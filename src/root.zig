@@ -183,3 +183,33 @@ test "RoundtripRequest" {
         server_client.sendMessage(alloc, message);
     }
 }
+
+test "RoundtripDone" {
+    const RoundtripDone = @import("message/messages/RoundtripDone.zig");
+    const ServerClient = @import("server/ServerClient.zig");
+    const MessageType = @import("message/MessageType.zig").MessageType;
+    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
+
+    const alloc = std.testing.allocator;
+
+    {
+        const message = RoundtripDone.init(42);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][UINT_magic][seq:4][END]
+        // seq = 42 (0x2A 0x00 0x00 0x00)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.roundtrip_done),
+            @intFromEnum(MessageMagic.type_uint),
+            0x2A, 0x00, 0x00, 0x00, // seq = 42
+            @intFromEnum(MessageMagic.end),
+        };
+        const message = try RoundtripDone.fromBytes(&bytes, 0);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+}
