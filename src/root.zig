@@ -123,3 +123,33 @@ test "BindProtocol" {
         server_client.sendMessage(alloc, message);
     }
 }
+
+test "HandshakeAck" {
+    const HandshakeAck = @import("message/messages/HandshakeAck.zig");
+    const ServerClient = @import("server/ServerClient.zig");
+    const MessageType = @import("message/MessageType.zig").MessageType;
+    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
+
+    const alloc = std.testing.allocator;
+
+    {
+        const message = HandshakeAck.init(1);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][UINT_magic][version:4][END]
+        // version = 1 (0x01 0x00 0x00 0x00)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.handshake_ack),
+            @intFromEnum(MessageMagic.type_uint),
+            0x01, 0x00, 0x00, 0x00, // version = 1
+            @intFromEnum(MessageMagic.end),
+        };
+        const message = try HandshakeAck.fromBytes(&bytes, 0);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+}
