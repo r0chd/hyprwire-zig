@@ -71,8 +71,8 @@ pub const MessageParser = struct {
     }
 };
 
-pub var g_messageParser: MessageParser = undefined;
+pub var message_parser: MessageParser = undefined;
 
 pub fn initGlobalParser(gpa: mem.Allocator) void {
-    g_messageParser = MessageParser.init(gpa);
+    message_parser = MessageParser.init(gpa);
 }

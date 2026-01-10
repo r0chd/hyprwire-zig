@@ -10,6 +10,7 @@ const mem = std.mem;
 const ServerObject = @import("ServerObject.zig");
 const ServerSocket = @import("ServerSocket.zig");
 const Message = @import("../message/messages/Message.zig");
+const types = @import("../implementation/types.zig");
 
 const steadyMillis = root.steadyMillis;
 
@@ -28,7 +29,7 @@ version: u32 = 0,
 max_id: u32 = 1,
 err: bool = false,
 scheduled_roundtrip_seq: u32 = 0,
-objects: std.ArrayList(ServerObject) = .empty,
+objects: std.ArrayList(*ServerObject) = .empty,
 server: ?*ServerSocket = null,
 self: ?*Self = null,
 
@@ -120,4 +121,67 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: anytype) void
     }
 
     _ = c.sendmsg(self.fd, &msg, 0);
+}
+
+pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, object: []const u8, version: u32, seq: u32) !?*ServerObject {
+    _ = seq;
+    if (self.server == null) return null;
+
+    const obj = try gpa.create(ServerObject);
+    errdefer gpa.destroy(obj);
+    obj.* = ServerObject.init(self);
+    obj.base.id = self.max_id;
+    self.max_id += 1;
+    obj.base.self = obj;
+    obj.base.version = version;
+    try self.objects.append(gpa, obj);
+
+    // Search for matching protocol implementation
+    var found_spec: ?*const types.ProtocolObjectSpec = null;
+    var protocol_name: []const u8 = "";
+
+    for (self.server.?.impls.items) |impl| {
+        const protocol_spec = impl.protocol();
+        if (!mem.eql(u8, protocol_spec.specName(), protocol)) continue;
+
+        // Search for matching object spec
+        for (protocol_spec.getObjects()) |spec| {
+            if (object.len > 0 and !mem.eql(u8, spec.objectName(), object)) continue;
+            found_spec = &spec;
+            break;
+        }
+
+        protocol_name = protocol_spec.specName();
+
+        if (found_spec == null) {
+            log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd, steadyMillis() });
+            self.err = true;
+            return null;
+        }
+
+        if (protocol_spec.specVer() < version) {
+            log.err("[{} @ {}] Error: createObject for protocol {s} object {s} for version {}, but we have only {}", .{ self.fd, steadyMillis(), protocol_name, object, version, protocol_spec.specVer() });
+            self.err = true;
+            return null;
+        }
+
+        break;
+    }
+
+    if (found_spec == null) {
+        log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd, steadyMillis() });
+        self.err = true;
+        return null;
+    }
+
+    obj.base.spec = found_spec;
+    obj.base.protocol_name = try gpa.dupe(u8, protocol_name);
+    errdefer gpa.free(obj.base.protocol_name);
+
+    // TODO: Send NewObject message and call onBind
+    // const ret = NewObjectMessage.init(seq, obj.base.id);
+    // self.sendMessage(gpa, ret);
+    // onBind(obj);
+
+    return obj;
 }

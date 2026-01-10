@@ -1,6 +1,10 @@
 const std = @import("std");
 
 const time = std.time;
+const posix = std.posix;
+const mem = std.mem;
+
+const ServerSocket = @import("server/ServerSocket.zig");
 
 var start: ?time.Instant = null;
 
@@ -12,6 +16,18 @@ pub fn steadyMillis() u64 {
         start = now;
         return 0;
     }
+}
+
+pub fn sunLen(addr: *const posix.sockaddr.un) usize {
+    const path_ptr: [*:0]const u8 = @ptrCast(&addr.path);
+    const path_len = mem.span(path_ptr).len;
+    return @offsetOf(posix.sockaddr.un, "path") + path_len + 1;
+}
+
+test "ServerSocket" {
+    const alloc = std.testing.allocator;
+    var socket = (try ServerSocket.open(alloc, null)).?;
+    defer socket.deinit(alloc);
 }
 
 test "fromFd" {
