@@ -23,27 +23,29 @@ pub fn parseData(self: *const Self, gpa: mem.Allocator) ![]const u8 {
                 break;
             },
             .type_seq => {
-                const value: *const u32 = @ptrCast(@alignCast(&self.data[needle]));
-                try result.writer(gpa).print("seq: {}", .{value.*});
-                needle += 4;
+                // Use mem.readInt for safe unaligned reads
+                const value = std.mem.readInt(u32, self.data[needle + 1 .. needle + 5][0..4], .little);
+                try result.writer(gpa).print("seq: {}", .{value});
+                needle += 5; // magic byte + 4 bytes value
                 break;
             },
             .type_uint => {
-                const value: *const u32 = @ptrCast(@alignCast(&self.data[needle]));
-                try result.writer(gpa).print("{}", .{value.*});
-                needle += 4;
+                const value = std.mem.readInt(u32, self.data[needle + 1 .. needle + 5][0..4], .little);
+                try result.writer(gpa).print("{}", .{value});
+                needle += 5;
                 break;
             },
             .type_int => {
-                const value: *const i32 = @ptrCast(@alignCast(&self.data[needle]));
-                try result.writer(gpa).print("{}", .{value.*});
-                needle += 4;
+                const value = std.mem.readInt(i32, self.data[needle + 1 .. needle + 5][0..4], .little);
+                try result.writer(gpa).print("{}", .{value});
+                needle += 5;
                 break;
             },
             .type_f32 => {
-                const value: *const f32 = @ptrCast(@alignCast(&self.data[needle]));
-                try result.writer(gpa).print("{}", .{value.*});
-                needle += 4;
+                const int_value = std.mem.readInt(u32, self.data[needle + 1 .. needle + 5][0..4], .little);
+                const value: f32 = @bitCast(int_value);
+                try result.writer(gpa).print("{}", .{value});
+                needle += 5;
                 break;
             },
             // TODO:
@@ -59,7 +61,9 @@ pub fn parseData(self: *const Self, gpa: mem.Allocator) ![]const u8 {
             .type_fd => {
                 break;
             },
-            else => {},
+            else => {
+                needle += 1; // Skip unknown magic byte
+            },
         }
     }
     try result.append(gpa, ')');

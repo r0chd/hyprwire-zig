@@ -11,7 +11,7 @@ base: Message,
 const Self = @This();
 
 pub fn init() Self {
-    const hello_data = &.{
+    const data = &.{
         @intFromEnum(MessageType.sup),
         @intFromEnum(MessageMagic.type_varchar),
         0x03,
@@ -23,15 +23,15 @@ pub fn init() Self {
 
     return Self{
         .base = Message{
-            .data = hello_data,
-            .len = hello_data.len,
+            .data = data,
+            .len = data.len,
             .message_type = .sup,
         },
     };
 }
 
-pub fn initFromBytes(data: []const u8, offset: usize) ?Self {
-    if (offset + 7 > data.len) return null;
+pub fn fromBytes(data: []const u8, offset: usize) !Self {
+    if (offset + 7 > data.len) return error.OutOfRange;
 
     const expected = [_]u8{
         @intFromEnum(MessageType.sup),
@@ -43,7 +43,7 @@ pub fn initFromBytes(data: []const u8, offset: usize) ?Self {
         @intFromEnum(MessageMagic.end),
     };
 
-    if (!mem.eql(u8, &expected, data[offset .. offset + 7])) return null;
+    if (!mem.eql(u8, &expected, data[offset .. offset + 7])) return error.InvalidMessage;
 
     return Self{
         .base = Message{ .data = data, .len = expected.len, .message_type = .sup },
