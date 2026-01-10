@@ -253,3 +253,41 @@ test "HandshakeProtocols" {
         server_client.sendMessage(alloc, message);
     }
 }
+
+test "HandshakeBegin" {
+    const HandshakeBegin = @import("message/messages/HandshakeBegin.zig");
+    const ServerClient = @import("server/ServerClient.zig");
+    const MessageType = @import("message/MessageType.zig").MessageType;
+    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
+
+    const alloc = std.testing.allocator;
+
+    {
+        const versions = [_]u32{ 1, 2 };
+        var message = try HandshakeBegin.init(alloc, &versions);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][ARRAY_magic][UINT_magic][varint_arr_len][version1:4][version2:4]...[END]
+        // Array length = 2 (0x02)
+        // version1 = 1 (0x01 0x00 0x00 0x00)
+        // version2 = 2 (0x02 0x00 0x00 0x00)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.handshake_begin),
+            @intFromEnum(MessageMagic.type_array),
+            @intFromEnum(MessageMagic.type_uint),
+            0x02, // array length = 2
+            0x01, 0x00, 0x00, 0x00, // version = 1
+            0x02,                           0x00, 0x00, 0x00, // version = 2
+            @intFromEnum(MessageMagic.end),
+        };
+        var message = try HandshakeBegin.fromBytes(alloc, &bytes, 0);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+}
