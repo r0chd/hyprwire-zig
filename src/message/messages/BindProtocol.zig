@@ -98,3 +98,7 @@ pub fn fds(self: *const Self) []const i32 {
     _ = self;
     return &.{};
 }
+
+pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    gpa.free(self.base.data);
+}

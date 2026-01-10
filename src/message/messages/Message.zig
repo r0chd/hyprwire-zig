@@ -23,10 +23,9 @@ pub fn parseData(self: *const Self, gpa: mem.Allocator) ![]const u8 {
                 break;
             },
             .type_seq => {
-                // Use mem.readInt for safe unaligned reads
                 const value = std.mem.readInt(u32, self.data[needle + 1 .. needle + 5][0..4], .little);
                 try result.writer(gpa).print("seq: {}", .{value});
-                needle += 5; // magic byte + 4 bytes value
+                needle += 5;
                 break;
             },
             .type_uint => {
@@ -62,7 +61,7 @@ pub fn parseData(self: *const Self, gpa: mem.Allocator) ![]const u8 {
                 break;
             },
             else => {
-                needle += 1; // Skip unknown magic byte
+                needle += 1;
             },
         }
     }

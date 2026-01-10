@@ -95,8 +95,8 @@ test "BindProtocol" {
     const alloc = std.testing.allocator;
 
     {
-        const message = try BindProtocol.init(alloc, "test@1", 5, 1);
-        defer alloc.free(message.base.data);
+        var message = try BindProtocol.init(alloc, "test@1", 5, 1);
+        defer message.deinit(alloc);
 
         const server_client = try ServerClient.init(0);
         server_client.sendMessage(alloc, message);
@@ -109,12 +109,12 @@ test "BindProtocol" {
         const bytes = [_]u8{
             @intFromEnum(MessageType.bind_protocol),
             @intFromEnum(MessageMagic.type_uint),
-            0x05, 0x00, 0x00, 0x00, // seq = 5
+            0x05,                                    0x00, 0x00, 0x00, // seq = 5
             @intFromEnum(MessageMagic.type_varchar),
             0x06, // varint length = 6
-            't', 'e', 's', 't', '@', '1', // protocol = "test@1"
+            't',                                  'e', 's', 't', '@', '1', // protocol = "test@1"
             @intFromEnum(MessageMagic.type_uint),
-            0x01, 0x00, 0x00, 0x00, // version = 1
+            0x01,                           0x00, 0x00, 0x00, // version = 1
             @intFromEnum(MessageMagic.end),
         };
         const message = try BindProtocol.fromBytes(&bytes, 0);
@@ -144,7 +144,7 @@ test "HandshakeAck" {
         const bytes = [_]u8{
             @intFromEnum(MessageType.handshake_ack),
             @intFromEnum(MessageMagic.type_uint),
-            0x01, 0x00, 0x00, 0x00, // version = 1
+            0x01,                           0x00, 0x00, 0x00, // version = 1
             @intFromEnum(MessageMagic.end),
         };
         const message = try HandshakeAck.fromBytes(&bytes, 0);
@@ -174,7 +174,7 @@ test "RoundtripRequest" {
         const bytes = [_]u8{
             @intFromEnum(MessageType.roundtrip_request),
             @intFromEnum(MessageMagic.type_uint),
-            0x2A, 0x00, 0x00, 0x00, // seq = 42
+            0x2A,                           0x00, 0x00, 0x00, // seq = 42
             @intFromEnum(MessageMagic.end),
         };
         const message = try RoundtripRequest.fromBytes(&bytes, 0);
@@ -204,10 +204,50 @@ test "RoundtripDone" {
         const bytes = [_]u8{
             @intFromEnum(MessageType.roundtrip_done),
             @intFromEnum(MessageMagic.type_uint),
-            0x2A, 0x00, 0x00, 0x00, // seq = 42
+            0x2A,                           0x00, 0x00, 0x00, // seq = 42
             @intFromEnum(MessageMagic.end),
         };
         const message = try RoundtripDone.fromBytes(&bytes, 0);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+}
+
+test "HandshakeProtocols" {
+    const HandshakeProtocols = @import("message/messages/HandshakeProtocols.zig");
+    const ServerClient = @import("server/ServerClient.zig");
+    const MessageType = @import("message/MessageType.zig").MessageType;
+    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
+
+    const alloc = std.testing.allocator;
+
+    {
+        const protocols = [_][]const u8{ "test@1", "test2@2" };
+        var message = try HandshakeProtocols.init(alloc, &protocols);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][ARRAY_magic][VARCHAR_magic][varint_arr_len][varint_str_len][str]...[END]
+        // Array length = 2 (0x02)
+        // First string: "test@1" (6 bytes, varint = 0x06)
+        // Second string: "test2@2" (7 bytes, varint = 0x07)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.handshake_protocols),
+            @intFromEnum(MessageMagic.type_array),
+            @intFromEnum(MessageMagic.type_varchar),
+            0x02, // array length = 2
+            0x06, // first string length = 6
+            't', 'e', 's', 't', '@', '1', // "test@1"
+            0x07, // second string length = 7
+            't',                            'e', 's', 't', '2', '@', '2', // "test2@2"
+            @intFromEnum(MessageMagic.end),
+        };
+        var message = try HandshakeProtocols.fromBytes(alloc, &bytes, 0);
+        defer message.deinit(alloc);
 
         const server_client = try ServerClient.init(0);
         server_client.sendMessage(alloc, message);
