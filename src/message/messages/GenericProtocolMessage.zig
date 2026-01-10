@@ -55,7 +55,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
     while (data_needle < data.len) {
         if (data[data_needle] == @intFromEnum(MessageMagic.end)) break;
 
-        const magic = @as(MessageMagic, @enumFromInt(data[data_needle]));
+        const magic: MessageMagic = @enumFromInt(data[data_needle]);
         data_needle += 1;
 
         switch (magic) {
@@ -78,7 +78,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
             },
             .type_array => {
                 if (data_needle >= data.len) return error.OutOfRange;
-                const arr_type = @as(MessageMagic, @enumFromInt(data[data_needle]));
+                const arr_type: MessageMagic = @enumFromInt(data[data_needle]);
                 data_needle += 1;
 
                 var arr_len: usize = 0;

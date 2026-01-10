@@ -2,7 +2,6 @@ const std = @import("std");
 const c = @cImport(@cInclude("sys/socket.h"));
 
 const posix = std.posix;
-const linux = std.os.linux;
 const mem = std.mem;
 const log = std.log;
 

@@ -1,6 +1,7 @@
 const std = @import("std");
 const c = @cImport(@cInclude("sys/socket.h"));
 const root = @import("../root.zig");
+const builtin = @import("builtin");
 
 const posix = std.posix;
 const log = std.log;
@@ -22,7 +23,7 @@ const Self = @This();
 
 fd: i32,
 pid: i32 = -1,
-firstPollDone: bool = false,
+first_poll_done: bool = false,
 version: u32 = 0,
 max_id: u32 = 1,
 err: bool = false,
@@ -37,6 +38,38 @@ pub fn init(fd: i32) posix.FcntlError!Self {
     return .{
         .fd = fd,
     };
+}
+
+pub fn dispatchFirstPoll(self: *Self) !void {
+    if (self.first_poll_done) return;
+
+    self.first_poll_done = true;
+
+    const Credential = switch (builtin.os.tag) {
+        .openbsd => extern struct {
+            pid: std.c.pid_t,
+            uid: std.c.uid_t,
+            gid: std.c.gid_t,
+        },
+        else => extern struct {
+            pid: std.c.pid_t,
+            uid: std.c.uid_t,
+            gid: std.c.gid_t,
+        },
+    };
+
+    var cred: Credential = undefined;
+
+    posix.getsockopt(
+        self.fd,
+        posix.SOL.SOCKET,
+        posix.SO.PEERCRED,
+        std.mem.asBytes(&cred),
+    ) catch {
+        return;
+    };
+
+    self.pid = cred.pid;
 }
 
 pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: anytype) void {
