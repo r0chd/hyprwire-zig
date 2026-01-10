@@ -85,3 +85,41 @@ test "NewObject" {
         server_client.sendMessage(alloc, message);
     }
 }
+
+test "BindProtocol" {
+    const BindProtocol = @import("message/messages/BindProtocol.zig");
+    const ServerClient = @import("server/ServerClient.zig");
+    const MessageType = @import("message/MessageType.zig").MessageType;
+    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
+
+    const alloc = std.testing.allocator;
+
+    {
+        const message = try BindProtocol.init(alloc, "test@1", 5, 1);
+        defer alloc.free(message.base.data);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][UINT_magic][seq:4][VARCHAR_magic][varint_len][protocol][UINT_magic][version:4][END]
+        // protocol = "test@1" (6 bytes), varint encoding of 6 = 0x06
+        // seq = 5 (0x05 0x00 0x00 0x00)
+        // version = 1 (0x01 0x00 0x00 0x00)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.bind_protocol),
+            @intFromEnum(MessageMagic.type_uint),
+            0x05, 0x00, 0x00, 0x00, // seq = 5
+            @intFromEnum(MessageMagic.type_varchar),
+            0x06, // varint length = 6
+            't', 'e', 's', 't', '@', '1', // protocol = "test@1"
+            @intFromEnum(MessageMagic.type_uint),
+            0x01, 0x00, 0x00, 0x00, // version = 1
+            @intFromEnum(MessageMagic.end),
+        };
+        const message = try BindProtocol.fromBytes(&bytes, 0);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+}
