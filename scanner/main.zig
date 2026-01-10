@@ -18,7 +18,7 @@ const ProtoData = struct {
 
     const Self = @This();
 
-    fn init(alloc: mem.Allocator, proto_path: []const u8, document: *const Document) !Self {
+    fn init(gpa: mem.Allocator, proto_path: []const u8, document: *const Document) !Self {
         const protocol_element = blk: for (document.root_nodes) |node| {
             switch (node) {
                 .element => |e| if (mem.eql(u8, e.name, "protocol")) break :blk e,
@@ -49,7 +49,7 @@ const ProtoData = struct {
         if (name_len > 0) {
             name_buf[0] = ascii.toUpper(name_buf[0]);
         }
-        const name = try alloc.dupe(u8, name_buf[0..name_len]);
+        const name = try gpa.dupe(u8, name_buf[0..name_len]);
 
         return ProtoData{
             .name = name,

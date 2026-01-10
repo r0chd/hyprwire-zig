@@ -1,6 +1,5 @@
 const std = @import("std");
 const c = @cImport(@cInclude("sys/socket.h"));
-const rc = @import("../rc.zig");
 
 const posix = std.posix;
 const linux = std.os.linux;
@@ -20,7 +19,7 @@ pub const SocketRawParsedMessage = struct {
 
     const Self = @This();
 
-    pub fn fromFd(alloc: mem.Allocator, fd: i32) !Self {
+    pub fn fromFd(gpa: mem.Allocator, fd: i32) !Self {
         var self = Self{};
         const BUFFER_SIZE = 8192;
         const MAX_FDS_PER_MSG = 255;
@@ -33,8 +32,8 @@ pub const SocketRawParsedMessage = struct {
                 .len = BUFFER_SIZE,
             };
 
-            var control_buf = try std.ArrayList(u8).initCapacity(alloc, MAX_FDS_PER_MSG * @sizeOf(i32));
-            defer control_buf.deinit(alloc);
+            var control_buf = try std.ArrayList(u8).initCapacity(gpa, MAX_FDS_PER_MSG * @sizeOf(i32));
+            defer control_buf.deinit(gpa);
             var msg: c.msghdr = .{
                 .msg_iov = @ptrCast(&io),
                 .msg_iovlen = 1,
@@ -48,7 +47,7 @@ pub const SocketRawParsedMessage = struct {
             size_written = c.recvmsg(fd, &msg, 0);
             if (size_written < 0) return .{};
 
-            try self.data.appendSlice(alloc, &buffer);
+            try self.data.appendSlice(gpa, &buffer);
 
             // TODO: wait for zig api
             // https://codeberg.org/ziglang/zig/issues/30629
@@ -66,10 +65,10 @@ pub const SocketRawParsedMessage = struct {
             const payload_size = recvd_cmsg.*.cmsg_len - c.CMSG_LEN(0);
             const num_fds = payload_size / @sizeOf(i32);
 
-            try self.fds.ensureTotalCapacity(alloc, self.fds.capacity + num_fds);
+            try self.fds.ensureTotalCapacity(gpa, self.fds.capacity + num_fds);
 
             for (0..num_fds) |i| {
-                const ptr = try self.fds.addOne(alloc);
+                const ptr = try self.fds.addOne(gpa);
                 ptr.* = data[i];
             }
 
@@ -79,8 +78,8 @@ pub const SocketRawParsedMessage = struct {
         return self;
     }
 
-    pub fn deinit(self: *Self, alloc: mem.Allocator) void {
-        self.data.deinit(alloc);
-        self.fds.deinit(alloc);
+    pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+        self.data.deinit(gpa);
+        self.fds.deinit(gpa);
     }
 };
