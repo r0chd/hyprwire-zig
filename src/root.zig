@@ -315,15 +315,60 @@ test "FatalProtocolError" {
         const bytes = [_]u8{
             @intFromEnum(MessageType.fatal_protocol_error),
             @intFromEnum(MessageMagic.type_uint),
-            0x03,                           0x00, 0x00, 0x00, // objectId = 3
+            0x03,                                 0x00, 0x00, 0x00, // objectId = 3
             @intFromEnum(MessageMagic.type_uint),
-            0x05,                           0x00, 0x00, 0x00, // errorId = 5
+            0x05,                                    0x00, 0x00, 0x00, // errorId = 5
             @intFromEnum(MessageMagic.type_varchar),
             0x0A, // errorMsg length = 10
-            't', 'e', 's', 't', ' ', 'e', 'r', 'r', 'o', 'r', // "test error"
+            't',                            'e', 's', 't', ' ', 'e', 'r', 'r', 'o', 'r', // "test error"
             @intFromEnum(MessageMagic.end),
         };
         var message = try FatalProtocolError.fromBytes(alloc, &bytes, 0);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+}
+
+test "GenericProtocolMessage" {
+    const GenericProtocolMessage = @import("message/messages/GenericProtocolMessage.zig");
+    const ServerClient = @import("server/ServerClient.zig");
+    const MessageType = @import("message/MessageType.zig").MessageType;
+    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
+
+    const alloc = std.testing.allocator;
+
+    {
+        const data = [_]u8{
+            @intFromEnum(MessageType.generic_protocol_message),
+            @intFromEnum(MessageMagic.type_object),
+            0x01,                                 0x00, 0x00, 0x00, // object = 1
+            @intFromEnum(MessageMagic.type_uint),
+            0x02,                           0x00, 0x00, 0x00, // method = 2
+            @intFromEnum(MessageMagic.end),
+        };
+        var message = try GenericProtocolMessage.init(alloc, &data, &.{});
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][OBJECT_magic][object:4][UINT_magic][method:4][...data...][END]
+        // object = 1 (0x01 0x00 0x00 0x00)
+        // method = 2 (0x02 0x00 0x00 0x00)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.generic_protocol_message),
+            @intFromEnum(MessageMagic.type_object),
+            0x01,                                 0x00, 0x00, 0x00, // object = 1
+            @intFromEnum(MessageMagic.type_uint),
+            0x02,                           0x00, 0x00, 0x00, // method = 2
+            @intFromEnum(MessageMagic.end),
+        };
+        var fds_list: std.ArrayList(i32) = .empty;
+        defer fds_list.deinit(alloc);
+        var message = try GenericProtocolMessage.fromBytes(alloc, &bytes, &fds_list, 0);
         defer message.deinit(alloc);
 
         const server_client = try ServerClient.init(0);
