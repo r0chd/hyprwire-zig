@@ -291,3 +291,42 @@ test "HandshakeBegin" {
         server_client.sendMessage(alloc, message);
     }
 }
+
+test "FatalProtocolError" {
+    const FatalProtocolError = @import("message/messages/FatalProtocolError.zig");
+    const ServerClient = @import("server/ServerClient.zig");
+    const MessageType = @import("message/MessageType.zig").MessageType;
+    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
+
+    const alloc = std.testing.allocator;
+
+    {
+        var message = try FatalProtocolError.init(alloc, 3, 5, "test error");
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][UINT_magic][objectId:4][UINT_magic][errorId:4][VARCHAR_magic][varint_len][errorMsg][END]
+        // objectId = 3 (0x03 0x00 0x00 0x00)
+        // errorId = 5 (0x05 0x00 0x00 0x00)
+        // errorMsg = "test error" (10 bytes, varint = 0x0A)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.fatal_protocol_error),
+            @intFromEnum(MessageMagic.type_uint),
+            0x03,                           0x00, 0x00, 0x00, // objectId = 3
+            @intFromEnum(MessageMagic.type_uint),
+            0x05,                           0x00, 0x00, 0x00, // errorId = 5
+            @intFromEnum(MessageMagic.type_varchar),
+            0x0A, // errorMsg length = 10
+            't', 'e', 's', 't', ' ', 'e', 'r', 'r', 'o', 'r', // "test error"
+            @intFromEnum(MessageMagic.end),
+        };
+        var message = try FatalProtocolError.fromBytes(alloc, &bytes, 0);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+}
