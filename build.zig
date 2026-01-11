@@ -14,6 +14,16 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .link_libc = true,
     });
+    mod.addImport("xml", xml.module("xml"));
+
+    const scanner_mod = b.addModule("scanner", .{
+        .root_source_file = b.path("scanner/root.zig"),
+        .target = target,
+    });
+    scanner_mod.addImport("xml", xml.module("xml"));
+    scanner_mod.addImport("hyprwire", mod);
+
+    mod.addImport("scanner", scanner_mod);
 
     const exe_options = b.addOptions();
 
@@ -26,7 +36,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "hyprwire", .module = mod },
+                .{ .name = "scanner", .module = scanner_mod },
             },
         }),
     });
@@ -57,7 +67,6 @@ pub fn build(b: *std.Build) void {
 
     const run_exe_tests = b.addRunArtifact(exe_tests);
 
-    const scanner_module = scanner.root_module;
     const scanner_snapshot_test = b.addTest(.{
         .root_module = b.createModule(.{
             .root_source_file = b.path("scanner/tests/snapshot_test.zig"),
@@ -65,7 +74,6 @@ pub fn build(b: *std.Build) void {
             .optimize = optimize,
             .imports = &.{
                 .{ .name = "hyprwire", .module = mod },
-                .{ .name = "scanner", .module = scanner_module },
             },
         }),
     });
@@ -77,9 +85,8 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_scanner_snapshot_test.step);
 
-    const integration_tests = b.step("integration", "Run integration tests");
-
-    const client_test = b.addTest(.{
+    const client_exe = b.addExecutable(.{
+        .name = "client",
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/client.zig"),
             .target = target,
@@ -89,10 +96,11 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    const run_client_test = b.addRunArtifact(client_test);
-    integration_tests.dependOn(&run_client_test.step);
+    client_exe.root_module.link_libc = true;
+    b.installArtifact(client_exe);
 
-    const server_test = b.addTest(.{
+    const server_exe = b.addExecutable(.{
+        .name = "server",
         .root_module = b.createModule(.{
             .root_source_file = b.path("tests/server.zig"),
             .target = target,
@@ -102,8 +110,21 @@ pub fn build(b: *std.Build) void {
             },
         }),
     });
-    const run_server_test = b.addRunArtifact(server_test);
-    integration_tests.dependOn(&run_server_test.step);
+    server_exe.root_module.link_libc = true;
+    b.installArtifact(server_exe);
 
-    test_step.dependOn(integration_tests);
+    const run_client = b.step("client", "Run the client binary");
+    const run_client_cmd = b.addRunArtifact(client_exe);
+    run_client.dependOn(&run_client_cmd.step);
+    run_client_cmd.step.dependOn(b.getInstallStep());
+
+    const run_server = b.step("server", "Run the server binary");
+    const run_server_cmd = b.addRunArtifact(server_exe);
+    run_server.dependOn(&run_server_cmd.step);
+    run_server_cmd.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_client_cmd.addArgs(args);
+        run_server_cmd.addArgs(args);
+    }
 }

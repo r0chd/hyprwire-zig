@@ -1,11 +1,9 @@
 const std = @import("std");
 
 const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
+const ServerClient = @import("../server/ServerClient.zig");
 
 const mem = std.mem;
-
-const ServerClient = opaque {};
-const ClientSocket = opaque {};
 
 pub const MessageParsingResult = enum(u8) {
     ok = 0,
@@ -29,12 +27,12 @@ pub const MessageParser = struct {
         return .ok;
     }
 
-    pub fn handleMessageClient(self: *Self, data: SocketRawParsedMessage, client: *ClientSocket) MessageParsingResult {
-        _ = self;
-        _ = data;
-        _ = client;
-        return .ok;
-    }
+    // pub fn handleMessageClient(self: *Self, data: SocketRawParsedMessage, client: *ClientSocket) MessageParsingResult {
+    //     _ = self;
+    //     _ = data;
+    //     _ = client;
+    //     return .ok;
+    // }
 
     pub fn parseVarInt(self: *Self, data: []const u8, offset: usize) struct { usize, usize } {
         _ = self;
@@ -62,13 +60,13 @@ pub const MessageParser = struct {
         return 0;
     }
 
-    fn parseSingleMessageClient(self: *Self, data: SocketRawParsedMessage, off: usize, client: *ClientSocket) usize {
-        _ = self;
-        _ = data;
-        _ = off;
-        _ = client;
-        return 0;
-    }
+    // fn parseSingleMessageClient(self: *Self, data: SocketRawParsedMessage, off: usize, client: *ClientSocket) usize {
+    //     _ = self;
+    //     _ = data;
+    //     _ = off;
+    //     _ = client;
+    //     return 0;
+    // }
 };
 
 pub var message_parser: MessageParser = undefined;

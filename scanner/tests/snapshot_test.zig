@@ -1,9 +1,9 @@
 const std = @import("std");
 const xml = @import("xml");
-const scanner = @import("scanner");
-const Document = scanner.Document;
-const generateClientCode = scanner.generateClientCode;
-const generateServerCode = scanner.generateServerCode;
+const Scanner = @import("hyprwire").Scanner;
+const Document = Scanner.Document;
+const generateClientCode = Scanner.generateClientCode;
+const generateServerCode = Scanner.generateServerCode;
 
 const testing = std.testing;
 const mem = std.mem;

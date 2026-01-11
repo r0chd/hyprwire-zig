@@ -76,8 +76,6 @@ pub fn dispatchFirstPoll(self: *Self) !void {
 }
 
 pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: anytype) void {
-    Message.CheckTrait(@TypeOf(message));
-
     const parsed = message.base.parseData(gpa) catch |err| {
         log.debug("[{} @ {}] -> parse error: {}", .{ self.fd, steadyMillis(), err });
         return;

@@ -30,7 +30,7 @@ exit_write_fd: i32 = -1,
 wakeup_fd: i32,
 wakeup_write_fd: i32,
 pollfds: std.ArrayList(posix.pollfd) = .empty,
-clients: std.ArrayList(ServerClient) = .empty,
+clients: std.ArrayList(*ServerClient) = .empty,
 impls: std.ArrayList(*const ProtocolServerImplementation) = .empty,
 thread_can_poll: bool = false,
 poll_thread: ?std.Thread = null,
@@ -140,7 +140,7 @@ pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: *const ProtocolS
 }
 
 pub fn dispatchPending(self: *Self, gpa: mem.Allocator) bool {
-    posix.poll(self.pollfds.items, 0) catch return false;
+    _ = posix.poll(self.pollfds.items, 0) catch return false;
     if (self.dispatchNewConnections(gpa)) return self.dispatchPending(gpa);
 
     return self.dispatchExistingConnections(gpa);
@@ -156,7 +156,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) bool {
     self.clearWakeupFd();
 
     if (block) {
-        posix.poll(self.pollfds.items, -1) catch return false;
+        _ = posix.poll(self.pollfds.items, -1) catch return false;
         while (self.dispatchPending(gpa)) {}
     }
 
@@ -170,25 +170,15 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) bool {
 
 pub fn clearFd(fd: i32) void {
     var buf: [128]u8 = undefined;
-    var pfd = posix.pollfd{
-        .fd = fd,
-        .events = posix.POLL.IN,
-    };
+    var fds = [_]posix.pollfd{.{ .fd = fd, .events = posix.POLL.IN, .revents = 0 }};
 
     while (true) {
-        const valid = posix.fcntl(fd, posix.F.GETFL, 0) catch |err| switch (err) {
-            else => break,
-        };
-        _ = valid;
+        _ = posix.poll(&fds, 0) catch break;
 
-        posix.poll(&pfd, 0) catch break;
-
-        if (pfd.revents & posix.POLL.IN) {
+        if (fds[0].revents & posix.POLL.IN != 0) {
             _ = posix.read(fd, &buf) catch break;
             continue;
         }
-
-        break;
     }
 }
 
@@ -288,12 +278,15 @@ pub fn recheckPollFds(self: *Self, gpa: mem.Allocator) !void {
 pub fn dispatchNewConnections(self: *Self, gpa: mem.Allocator) bool {
     if (self.is_empty_listener) return false;
 
-    if (!(self.pollfds.items[0].revents & posix.POLL.IN)) return false;
+    if (self.pollfds.items[0].revents & posix.POLL.IN != 0) return false;
 
-    var client_address: posix.sockaddr.in = .{};
+    var client_address: posix.sockaddr.in = .{
+        .port = 0,
+        .addr = 0,
+    };
     var client_size: posix.socklen_t = @sizeOf(posix.sockaddr.in);
 
-    const client_fd = posix.accept(self.fd, &client_address.addr, &client_size, 0) catch return false;
+    const client_fd = posix.accept(self.fd, @as(*posix.sockaddr, @ptrCast(&client_address.addr)), &client_size, 0) catch return false;
     const client_init = ServerClient.init(client_fd) catch {
         posix.close(client_fd);
         return false;
@@ -321,13 +314,13 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) bool {
     var needs_poll_recheck = false;
 
     for (self.internalFds()..self.pollfds.items.len) |i| {
-        if (!(self.pollfds.items[i].revents & posix.POLL.IN)) continue;
+        if (self.pollfds.items[i].revents & posix.POLL.IN != 0) continue;
 
-        self.dispatchClient(gpa, self.clients.items[i - self.internalFds()]);
+        self.dispatchClient(gpa, self.clients.items[i - self.internalFds()]) catch return false;
 
         had_any = true;
 
-        if (self.pollfds.items[i].revents & posix.POLL.HUP) {
+        if (self.pollfds.items[i].revents & posix.POLL.HUP == 0) {
             self.clients.items[i - self.internalFds()].err = true;
             needs_poll_recheck = true;
             log.debug("[{} @ {}] Dropping client (hangup)", .{ self.clients.items[i - self.internalFds()].fd, steadyMillis() });
@@ -344,7 +337,7 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) bool {
         while (i > 0) : (i -= 1) {
             const client = self.clients.items[i];
             if (client.err) {
-                self.clients.swapRemove(i);
+                _ = self.clients.swapRemove(i);
             }
         }
         self.recheckPollFds(gpa) catch return false;
@@ -357,7 +350,12 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
     _ = self;
     const data = try SocketRawParsedMessage.fromFd(gpa, client.fd);
     if (data.bad) {
-        client.sendMessage(gpa, FatalError.init(gpa, 0, -1, "fatal: invalid message on wire"));
+        const fatal_msg = FatalError.init(gpa, 0, 0, "fatal: invalid message on wire") catch |err| {
+            log.err("Failed to create fatal error message: {}", .{err});
+            client.err = true;
+            return;
+        };
+        client.sendMessage(gpa, fatal_msg);
         client.err = true;
         return;
     }
@@ -366,13 +364,18 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
 
     const ret = message_parser.message_parser.handleMessageServer(data, client);
     if (ret != MessageParsingResult.ok) {
-        client.sendMessage(gpa, FatalError.init(gpa, 0, -1, "fatal: failed to handle message on wire"));
+        const fatal_msg = FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire") catch |err| {
+            log.err("Failed to create fatal error message: {}", .{err});
+            client.err = true;
+            return;
+        };
+        client.sendMessage(gpa, fatal_msg);
         client.err = true;
         return;
     }
 
     if (client.scheduled_roundtrip_seq > 0) {
-        client.sendMessage(gpa, FatalError.init(gpa, 0, -1, RoundtripDone.init(client.scheduled_roundtrip_seq)));
+        client.sendMessage(gpa, RoundtripDone.init(client.scheduled_roundtrip_seq));
         client.scheduled_roundtrip_seq = 0;
     }
 }

@@ -4,9 +4,10 @@ const time = std.time;
 const posix = std.posix;
 const mem = std.mem;
 
-pub const ServerSocket = @import("server/ServerSocket.zig");
 pub const types = @import("implementation/types.zig");
+pub const ServerSocket = @import("server/ServerSocket.zig");
 pub const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
+pub const Scanner = @import("scanner");
 
 var start: ?time.Instant = null;
 

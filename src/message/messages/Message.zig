@@ -68,22 +68,3 @@ pub fn parseData(self: *const Self, gpa: mem.Allocator) ![]const u8 {
     try result.append(gpa, ')');
     return result.toOwnedSlice(gpa);
 }
-
-pub fn CheckTrait(comptime T: type) void {
-    if (!@hasField(T, "base")) {
-        @compileError("Required field not found: base");
-    }
-
-    const type_info = @typeInfo(T);
-    if (type_info != .@"struct") {
-        @compileError("T must be a struct");
-    }
-
-    const BaseType = @TypeOf(@field(@as(T, undefined), "base"));
-    if (!@hasField(BaseType, "data")) @compileError("Required field not found: base.data");
-    if (!@hasField(BaseType, "message_type")) @compileError("Required field not found: base.message_type");
-    if (!@hasField(BaseType, "len")) @compileError("Required field not found: base.len");
-
-    if (!@hasDecl(BaseType, "parseData")) @compileError("Required method not found: base.parseData");
-    if (!@hasDecl(T, "fds")) @compileError("Required method not found: fds");
-}
