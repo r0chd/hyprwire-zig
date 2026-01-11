@@ -1,5 +1,78 @@
 const std = @import("std");
 
+const VERSION: [:0]const u8 = "0.2.1";
+
+pub fn buildHyprwire(b: *std.Build, target: std.Build.ResolvedTarget) *std.Build.Module {
+    const mod = b.addModule("hyprwire", .{
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .link_libc = true,
+    });
+
+    return mod;
+}
+
+pub fn buildScanner(b: *std.Build, target: std.Build.ResolvedTarget, xml: *std.Build.Dependency, hw: *std.Build.Module) *std.Build.Module {
+    const scanner = b.addModule("scanner", .{
+        .root_source_file = b.path("scanner/root.zig"),
+        .target = target,
+    });
+    scanner.addImport("xml", xml.module("xml"));
+    scanner.addImport("hyprwire", hw);
+
+    return scanner;
+}
+
+pub fn buildServer(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, hyprwire: *std.Build.Module) void {
+    const exe = b.addExecutable(.{
+        .name = "server",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/server.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "hyprwire", .module = hyprwire },
+            },
+        }),
+    });
+    exe.root_module.link_libc = true;
+    b.installArtifact(exe);
+
+    const run = b.step("server", "Run the server binary");
+    const run_cmd = b.addRunArtifact(exe);
+    run.dependOn(&run_cmd.step);
+    run_cmd.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+}
+
+pub fn buildClient(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, hyprwire: *std.Build.Module) void {
+    const exe = b.addExecutable(.{
+        .name = "client",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("tests/client.zig"),
+            .target = target,
+            .optimize = optimize,
+            .imports = &.{
+                .{ .name = "hyprwire", .module = hyprwire },
+            },
+        }),
+    });
+    exe.root_module.link_libc = true;
+    b.installArtifact(exe);
+
+    const run = b.step("client", "Run the client binary");
+    const run_cmd = b.addRunArtifact(exe);
+    run.dependOn(&run_cmd.step);
+    run_cmd.step.dependOn(b.getInstallStep());
+
+    if (b.args) |args| {
+        run_cmd.addArgs(args);
+    }
+}
+
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
@@ -9,25 +82,14 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const mod = b.addModule("hyprwire", .{
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .link_libc = true,
-    });
-    mod.addImport("xml", xml.module("xml"));
+    const hyprwire = buildHyprwire(b, target);
+    const scanner_mod = buildScanner(b, target, xml, hyprwire);
 
-    const scanner_mod = b.addModule("scanner", .{
-        .root_source_file = b.path("scanner/root.zig"),
-        .target = target,
-    });
-    scanner_mod.addImport("xml", xml.module("xml"));
-    scanner_mod.addImport("hyprwire", mod);
-
-    mod.addImport("scanner", scanner_mod);
+    hyprwire.addImport("scanner", scanner_mod);
 
     const exe_options = b.addOptions();
 
-    exe_options.addOption([]const u8, "version", "0.2.1");
+    exe_options.addOption([:0]const u8, "version", VERSION);
 
     const scanner = b.addExecutable(.{
         .name = "hyprwire_scanner",
@@ -56,7 +118,7 @@ pub fn build(b: *std.Build) void {
     }
 
     const mod_tests = b.addTest(.{
-        .root_module = mod,
+        .root_module = hyprwire,
     });
 
     const run_mod_tests = b.addRunArtifact(mod_tests);
@@ -73,7 +135,7 @@ pub fn build(b: *std.Build) void {
             .target = target,
             .optimize = optimize,
             .imports = &.{
-                .{ .name = "hyprwire", .module = mod },
+                .{ .name = "hyprwire", .module = hyprwire },
             },
         }),
     });
@@ -85,46 +147,6 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_exe_tests.step);
     test_step.dependOn(&run_scanner_snapshot_test.step);
 
-    const client_exe = b.addExecutable(.{
-        .name = "client",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/client.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "hyprwire", .module = mod },
-            },
-        }),
-    });
-    client_exe.root_module.link_libc = true;
-    b.installArtifact(client_exe);
-
-    const server_exe = b.addExecutable(.{
-        .name = "server",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("tests/server.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "hyprwire", .module = mod },
-            },
-        }),
-    });
-    server_exe.root_module.link_libc = true;
-    b.installArtifact(server_exe);
-
-    const run_client = b.step("client", "Run the client binary");
-    const run_client_cmd = b.addRunArtifact(client_exe);
-    run_client.dependOn(&run_client_cmd.step);
-    run_client_cmd.step.dependOn(b.getInstallStep());
-
-    const run_server = b.step("server", "Run the server binary");
-    const run_server_cmd = b.addRunArtifact(server_exe);
-    run_server.dependOn(&run_server_cmd.step);
-    run_server_cmd.step.dependOn(b.getInstallStep());
-
-    if (b.args) |args| {
-        run_client_cmd.addArgs(args);
-        run_server_cmd.addArgs(args);
-    }
+    buildServer(b, target, optimize, hyprwire);
+    buildClient(b, target, optimize, hyprwire);
 }
