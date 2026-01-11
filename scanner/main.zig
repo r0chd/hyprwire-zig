@@ -60,10 +60,10 @@ const ProtoData = struct {
     }
 };
 
-const Document = struct {
+pub const Document = struct {
     root_nodes: []const Node,
 
-    fn parse(arena: mem.Allocator, reader: *xml.Reader) !Document {
+    pub fn parse(arena: mem.Allocator, reader: *xml.Reader) !Document {
         var root_nodes: std.ArrayList(Node) = .empty;
         while (true) {
             const node = try reader.read();
@@ -132,24 +132,26 @@ const Node = union(enum) {
     };
 };
 
-fn generateClientCode(doc: *const Document) []const u8 {
+pub fn generateClientCode(doc: *const Document) []const u8 {
     _ = doc;
     const source =
         \\ test
         \\ client
-        \\ code`
+        \\ code
     ;
 
     return source;
 }
 
-fn generateServerCode(doc: *const Document) []const u8 {
-    _ = doc;
-    const source =
-        \\ test
-        \\ server
-        \\ code
-    ;
+pub fn generateServerCode(gpa: mem.Allocator, doc: *const Document) ![]const u8 {
+    for (doc.root_nodes) |node| {
+        _ = node;
+    }
+    const source = try std.fmt.allocPrint(gpa,
+        \\ pub fn test_method() {{
+        \\
+        \\ }}
+    , .{});
 
     return source;
 }
@@ -189,7 +191,7 @@ pub fn main() !void {
 
     const source = switch (cli.role) {
         .client => generateClientCode(&document),
-        .server => generateServerCode(&document),
+        .server => try generateServerCode(alloc, &document),
     };
 
     const outpath = cli.outpath;
