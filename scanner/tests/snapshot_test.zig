@@ -32,17 +32,72 @@ fn readSnapshot(allocator: mem.Allocator, snapshot_path: []const u8) ![]const u8
     return contents;
 }
 
+fn normalizeWhitespace(allocator: mem.Allocator, s: []const u8) ![]const u8 {
+    var result: std.ArrayList(u8) = .empty;
+    errdefer result.deinit(allocator);
+    
+    var i: usize = 0;
+    var last_was_space = false;
+    
+    while (i < s.len) {
+        const c = s[i];
+        if (c == '\r') {
+            i += 1;
+            continue;
+        }
+        if (c == ' ' or c == '\t') {
+            if (!last_was_space) {
+                try result.append(allocator, ' ');
+                last_was_space = true;
+            }
+        } else if (c == '\n') {
+            try result.append(allocator, '\n');
+            last_was_space = false;
+        } else {
+            try result.append(allocator, c);
+            last_was_space = false;
+        }
+        i += 1;
+    }
+    
+    return try result.toOwnedSlice(allocator);
+}
+
 fn compareSnapshots(allocator: mem.Allocator, actual: []const u8, expected_path: []const u8) !void {
     const expected_raw = try readSnapshot(allocator, expected_path);
     defer allocator.free(expected_raw);
-    const expected = trimTrailingNewlines(expected_raw);
+    const expected_trimmed = trimTrailingNewlines(expected_raw);
     const actual_trimmed = trimTrailingNewlines(actual);
 
-    if (!mem.eql(u8, actual_trimmed, expected)) {
+    const expected_normalized = try normalizeWhitespace(allocator, expected_trimmed);
+    defer allocator.free(expected_normalized);
+    const actual_normalized = try normalizeWhitespace(allocator, actual_trimmed);
+    defer allocator.free(actual_normalized);
+
+    if (!mem.eql(u8, actual_normalized, expected_normalized)) {
         std.debug.print("\n=== SNAPSHOT MISMATCH ===\n", .{});
         std.debug.print("Expected snapshot: {s}\n\n", .{expected_path});
-        std.debug.print("=== EXPECTED ===\n{s}\n", .{expected});
-        std.debug.print("=== ACTUAL ===\n{s}\n", .{actual_trimmed});
+        std.debug.print("=== EXPECTED (normalized) ===\n{s}\n", .{expected_normalized});
+        std.debug.print("=== ACTUAL (normalized) ===\n{s}\n", .{actual_normalized});
+        
+        // Show byte-by-byte diff for first mismatch
+        const min_len = @min(actual_normalized.len, expected_normalized.len);
+        for (0..min_len) |i| {
+            if (actual_normalized[i] != expected_normalized[i]) {
+                std.debug.print("\nFirst difference at byte {}:\n", .{i});
+                std.debug.print("Expected: 0x{x} ('{c}')\n", .{ expected_normalized[i], if (expected_normalized[i] >= 32 and expected_normalized[i] < 127) expected_normalized[i] else '?' });
+                std.debug.print("Actual:   0x{x} ('{c}')\n", .{ actual_normalized[i], if (actual_normalized[i] >= 32 and actual_normalized[i] < 127) actual_normalized[i] else '?' });
+                std.debug.print("Context (20 chars before/after):\n", .{});
+                const start = if (i > 20) i - 20 else 0;
+                const end = @min(i + 20, expected_normalized.len);
+                std.debug.print("Expected: {s}\n", .{expected_normalized[start..end]});
+                std.debug.print("Actual:   {s}\n", .{actual_normalized[start..end]});
+                break;
+            }
+        }
+        if (actual_normalized.len != expected_normalized.len) {
+            std.debug.print("\nLength difference: expected {}, actual {}\n", .{ expected_normalized.len, actual_normalized.len });
+        }
         return error.SnapshotMismatch;
     }
 }

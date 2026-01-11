@@ -5,7 +5,8 @@ const posix = std.posix;
 const mem = std.mem;
 
 pub const ServerSocket = @import("server/ServerSocket.zig");
-pub const implementations = @import("implementation/types.zig");
+pub const types = @import("implementation/types.zig");
+pub const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
 var start: ?time.Instant = null;
 
@@ -43,7 +44,6 @@ test "Hello" {
     const Hello = @import("message/messages/Hello.zig");
     const ServerClient = @import("server/ServerClient.zig");
     const MessageType = @import("message/MessageType.zig").MessageType;
-    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
     const alloc = std.testing.allocator;
 
@@ -74,7 +74,6 @@ test "NewObject" {
     const NewObject = @import("message/messages/NewObject.zig");
     const ServerClient = @import("server/ServerClient.zig");
     const MessageType = @import("message/MessageType.zig").MessageType;
-    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
     const alloc = std.testing.allocator;
 
@@ -104,7 +103,6 @@ test "BindProtocol" {
     const BindProtocol = @import("message/messages/BindProtocol.zig");
     const ServerClient = @import("server/ServerClient.zig");
     const MessageType = @import("message/MessageType.zig").MessageType;
-    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
     const alloc = std.testing.allocator;
 
@@ -142,7 +140,6 @@ test "HandshakeAck" {
     const HandshakeAck = @import("message/messages/HandshakeAck.zig");
     const ServerClient = @import("server/ServerClient.zig");
     const MessageType = @import("message/MessageType.zig").MessageType;
-    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
     const alloc = std.testing.allocator;
 
@@ -172,7 +169,6 @@ test "RoundtripRequest" {
     const RoundtripRequest = @import("message/messages/RoundtripRequest.zig");
     const ServerClient = @import("server/ServerClient.zig");
     const MessageType = @import("message/MessageType.zig").MessageType;
-    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
     const alloc = std.testing.allocator;
 
@@ -202,7 +198,6 @@ test "RoundtripDone" {
     const RoundtripDone = @import("message/messages/RoundtripDone.zig");
     const ServerClient = @import("server/ServerClient.zig");
     const MessageType = @import("message/MessageType.zig").MessageType;
-    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
     const alloc = std.testing.allocator;
 
@@ -232,7 +227,6 @@ test "HandshakeProtocols" {
     const HandshakeProtocols = @import("message/messages/HandshakeProtocols.zig");
     const ServerClient = @import("server/ServerClient.zig");
     const MessageType = @import("message/MessageType.zig").MessageType;
-    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
     const alloc = std.testing.allocator;
 
@@ -272,7 +266,6 @@ test "HandshakeBegin" {
     const HandshakeBegin = @import("message/messages/HandshakeBegin.zig");
     const ServerClient = @import("server/ServerClient.zig");
     const MessageType = @import("message/MessageType.zig").MessageType;
-    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
     const alloc = std.testing.allocator;
 
@@ -310,7 +303,6 @@ test "FatalProtocolError" {
     const FatalProtocolError = @import("message/messages/FatalProtocolError.zig");
     const ServerClient = @import("server/ServerClient.zig");
     const MessageType = @import("message/MessageType.zig").MessageType;
-    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
     const alloc = std.testing.allocator;
 
@@ -349,7 +341,6 @@ test "GenericProtocolMessage" {
     const GenericProtocolMessage = @import("message/messages/GenericProtocolMessage.zig");
     const ServerClient = @import("server/ServerClient.zig");
     const MessageType = @import("message/MessageType.zig").MessageType;
-    const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
     const alloc = std.testing.allocator;
 
