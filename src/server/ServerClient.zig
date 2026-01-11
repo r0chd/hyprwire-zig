@@ -7,6 +7,8 @@ const posix = std.posix;
 const log = std.log;
 const mem = std.mem;
 
+const GenericProtocol = @import("../message/messages/GenericProtocolMessage.zig");
+const NewObject = @import("../message/messages/NewObject.zig");
 const ServerObject = @import("ServerObject.zig");
 const ServerSocket = @import("ServerSocket.zig");
 const Message = @import("../message/messages/Message.zig");
@@ -124,7 +126,6 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: anytype) void
 }
 
 pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, object: []const u8, version: u32, seq: u32) !?*ServerObject {
-    _ = seq;
     if (self.server == null) return null;
 
     const obj = try gpa.create(ServerObject);
@@ -136,7 +137,6 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
     obj.base.version = version;
     try self.objects.append(gpa, obj);
 
-    // Search for matching protocol implementation
     var found_spec: ?*const types.ProtocolObjectSpec = null;
     var protocol_name: []const u8 = "";
 
@@ -144,7 +144,6 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
         const protocol_spec = impl.protocol();
         if (!mem.eql(u8, protocol_spec.specName(), protocol)) continue;
 
-        // Search for matching object spec
         for (protocol_spec.getObjects()) |spec| {
             if (object.len > 0 and !mem.eql(u8, spec.objectName(), object)) continue;
             found_spec = &spec;
@@ -178,10 +177,46 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
     obj.base.protocol_name = try gpa.dupe(u8, protocol_name);
     errdefer gpa.free(obj.base.protocol_name);
 
-    // TODO: Send NewObject message and call onBind
-    // const ret = NewObjectMessage.init(seq, obj.base.id);
-    // self.sendMessage(gpa, ret);
-    // onBind(obj);
+    const ret = NewObject.init(seq, obj.base.id);
+    self.sendMessage(gpa, ret);
+
+    self.onBind(obj);
 
     return obj;
+}
+
+pub fn onBind(self: *Self, obj: *ServerObject) void {
+    if (self.server) |server| {
+        for (server.impls.items) |impl| {
+            if (!mem.eql(u8, impl.protocol().spec_name, obj.base.protocol_name)) {
+                continue;
+            }
+
+            for (impl.implementations) |implementation| {
+                if (mem.eql(u8, implementation.object_name, obj.base.spec.?.objectName())) {
+                    continue;
+                }
+
+                if (implementation.on_bind) |on_bind| {
+                    on_bind(obj);
+                }
+                break;
+            }
+
+            break;
+        }
+    }
+}
+
+pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: GenericProtocol) !void {
+    for (self.objects.items) |obj| {
+        if (obj.base.id == msg.object) {
+            try obj.called(gpa, msg.method, msg.data_span, msg.fds_list);
+            break;
+        }
+    }
+}
+
+pub fn getPid(self: *const Self) i32 {
+    return self.pid;
 }
