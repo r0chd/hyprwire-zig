@@ -2,11 +2,21 @@ const std = @import("std");
 
 const VERSION: [:0]const u8 = "0.2.1";
 
-pub fn buildHyprwire(b: *std.Build, target: std.Build.ResolvedTarget) *std.Build.Module {
+pub fn buildHyprwire(b: *std.Build, target: std.Build.ResolvedTarget, helpers: *std.Build.Module) *std.Build.Module {
     const mod = b.addModule("hyprwire", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .link_libc = true,
+    });
+    mod.addImport("helpers", helpers);
+
+    return mod;
+}
+
+pub fn buildHelpers(b: *std.Build, target: std.Build.ResolvedTarget) *std.Build.Module {
+    const mod = b.addModule("helpers", .{
+        .root_source_file = b.path("src/helpers.zig"),
+        .target = target,
     });
 
     return mod;
@@ -82,7 +92,8 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const hyprwire = buildHyprwire(b, target);
+    const helpers = buildHelpers(b, target);
+    const hyprwire = buildHyprwire(b, target, helpers);
     const scanner_mod = buildScanner(b, target, xml, hyprwire);
 
     hyprwire.addImport("scanner", scanner_mod);

@@ -5,6 +5,7 @@ const root = @import("../root.zig");
 const builtin = @import("builtin");
 const messages = @import("../message/messages/root.zig");
 const types = @import("../implementation/types.zig");
+const helpers = @import("helpers");
 
 const posix = std.posix;
 const log = std.log;
@@ -15,6 +16,7 @@ const NewObject = @import("../message/messages/NewObject.zig");
 const ServerObject = @import("ServerObject.zig");
 const ServerSocket = @import("ServerSocket.zig");
 
+const Fd = helpers.Fd;
 const Message = messages.Message;
 const parseData = messages.parseData;
 const steadyMillis = root.steadyMillis;
@@ -27,7 +29,7 @@ fn CMSG_DATA(cmsg: *c.struct_cmsghdr) [*]u8 {
 
 const Self = @This();
 
-fd: i32,
+fd: Fd,
 pid: i32 = -1,
 first_poll_done: bool = false,
 version: u32 = 0,
@@ -38,15 +40,16 @@ objects: std.ArrayList(*ServerObject) = .empty,
 server: ?*ServerSocket = null,
 self: ?*Self = null,
 
-pub fn init(fd: i32) posix.FcntlError!Self {
-    const flags = try posix.fcntl(fd, posix.F.GETFD, 0);
-    _ = try posix.fcntl(fd, posix.F.SETFD, flags | posix.FD_CLOEXEC);
+pub fn init(raw_fd: i32) !Self {
+    var fd = Fd{ .raw = raw_fd };
+    try fd.setFlags(posix.FD_CLOEXEC);
+
     return .{
         .fd = fd,
     };
 }
 
-pub fn dispatchFirstPoll(self: *Self) !void {
+pub fn dispatchFirstPoll(self: *Self) void {
     if (self.first_poll_done) return;
 
     self.first_poll_done = true;
@@ -82,11 +85,11 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: anytype) void
     comptime Message(@TypeOf(message));
 
     const parsed = parseData(gpa, message) catch |err| {
-        log.debug("[{} @ {}] -> parse error: {}", .{ self.fd, steadyMillis(), err });
+        log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
         return;
     };
     defer gpa.free(parsed);
-    log.debug("[{} @ {}] -> {s}", .{ self.fd, steadyMillis(), parsed });
+    log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
 
     const fds = message.fds();
 
@@ -125,7 +128,7 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: anytype) void
         }
     }
 
-    _ = c.sendmsg(self.fd, &msg, 0);
+    _ = c.sendmsg(self.fd.raw, &msg, 0);
 }
 
 pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, object: []const u8, version: u32, seq: u32) !?*ServerObject {

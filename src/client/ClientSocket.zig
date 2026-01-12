@@ -1,10 +1,12 @@
 const std = @import("std");
 const types = @import("../implementation/types.zig");
 const message = @import("../message/messages/root.zig");
+const helpers = @import("helpers");
 
 const mem = std.mem;
 const posix = std.posix;
 const log = std.log;
+const fs = std.fs;
 
 const ClientObject = @import("ClientObject.zig");
 
@@ -23,6 +25,35 @@ objects: std.ArrayList(ClientObject) = .empty,
 @"error": bool = false,
 
 const Self = @This();
+
+pub fn open(gpa: mem.Allocator, path: [:0]const u8) !Self {
+    const sock = try gpa.create(Self);
+    sock.* = .{};
+}
+
+pub fn attempt(self: *Self, path: [:0]const u8) void {
+    self.fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
+    var server_address: posix.sockaddr.un = .{
+        .path = undefined,
+    };
+
+    try fs.cwd().access(path, .{});
+
+    if (path.len >= 108) return error.PathTooLong;
+
+    @memcpy(&server_address.path, path.ptr);
+
+    const failure = blk: {
+        posix.connect(self.fd, @ptrCast(&server_address), @intCast(helpers.sunLen(&server_address))) catch |err| {
+            if (err != error.ConnectionRefused) {
+                return err;
+            }
+
+            break :blk true;
+        };
+        break :blk false;
+    };
+}
 
 pub fn sendMessage(self: *Self, gpa: mem.Allocator, msg: anytype) void {
     comptime Message(msg);

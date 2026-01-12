@@ -2,6 +2,7 @@ const std = @import("std");
 const types = @import("../implementation/types.zig");
 const message_parser = @import("../message/MessageParser.zig");
 const root = @import("../root.zig");
+const helpers = @import("helpers");
 
 const ServerObject = @import("ServerObject.zig");
 const ServerClient = @import("ServerClient.zig");
@@ -11,6 +12,7 @@ const RoundtripDone = @import("../message/messages/RoundtripDone.zig");
 
 const ProtocolServerImplementation = types.ProtocolServerImplementation;
 const MessageParsingResult = message_parser.MessageParsingResult;
+const Fd = helpers.Fd;
 
 const mem = std.mem;
 const posix = std.posix;
@@ -20,13 +22,13 @@ const steadyMillis = root.steadyMillis;
 
 const Self = @This();
 
-fd: i32 = -1,
-export_fd: i32 = -1,
-export_write_fd: i32 = -1,
-exit_fd: i32 = -1,
-exit_write_fd: i32 = -1,
-wakeup_fd: i32,
-wakeup_write_fd: i32,
+fd: ?Fd = null,
+export_fd: ?Fd = null,
+export_write_fd: ?Fd = null,
+exit_fd: ?Fd = null,
+exit_write_fd: ?Fd = null,
+wakeup_fd: Fd,
+wakeup_write_fd: Fd,
 pollfds: std.ArrayList(posix.pollfd) = .empty,
 clients: std.ArrayList(*ServerClient) = .empty,
 impls: std.ArrayList(*const ProtocolServerImplementation) = .empty,
@@ -44,8 +46,8 @@ fn init() !Self {
     });
 
     return .{
-        .wakeup_fd = pipes[0],
-        .wakeup_write_fd = pipes[1],
+        .wakeup_fd = Fd{ .raw = pipes[0] },
+        .wakeup_write_fd = Fd{ .raw = pipes[1] },
     };
 }
 
@@ -64,13 +66,33 @@ pub fn open(gpa: mem.Allocator, path: ?[:0]const u8) !*Self {
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    if (self.poll_thread) |*thread| {
+        self.thread_can_poll = false;
+        if (self.exit_write_fd) |fd| {
+            const write_buf: [1]u8 = .{'x'};
+            _ = posix.write(fd.raw, &write_buf) catch {};
+        }
+        if (self.export_poll_mtx_locked) {
+            self.export_poll_mtx.unlock();
+        }
+        thread.join();
+    }
+
+    if (self.export_fd) |*fd| fd.close();
+    if (self.export_write_fd) |*fd| fd.close();
+    if (self.exit_fd) |*fd| fd.close();
+    if (self.exit_write_fd) |*fd| fd.close();
+    if (self.fd) |*fd| fd.close();
     self.pollfds.deinit(gpa);
     gpa.destroy(self);
 }
 
 pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
     if (posix.access(path, posix.F_OK)) {
-        self.fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
+        const raw_fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
+        var fd = Fd{ .raw = raw_fd };
+        defer fd.close();
+
         var server_address: posix.sockaddr.un = .{
             .path = undefined,
         };
@@ -80,7 +102,7 @@ pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
         @memcpy(&server_address.path, path.ptr);
 
         const failure = blk: {
-            posix.connect(self.fd, @ptrCast(&server_address), @intCast(sunLen(&server_address))) catch |err| {
+            posix.connect(fd.raw, @ptrCast(&server_address), @intCast(helpers.sunLen(&server_address))) catch |err| {
                 if (err != error.ConnectionRefused) {
                     return err;
                 }
@@ -91,18 +113,16 @@ pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
         };
 
         if (!failure) {
-            posix.close(self.fd);
-            self.fd = -1;
             return;
         }
-
-        posix.close(self.fd);
-        self.fd = -1;
 
         try fs.deleteFileAbsolute(path);
     } else |_| {}
 
-    self.fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
+    const raw_fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
+    var fd = Fd{ .raw = raw_fd };
+    errdefer fd.close();
+
     var server_address: posix.sockaddr.un = .{
         .path = undefined,
     };
@@ -111,18 +131,16 @@ pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
 
     @memcpy(&server_address.path, path.ptr);
 
-    try posix.bind(self.fd, @ptrCast(&server_address), @intCast(sunLen(&server_address)));
+    try posix.bind(fd.raw, @ptrCast(&server_address), @intCast(helpers.sunLen(&server_address)));
 
-    try posix.listen(self.fd, 100);
+    try posix.listen(fd.raw, 100);
 
-    const current_fd_flags = try posix.fcntl(self.fd, posix.F.GETFD, 0);
-    _ = try posix.fcntl(self.fd, posix.F.SETFD, current_fd_flags | posix.FD_CLOEXEC);
-    const current_flags = try posix.fcntl(self.fd, posix.F.GETFL, 0);
-    _ = try posix.fcntl(self.fd, posix.F.SETFL, current_flags | (1 << @bitOffsetOf(posix.O, "NONBLOCK")));
+    try fd.setFlags(posix.FD_CLOEXEC | (1 << @bitOffsetOf(posix.O, "NONBLOCK")));
+
     self.path = path;
+    self.fd = fd;
 
     try self.recheckPollFds(gpa);
-    return;
 }
 
 pub fn attemptEmpty(self: *Self, gpa: mem.Allocator) !void {
@@ -162,30 +180,33 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
     }
 }
 
-pub fn clearFd(fd: i32) void {
+pub fn clearFd(fd: Fd) void {
     var buf: [128]u8 = undefined;
-    var fds = [_]posix.pollfd{.{ .fd = fd, .events = posix.POLL.IN, .revents = 0 }};
+    var fds = [_]posix.pollfd{.{ .fd = fd.raw, .events = posix.POLL.IN, .revents = 0 }};
 
     while (true) {
         _ = posix.poll(&fds, 0) catch break;
 
         if (fds[0].revents & posix.POLL.IN != 0) {
-            _ = posix.read(fd, &buf) catch break;
+            _ = posix.read(fd.raw, &buf) catch break;
             continue;
         }
     }
 }
 
 pub fn clearEventFd(self: *Self) void {
-    clearFd(self.export_fd);
+    if (self.export_fd) |fd| {
+        clearFd(fd);
+    }
 }
 
 pub fn clearWakeupFd(self: *Self) void {
     clearFd(self.wakeup_fd);
 }
 
-pub fn addClient(self: *Self, gpa: mem.Allocator, fd: i32) ?*ServerClient {
+pub fn addClient(self: *Self, gpa: mem.Allocator, fd: Fd) ?*ServerClient {
     const x = ServerClient.init(fd) catch return null;
+
     const client = gpa.create(ServerClient) catch return null;
     client.* = x;
 
@@ -216,7 +237,7 @@ pub fn addClient(self: *Self, gpa: mem.Allocator, fd: i32) ?*ServerClient {
     return client;
 }
 
-pub fn removeClient(self: *Self, gpa: mem.Allocator, fd: i32) bool {
+pub fn removeClient(self: *Self, gpa: mem.Allocator, fd: Fd) bool {
     var removed: u32 = 0;
 
     var i: usize = self.clients.items.len;
@@ -240,29 +261,32 @@ pub fn internalFds(self: *Self) usize {
 pub fn recheckPollFds(self: *Self, gpa: mem.Allocator) !void {
     self.pollfds.clearAndFree(gpa);
 
+    const fd = self.fd orelse return error.NoFileDescriptor;
     if (!self.is_empty_listener) {
         try self.pollfds.append(gpa, .{
-            .fd = self.fd,
+            .fd = fd.raw,
+            .events = posix.POLL.IN,
+            .revents = 0,
+        });
+    }
+
+    if (self.exit_fd) |exit_fd| {
+        try self.pollfds.append(gpa, .{
+            .fd = exit_fd.raw,
             .events = posix.POLL.IN,
             .revents = 0,
         });
     }
 
     try self.pollfds.append(gpa, .{
-        .fd = self.exit_fd,
-        .events = posix.POLL.IN,
-        .revents = 0,
-    });
-
-    try self.pollfds.append(gpa, .{
-        .fd = self.wakeup_fd,
+        .fd = self.wakeup_fd.raw,
         .events = posix.POLL.IN,
         .revents = 0,
     });
 
     for (self.clients.items) |client| {
         try self.pollfds.append(gpa, .{
-            .fd = client.fd,
+            .fd = client.fd.raw,
             .events = posix.POLL.IN,
             .revents = 0,
         });
@@ -270,6 +294,8 @@ pub fn recheckPollFds(self: *Self, gpa: mem.Allocator) !void {
 }
 
 pub fn dispatchNewConnections(self: *Self, gpa: mem.Allocator) bool {
+    const fd = self.fd orelse return false;
+
     if (self.is_empty_listener) return false;
 
     if (self.pollfds.items[0].revents & posix.POLL.IN != 0) return false;
@@ -280,7 +306,7 @@ pub fn dispatchNewConnections(self: *Self, gpa: mem.Allocator) bool {
     };
     var client_size: posix.socklen_t = @sizeOf(posix.sockaddr.in);
 
-    const client_fd = posix.accept(self.fd, @as(*posix.sockaddr, @ptrCast(&client_address.addr)), &client_size, 0) catch return false;
+    const client_fd = posix.accept(fd.raw, @as(*posix.sockaddr, @ptrCast(&client_address.addr)), &client_size, 0) catch return false;
     const client_init = ServerClient.init(client_fd) catch {
         posix.close(client_fd);
         return false;
@@ -340,7 +366,7 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !void {
 
 pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !void {
     _ = self;
-    const data = try SocketRawParsedMessage.fromFd(gpa, client.fd);
+    const data = try SocketRawParsedMessage.fromFd(gpa, client.fd.raw);
     if (data.bad) {
         const fatal_msg = FatalError.init(gpa, 0, 0, "fatal: invalid message on wire") catch |err| {
             log.err("Failed to create fatal error message: {}", .{err});
@@ -373,18 +399,21 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
 }
 
 pub fn extractLoopFD(self: *Self, gpa: mem.Allocator) !i32 {
-    const export_fd_valid = posix.fcntl(self.export_fd, posix.F.GETFL, 0) catch |err| switch (err) {
-        else => false,
-    };
+    const export_fd_valid = if (self.export_fd) |fd|
+        posix.fcntl(fd.raw, posix.F.GETFL, 0) catch |err| switch (err) {
+            else => false,
+        }
+    else
+        false;
 
-    if (!export_fd_valid or self.export_fd == -1) {
-        const export_pipes = try posix.pipe2(posix.FD_CLOEXEC);
-        self.export_fd = export_pipes[0];
-        self.export_write_fd = export_pipes[1];
+    if (!export_fd_valid or self.export_fd == null) {
+        const export_pipes = try posix.pipe2(.{ .CLOEXEC = true });
+        self.export_fd = Fd{ .raw = export_pipes[0] };
+        self.export_write_fd = Fd{ .raw = export_pipes[1] };
 
-        const exit_pipes = try posix.pipe2(posix.FD_CLOEXEC);
-        self.exit_fd = exit_pipes[0];
-        self.exit_write_fd = exit_pipes[1];
+        const exit_pipes = try posix.pipe2(.{ .CLOEXEC = true });
+        self.exit_fd = Fd{ .raw = exit_pipes[0] };
+        self.exit_write_fd = Fd{ .raw = exit_pipes[1] };
 
         self.thread_can_poll = true;
 
@@ -393,7 +422,7 @@ pub fn extractLoopFD(self: *Self, gpa: mem.Allocator) !i32 {
         self.poll_thread = try std.Thread.spawn(.{}, pollThread, .{self});
     }
 
-    return self.export_fd;
+    return self.export_fd.?.raw;
 }
 
 pub fn createObject(gpa: mem.Allocator, client: ?*ServerClient, reference: ?*ServerObject, object: []const u8, seq: u32) ?*ServerObject {
@@ -440,13 +469,15 @@ fn pollThread(self: *Self) void {
             };
         }
 
-        pollfds.append(.{
-            .fd = self.exit_fd,
-            .events = posix.POLL.IN,
-        }) catch {
-            self.poll_mtx.unlock();
-            continue;
-        };
+        if (self.exit_fd) |fd| {
+            pollfds.append(.{
+                .fd = fd.raw,
+                .events = posix.POLL.IN,
+            }) catch {
+                self.poll_mtx.unlock();
+                continue;
+            };
+        }
 
         pollfds.append(.{
             .fd = self.wakeup_fd,
@@ -471,18 +502,8 @@ fn pollThread(self: *Self) void {
         _ = posix.poll(pollfds.items, -1) catch break;
 
         const write_buf: [1]u8 = .{'x'};
-        _ = posix.write(self.export_write_fd, &write_buf) catch {};
+        if (self.export_write_fd) |fd| {
+            _ = posix.write(fd.raw, &write_buf) catch {};
+        }
     }
-}
-
-pub fn sunLen(addr: *const posix.sockaddr.un) usize {
-    const path_ptr: [*:0]const u8 = @ptrCast(&addr.path);
-    const path_len = mem.span(path_ptr).len;
-    return @offsetOf(posix.sockaddr.un, "path") + path_len + 1;
-}
-
-test "ServerSocket" {
-    const alloc = std.testing.allocator;
-    var socket = try Self.open(alloc, null);
-    defer socket.deinit(alloc);
 }

@@ -77,13 +77,19 @@ pub fn fds(self: *const Self) []const i32 {
 
 test "NewObject" {
     const ServerClient = @import("../../server/ServerClient.zig");
+    const posix = std.posix;
 
     const alloc = std.testing.allocator;
 
     {
         const message = Self.init(3, 2);
 
-        const server_client = try ServerClient.init(0);
+        const pipes = try posix.pipe();
+        defer {
+            posix.close(pipes[0]);
+            posix.close(pipes[1]);
+        }
+        const server_client = try ServerClient.init(pipes[0]);
         server_client.sendMessage(alloc, message);
     }
     {
@@ -97,7 +103,12 @@ test "NewObject" {
         };
         const message = try Self.fromBytes(&bytes, 0);
 
-        const server_client = try ServerClient.init(0);
+        const pipes = try posix.pipe();
+        defer {
+            posix.close(pipes[0]);
+            posix.close(pipes[1]);
+        }
+        const server_client = try ServerClient.init(pipes[0]);
         server_client.sendMessage(alloc, message);
     }
 }

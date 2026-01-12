@@ -158,6 +158,7 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
 
 test "GenericProtocolMessage" {
     const ServerClient = @import("../../server/ServerClient.zig");
+    const posix = std.posix;
 
     const alloc = std.testing.allocator;
 
@@ -173,7 +174,12 @@ test "GenericProtocolMessage" {
         var message = try Self.init(alloc, &data, &.{});
         defer message.deinit(alloc);
 
-        const server_client = try ServerClient.init(0);
+        const pipes = try posix.pipe();
+        defer {
+            posix.close(pipes[0]);
+            posix.close(pipes[1]);
+        }
+        const server_client = try ServerClient.init(pipes[0]);
         server_client.sendMessage(alloc, message);
     }
     {
@@ -193,7 +199,12 @@ test "GenericProtocolMessage" {
         var message = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
         defer message.deinit(alloc);
 
-        const server_client = try ServerClient.init(0);
+        const pipes = try posix.pipe();
+        defer {
+            posix.close(pipes[0]);
+            posix.close(pipes[1]);
+        }
+        const server_client = try ServerClient.init(pipes[0]);
         server_client.sendMessage(alloc, message);
     }
 }
