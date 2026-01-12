@@ -49,15 +49,15 @@ fn init() !Self {
     };
 }
 
-pub fn open(gpa: mem.Allocator, path: ?[:0]const u8) !?*Self {
+pub fn open(gpa: mem.Allocator, path: ?[:0]const u8) !*Self {
     const socket = try gpa.create(Self);
     errdefer gpa.destroy(socket);
     socket.* = try Self.init();
 
     if (path) |p| {
-        if (!socket.attempt(gpa, p)) return null;
+        try socket.attempt(gpa, p);
     } else {
-        if (!socket.attemptEmpty(gpa)) return null;
+        try socket.attemptEmpty(gpa);
     }
 
     return socket;
@@ -68,21 +68,21 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.destroy(self);
 }
 
-pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) bool {
+pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
     if (posix.access(path, posix.F_OK)) {
-        self.fd = posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0) catch return false;
+        self.fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
         var server_address: posix.sockaddr.un = .{
             .path = undefined,
         };
 
-        if (path.len >= 108) return false;
+        if (path.len >= 108) return error.PathTooLong;
 
         @memcpy(&server_address.path, path.ptr);
 
         const failure = blk: {
             posix.connect(self.fd, @ptrCast(&server_address), @intCast(sunLen(&server_address))) catch |err| {
                 if (err != error.ConnectionRefused) {
-                    return false;
+                    return err;
                 }
 
                 break :blk true;
@@ -93,77 +93,73 @@ pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) bool {
         if (!failure) {
             posix.close(self.fd);
             self.fd = -1;
-            return false;
+            return;
         }
 
         posix.close(self.fd);
         self.fd = -1;
 
-        fs.deleteFileAbsolute(path) catch return false;
+        try fs.deleteFileAbsolute(path);
     } else |_| {}
 
-    self.fd = posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0) catch return false;
+    self.fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
     var server_address: posix.sockaddr.un = .{
         .path = undefined,
     };
 
-    if (path.len >= 108) return false;
+    if (path.len >= 108) return error.PathTooLong;
 
     @memcpy(&server_address.path, path.ptr);
 
-    posix.bind(self.fd, @ptrCast(&server_address), @intCast(sunLen(&server_address))) catch return false;
+    try posix.bind(self.fd, @ptrCast(&server_address), @intCast(sunLen(&server_address)));
 
-    posix.listen(self.fd, 100) catch return false;
+    try posix.listen(self.fd, 100);
 
-    const current_fd_flags = posix.fcntl(self.fd, posix.F.GETFD, 0) catch return false;
-    _ = posix.fcntl(self.fd, posix.F.SETFD, current_fd_flags | posix.FD_CLOEXEC) catch return false;
-    const current_flags = posix.fcntl(self.fd, posix.F.GETFL, 0) catch return false;
-    _ = posix.fcntl(self.fd, posix.F.SETFL, current_flags | (1 << @bitOffsetOf(posix.O, "NONBLOCK"))) catch return false;
+    const current_fd_flags = try posix.fcntl(self.fd, posix.F.GETFD, 0);
+    _ = try posix.fcntl(self.fd, posix.F.SETFD, current_fd_flags | posix.FD_CLOEXEC);
+    const current_flags = try posix.fcntl(self.fd, posix.F.GETFL, 0);
+    _ = try posix.fcntl(self.fd, posix.F.SETFL, current_flags | (1 << @bitOffsetOf(posix.O, "NONBLOCK")));
     self.path = path;
 
-    self.recheckPollFds(gpa) catch return false;
-    return true;
+    try self.recheckPollFds(gpa);
+    return;
 }
 
-pub fn attemptEmpty(self: *Self, gpa: mem.Allocator) bool {
+pub fn attemptEmpty(self: *Self, gpa: mem.Allocator) !void {
     self.is_empty_listener = true;
 
-    self.recheckPollFds(gpa) catch return false;
-
-    return true;
+    try self.recheckPollFds(gpa);
 }
 
 pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: *const ProtocolServerImplementation) !void {
     try self.impls.append(gpa, impl);
 }
 
-pub fn dispatchPending(self: *Self, gpa: mem.Allocator) bool {
-    _ = posix.poll(self.pollfds.items, 0) catch return false;
+pub fn dispatchPending(self: *Self, gpa: mem.Allocator) !void {
+    _ = try posix.poll(self.pollfds.items, 0);
     if (self.dispatchNewConnections(gpa)) return self.dispatchPending(gpa);
 
     return self.dispatchExistingConnections(gpa);
 }
 
-pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) bool {
+pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
     self.poll_mtx.lock();
     defer self.poll_mtx.unlock();
 
-    while (self.dispatchPending(gpa)) {}
+    while (self.dispatchPending(gpa)) {} else |_| {}
 
     self.clearEventFd();
     self.clearWakeupFd();
 
     if (block) {
-        _ = posix.poll(self.pollfds.items, -1) catch return false;
-        while (self.dispatchPending(gpa)) {}
+        _ = try posix.poll(self.pollfds.items, -1);
+        while (self.dispatchPending(gpa)) {} else |_| {}
     }
 
     if (self.export_poll_mtx_locked) {
         self.export_poll_mtx.unlock();
         self.export_poll_mtx_locked = false;
     }
-
-    return true;
 }
 
 pub fn clearFd(fd: i32) void {
@@ -307,14 +303,14 @@ pub fn dispatchNewConnections(self: *Self, gpa: mem.Allocator) bool {
     return true;
 }
 
-pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) bool {
+pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !void {
     var had_any = false;
     var needs_poll_recheck = false;
 
     for (self.internalFds()..self.pollfds.items.len) |i| {
         if (self.pollfds.items[i].revents & posix.POLL.IN != 0) continue;
 
-        self.dispatchClient(gpa, self.clients.items[i - self.internalFds()]) catch return false;
+        try self.dispatchClient(gpa, self.clients.items[i - self.internalFds()]);
 
         had_any = true;
 
@@ -338,10 +334,8 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) bool {
                 _ = self.clients.swapRemove(i);
             }
         }
-        self.recheckPollFds(gpa) catch return false;
+        try self.recheckPollFds(gpa);
     }
-
-    return had_any;
 }
 
 pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !void {
@@ -485,4 +479,10 @@ pub fn sunLen(addr: *const posix.sockaddr.un) usize {
     const path_ptr: [*:0]const u8 = @ptrCast(&addr.path);
     const path_len = mem.span(path_ptr).len;
     return @offsetOf(posix.sockaddr.un, "path") + path_len + 1;
+}
+
+test "ServerSocket" {
+    const alloc = std.testing.allocator;
+    var socket = try Self.open(alloc, null);
+    defer socket.deinit(alloc);
 }

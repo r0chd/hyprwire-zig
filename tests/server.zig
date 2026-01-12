@@ -15,8 +15,8 @@ pub fn main() !void {
     const xdg_runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
     const socket_path_buf = try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{xdg_runtime_dir}, 0);
     defer alloc.free(socket_path_buf);
-    var socket = (try hw.ServerSocket.open(alloc, socket_path_buf)).?;
+    var socket = try hw.ServerSocket.open(alloc, socket_path_buf);
     defer socket.deinit(alloc);
 
-    while (socket.dispatchEvents(alloc, true)) {}
+    while (socket.dispatchEvents(alloc, true)) {} else |_| {}
 }

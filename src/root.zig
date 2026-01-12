@@ -33,12 +33,6 @@ test {
     _ = messages.RoundtripRequest;
 }
 
-test "ServerSocket" {
-    const alloc = std.testing.allocator;
-    var socket = (try ServerSocket.open(alloc, null)).?;
-    defer socket.deinit(alloc);
-}
-
 test "fromFd" {
     const SocketRawParsedMessage = @import("./socket/socket_helpers.zig").SocketRawParsedMessage;
     const alloc = std.testing.allocator;
