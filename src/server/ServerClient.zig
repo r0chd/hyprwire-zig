@@ -32,7 +32,7 @@ pid: i32 = -1,
 first_poll_done: bool = false,
 version: u32 = 0,
 max_id: u32 = 1,
-err: bool = false,
+@"error": bool = false,
 scheduled_roundtrip_seq: u32 = 0,
 objects: std.ArrayList(*ServerObject) = .empty,
 server: ?*ServerSocket = null,
@@ -157,13 +157,13 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
 
         if (found_spec == null) {
             log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd, steadyMillis() });
-            self.err = true;
+            self.@"@\"error\"" = true;
             return null;
         }
 
         if (protocol_spec.specVer() < version) {
             log.err("[{} @ {}] Error: createObject for protocol {s} object {s} for version {}, but we have only {}", .{ self.fd, steadyMillis(), protocol_name, object, version, protocol_spec.specVer() });
-            self.err = true;
+            self.@"@\"error\"" = true;
             return null;
         }
 
@@ -172,7 +172,7 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
 
     if (found_spec == null) {
         log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd, steadyMillis() });
-        self.err = true;
+        self.@"@\"error\"" = true;
         return null;
     }
 

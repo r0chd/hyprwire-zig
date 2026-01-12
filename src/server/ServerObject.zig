@@ -41,7 +41,7 @@ pub fn methodsIn(self: *const Self) []const Method {
 
 pub fn errd(self: *Self) void {
     if (self.client) |client| {
-        client.err = true;
+        client.@"error" = true;
     }
 }
 

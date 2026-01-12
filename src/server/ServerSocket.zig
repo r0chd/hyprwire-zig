@@ -315,13 +315,13 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !void {
         had_any = true;
 
         if (self.pollfds.items[i].revents & posix.POLL.HUP == 0) {
-            self.clients.items[i - self.internalFds()].err = true;
+            self.clients.items[i - self.internalFds()].@"error" = true;
             needs_poll_recheck = true;
             log.debug("[{} @ {}] Dropping client (hangup)", .{ self.clients.items[i - self.internalFds()].fd, steadyMillis() });
             continue;
         }
 
-        if (self.clients.items[i - self.internalFds()].err) {
+        if (self.clients.items[i - self.internalFds()].@"error") {
             log.debug("[{} @ {}] Dropping client (protocol error)", .{ self.clients.items[i - self.internalFds()].fd, steadyMillis() });
         }
     }
@@ -330,7 +330,7 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !void {
         var i: usize = self.clients.items.len;
         while (i > 0) : (i -= 1) {
             const client = self.clients.items[i];
-            if (client.err) {
+            if (client.@"error") {
                 _ = self.clients.swapRemove(i);
             }
         }
@@ -344,11 +344,11 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
     if (data.bad) {
         const fatal_msg = FatalError.init(gpa, 0, 0, "fatal: invalid message on wire") catch |err| {
             log.err("Failed to create fatal error message: {}", .{err});
-            client.err = true;
+            client.@"error" = true;
             return;
         };
         client.sendMessage(gpa, fatal_msg);
-        client.err = true;
+        client.@"error" = true;
         return;
     }
 
@@ -358,11 +358,11 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
     if (ret != MessageParsingResult.ok) {
         const fatal_msg = FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire") catch |err| {
             log.err("Failed to create fatal error message: {}", .{err});
-            client.err = true;
+            client.@"error" = true;
             return;
         };
         client.sendMessage(gpa, fatal_msg);
-        client.err = true;
+        client.@"error" = true;
         return;
     }
 
