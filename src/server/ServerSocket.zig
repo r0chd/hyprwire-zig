@@ -16,8 +16,6 @@ const mem = std.mem;
 const posix = std.posix;
 const fs = std.fs;
 const log = std.log;
-
-const sunLen = root.sunLen;
 const steadyMillis = root.steadyMillis;
 
 const Self = @This();
@@ -481,4 +479,10 @@ fn pollThread(self: *Self) void {
         const write_buf: [1]u8 = .{'x'};
         _ = posix.write(self.export_write_fd, &write_buf) catch {};
     }
+}
+
+pub fn sunLen(addr: *const posix.sockaddr.un) usize {
+    const path_ptr: [*:0]const u8 = @ptrCast(&addr.path);
+    const path_len = mem.span(path_ptr).len;
+    return @offsetOf(posix.sockaddr.un, "path") + path_len + 1;
 }

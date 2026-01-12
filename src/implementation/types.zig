@@ -65,3 +65,23 @@ pub const ProtocolServerImplementation = struct {
         return self.implementations;
     }
 };
+
+pub const ClientObjectImplementation = struct {
+    object_name: []const u8 = "",
+    version: u32 = 0,
+};
+
+pub const ProtocolClientImplementation = struct {
+    protocol_spec: *const ProtocolSpec,
+    implementations: []const ServerObjectImplementation,
+
+    const Self = @This();
+
+    pub fn protocol(self: Self) *const ProtocolSpec {
+        return self.protocol_spec;
+    }
+
+    pub fn getImplementations(self: Self) []const ClientObjectImplementation {
+        return self.implementations;
+    }
+};

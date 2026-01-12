@@ -1,14 +1,15 @@
 const std = @import("std");
 const mem = std.mem;
 
-const Message = @import("Message.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 
 object_id: u32 = 0,
 error_id: u32 = 0,
 error_msg: []const u8,
-base: Message,
+data: []const u8,
+message_type: MessageType = .invalid,
+len: usize = 0,
 
 const Self = @This();
 
@@ -40,11 +41,9 @@ pub fn init(gpa: mem.Allocator, object_id: u32, error_id: u32, error_msg: []cons
     const error_msg_copy = try gpa.dupe(u8, error_msg);
 
     return Self{
-        .base = Message{
-            .data = data_slice,
-            .len = data_slice.len,
-            .message_type = .fatal_protocol_error,
-        },
+        .data = data_slice,
+        .len = data_slice.len,
+        .message_type = .fatal_protocol_error,
         .object_id = object_id,
         .error_id = error_id,
         .error_msg = error_msg_copy,
@@ -93,11 +92,9 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     const message_len = needle - offset;
 
     return Self{
-        .base = Message{
-            .data = try gpa.dupe(u8, data[offset..]),
-            .len = message_len,
-            .message_type = .fatal_protocol_error,
-        },
+        .data = try gpa.dupe(u8, data[offset..]),
+        .len = message_len,
+        .message_type = .fatal_protocol_error,
         .object_id = object_id,
         .error_id = error_id,
         .error_msg = error_msg_copy,
@@ -111,5 +108,41 @@ pub fn fds(self: *const Self) []const i32 {
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.error_msg);
-    gpa.free(self.base.data);
+    gpa.free(self.data);
+}
+
+test "FatalProtocolError" {
+    const ServerClient = @import("../../server/ServerClient.zig");
+
+    const alloc = std.testing.allocator;
+
+    {
+        var message = try Self.init(alloc, 3, 5, "test error");
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][UINT_magic][objectId:4][UINT_magic][errorId:4][VARCHAR_magic][varint_len][errorMsg][END]
+        // objectId = 3 (0x03 0x00 0x00 0x00)
+        // errorId = 5 (0x05 0x00 0x00 0x00)
+        // errorMsg = "test error" (10 bytes, varint = 0x0A)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.fatal_protocol_error),
+            @intFromEnum(MessageMagic.type_uint),
+            0x03,                                 0x00, 0x00, 0x00, // objectId = 3
+            @intFromEnum(MessageMagic.type_uint),
+            0x05,                                    0x00, 0x00, 0x00, // errorId = 5
+            @intFromEnum(MessageMagic.type_varchar),
+            0x0A, // errorMsg length = 10
+            't',                            'e', 's', 't', ' ', 'e', 'r', 'r', 'o', 'r', // "test error"
+            @intFromEnum(MessageMagic.end),
+        };
+        var message = try Self.fromBytes(alloc, &bytes, 0);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
 }

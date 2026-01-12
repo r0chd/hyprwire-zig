@@ -35,10 +35,10 @@ fn readSnapshot(allocator: mem.Allocator, snapshot_path: []const u8) ![]const u8
 fn normalizeWhitespace(allocator: mem.Allocator, s: []const u8) ![]const u8 {
     var result: std.ArrayList(u8) = .empty;
     errdefer result.deinit(allocator);
-    
+
     var i: usize = 0;
     var last_was_space = false;
-    
+
     while (i < s.len) {
         const c = s[i];
         if (c == '\r') {
@@ -59,7 +59,7 @@ fn normalizeWhitespace(allocator: mem.Allocator, s: []const u8) ![]const u8 {
         }
         i += 1;
     }
-    
+
     return try result.toOwnedSlice(allocator);
 }
 
@@ -79,8 +79,7 @@ fn compareSnapshots(allocator: mem.Allocator, actual: []const u8, expected_path:
         std.debug.print("Expected snapshot: {s}\n\n", .{expected_path});
         std.debug.print("=== EXPECTED (normalized) ===\n{s}\n", .{expected_normalized});
         std.debug.print("=== ACTUAL (normalized) ===\n{s}\n", .{actual_normalized});
-        
-        // Show byte-by-byte diff for first mismatch
+
         const min_len = @min(actual_normalized.len, expected_normalized.len);
         for (0..min_len) |i| {
             if (actual_normalized[i] != expected_normalized[i]) {
@@ -127,7 +126,6 @@ fn trimTrailingNewlines(s: []const u8) []const u8 {
 }
 
 fn testSnapshot(allocator: mem.Allocator, document: *const Document, role: enum { client, server }, protocol_name: []const u8, arena: mem.Allocator) !void {
-    // Generate code
     const generated = switch (role) {
         .client => generateClientCode(document),
         .server => try generateServerCode(arena, document),
@@ -150,7 +148,6 @@ fn testProtocol(allocator: mem.Allocator, proto_filename: []const u8) !void {
     const proto_path = try std.fmt.allocPrint(allocator, "{s}/{s}", .{ PROTOCOL_DIR, proto_filename });
     defer allocator.free(proto_path);
 
-    // Read and parse the protocol file
     var input_file = try fs.cwd().openFile(proto_path, .{});
     defer input_file.close();
 
@@ -164,7 +161,6 @@ fn testProtocol(allocator: mem.Allocator, proto_filename: []const u8) !void {
     const protocol_name = try extractProtocolName(allocator, &document);
     defer allocator.free(protocol_name);
 
-    // Test both client and server generation
     try testSnapshot(allocator, &document, .client, protocol_name, arena);
     try testSnapshot(allocator, &document, .server, protocol_name, arena);
 }

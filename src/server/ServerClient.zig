@@ -1,7 +1,10 @@
-const std = @import("std");
 const c = @cImport(@cInclude("sys/socket.h"));
+
+const std = @import("std");
 const root = @import("../root.zig");
 const builtin = @import("builtin");
+const messages = @import("../message/messages/root.zig");
+const types = @import("../implementation/types.zig");
 
 const posix = std.posix;
 const log = std.log;
@@ -11,9 +14,9 @@ const GenericProtocol = @import("../message/messages/GenericProtocolMessage.zig"
 const NewObject = @import("../message/messages/NewObject.zig");
 const ServerObject = @import("ServerObject.zig");
 const ServerSocket = @import("ServerSocket.zig");
-const Message = @import("../message/messages/Message.zig");
-const types = @import("../implementation/types.zig");
 
+const Message = messages.Message;
+const parseData = messages.parseData;
 const steadyMillis = root.steadyMillis;
 
 fn CMSG_DATA(cmsg: *c.struct_cmsghdr) [*]u8 {
@@ -76,7 +79,9 @@ pub fn dispatchFirstPoll(self: *Self) !void {
 }
 
 pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: anytype) void {
-    const parsed = message.base.parseData(gpa) catch |err| {
+    comptime Message(@TypeOf(message));
+
+    const parsed = parseData(gpa, message) catch |err| {
         log.debug("[{} @ {}] -> parse error: {}", .{ self.fd, steadyMillis(), err });
         return;
     };
@@ -86,8 +91,8 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: anytype) void
     const fds = message.fds();
 
     var io: posix.iovec = .{
-        .base = @constCast(message.base.data.ptr),
-        .len = message.base.data.len,
+        .base = @constCast(message.data.ptr),
+        .len = message.data.len,
     };
     var msg: c.msghdr = .{
         .msg_iov = @ptrCast(&io),

@@ -1,5 +1,4 @@
 const std = @import("std");
-const hw = @import("hyprwire");
 
 const posix = std.posix;
 const fmt = std.fmt;
@@ -16,7 +15,5 @@ pub fn main() !void {
     const socket_path = try fmt.allocPrint(alloc, "{s}/test-hw.sock", .{xdg_runtime_dir});
     defer alloc.free(socket_path);
 
-    // Client implementation can be added here
-    // For now, this is a placeholder that just validates the socket path
     std.debug.print("Client would connect to: {s}\n", .{socket_path});
 }

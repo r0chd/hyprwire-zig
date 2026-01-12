@@ -1,11 +1,12 @@
 const std = @import("std");
 const mem = std.mem;
 
-const Message = @import("Message.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 
-base: Message,
+data: []const u8,
+message_type: MessageType = .invalid,
+len: usize = 0,
 
 const Self = @This();
 
@@ -35,11 +36,9 @@ pub fn init(gpa: mem.Allocator, protocol: []const u8, seq: u32, version: u32) !S
     const data_slice = try data.toOwnedSlice(gpa);
 
     return Self{
-        .base = Message{
-            .data = data_slice,
-            .len = data_slice.len,
-            .message_type = .bind_protocol,
-        },
+        .data = data_slice,
+        .len = data_slice.len,
+        .message_type = .bind_protocol,
     };
 }
 
@@ -86,11 +85,9 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     const message_len = needle - offset;
 
     return Self{
-        .base = Message{
-            .data = data[offset..],
-            .len = message_len,
-            .message_type = .bind_protocol,
-        },
+        .data = data[offset..],
+        .len = message_len,
+        .message_type = .bind_protocol,
     };
 }
 
@@ -100,5 +97,40 @@ pub fn fds(self: *const Self) []const i32 {
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    gpa.free(self.base.data);
+    gpa.free(self.data);
+}
+
+test "BindProtocol" {
+    const ServerClient = @import("../../server/ServerClient.zig");
+
+    const alloc = std.testing.allocator;
+
+    {
+        var message = try Self.init(alloc, "test@1", 5, 1);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][UINT_magic][seq:4][VARCHAR_magic][varint_len][protocol][UINT_magic][version:4][END]
+        // protocol = "test@1" (6 bytes), varint encoding of 6 = 0x06
+        // seq = 5 (0x05 0x00 0x00 0x00)
+        // version = 1 (0x01 0x00 0x00 0x00)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.bind_protocol),
+            @intFromEnum(MessageMagic.type_uint),
+            0x05,                                    0x00, 0x00, 0x00, // seq = 5
+            @intFromEnum(MessageMagic.type_varchar),
+            0x06, // varint length = 6
+            't',                                  'e', 's', 't', '@', '1', // protocol = "test@1"
+            @intFromEnum(MessageMagic.type_uint),
+            0x01,                           0x00, 0x00, 0x00, // version = 1
+            @intFromEnum(MessageMagic.end),
+        };
+        const message = try Self.fromBytes(&bytes, 0);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
 }

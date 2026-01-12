@@ -1,12 +1,13 @@
 const std = @import("std");
 const mem = std.mem;
 
-const Message = @import("Message.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 
 protocols: [][]const u8,
-base: Message,
+data: []const u8,
+message_type: MessageType = .invalid,
+len: usize = 0,
 
 const Self = @This();
 
@@ -54,11 +55,9 @@ pub fn init(gpa: mem.Allocator, protocol_list: []const []const u8) !Self {
     }
 
     return Self{
-        .base = Message{
-            .data = data_slice,
-            .len = data_slice.len,
-            .message_type = .handshake_protocols,
-        },
+        .data = data_slice,
+        .len = data_slice.len,
+        .message_type = .handshake_protocols,
         .protocols = protocols_slice,
     };
 }
@@ -124,13 +123,11 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     const message_len = needle - offset;
 
     return Self{
-        .base = Message{
-            // Let's allocate to keep it consistent with data being
-            // allocated on heap in init()
-            .data = try gpa.dupe(u8, data[offset..]),
-            .len = message_len,
-            .message_type = .handshake_protocols,
-        },
+        // Let's allocate to keep it consistent with data being
+        // allocated on heap in init()
+        .data = try gpa.dupe(u8, data[offset..]),
+        .len = message_len,
+        .message_type = .handshake_protocols,
         .protocols = protocols_slice,
     };
 }
@@ -145,5 +142,42 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
         gpa.free(protocol);
     }
     gpa.free(self.protocols);
-    gpa.free(self.base.data);
+    gpa.free(self.data);
+}
+
+test "HandshakeProtocols" {
+    const ServerClient = @import("../../server/ServerClient.zig");
+
+    const alloc = std.testing.allocator;
+
+    {
+        const protocols = [_][]const u8{ "test@1", "test2@2" };
+        var message = try Self.init(alloc, &protocols);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][ARRAY_magic][VARCHAR_magic][varint_arr_len][varint_str_len][str]...[END]
+        // Array length = 2 (0x02)
+        // First string: "test@1" (6 bytes, varint = 0x06)
+        // Second string: "test2@2" (7 bytes, varint = 0x07)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.handshake_protocols),
+            @intFromEnum(MessageMagic.type_array),
+            @intFromEnum(MessageMagic.type_varchar),
+            0x02, // array length = 2
+            0x06, // first string length = 6
+            't', 'e', 's', 't', '@', '1', // "test@1"
+            0x07, // second string length = 7
+            't',                            'e', 's', 't', '2', '@', '2', // "test2@2"
+            @intFromEnum(MessageMagic.end),
+        };
+        var message = try Self.fromBytes(alloc, &bytes, 0);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
 }

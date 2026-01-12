@@ -2,14 +2,14 @@ const std = @import("std");
 const types = @import("../implementation/types.zig");
 
 const mem = std.mem;
-const log = std.log;
 
 const FatalErrorMessage = @import("../message/messages/FatalProtocolError.zig");
 const ServerSocket = @import("ServerSocket.zig");
 const ServerClient = @import("ServerClient.zig");
 const WireObject = @import("../implementation/WireObject.zig");
-const Method = types.Method;
 const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
+const Message = @import("../message/messages/root.zig");
+const Method = types.Method;
 
 base: WireObject,
 client: ?*ServerClient,
@@ -46,6 +46,8 @@ pub fn errd(self: *Self) void {
 }
 
 pub fn sendMessage(self: *Self, gpa: mem.Allocator, msg: anytype) void {
+    comptime Message(@TypeOf(msg));
+
     if (self.client) |client| {
         client.sendMessage(gpa, msg);
     }

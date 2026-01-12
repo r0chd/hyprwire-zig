@@ -1,7 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
 
-const Message = @import("Message.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 
@@ -9,7 +8,9 @@ object: u32 = 0,
 method: u32 = 0,
 data_span: []const u8,
 fds_list: []const i32,
-base: Message,
+data: []const u8,
+message_type: MessageType = .invalid,
+len: usize = 0,
 
 const Self = @This();
 
@@ -18,11 +19,9 @@ pub fn init(gpa: mem.Allocator, data: []const u8, fds_list: []const i32) !Self {
     const fds_copy = try gpa.dupe(i32, fds_list);
 
     return Self{
-        .base = Message{
-            .data = data_copy,
-            .len = data_copy.len,
-            .message_type = .generic_protocol_message,
-        },
+        .data = data_copy,
+        .len = data_copy.len,
+        .message_type = .generic_protocol_message,
         .object = 0,
         .method = 0,
         .data_span = data_copy,
@@ -138,11 +137,9 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
     const fds_copy = try fds_consumed.toOwnedSlice(gpa);
 
     return Self{
-        .base = Message{
-            .data = data_copy,
-            .len = message_len,
-            .message_type = .generic_protocol_message,
-        },
+        .data = data_copy,
+        .len = message_len,
+        .message_type = .generic_protocol_message,
         .object = object_id,
         .method = method_id,
         .data_span = data_copy[11..],
@@ -156,5 +153,47 @@ pub fn fds(self: *const Self) []const i32 {
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.fds_list);
-    gpa.free(self.base.data);
+    gpa.free(self.data);
+}
+
+test "GenericProtocolMessage" {
+    const ServerClient = @import("../../server/ServerClient.zig");
+
+    const alloc = std.testing.allocator;
+
+    {
+        const data = [_]u8{
+            @intFromEnum(MessageType.generic_protocol_message),
+            @intFromEnum(MessageMagic.type_object),
+            0x01,                                 0x00, 0x00, 0x00, // object = 1
+            @intFromEnum(MessageMagic.type_uint),
+            0x02,                           0x00, 0x00, 0x00, // method = 2
+            @intFromEnum(MessageMagic.end),
+        };
+        var message = try Self.init(alloc, &data, &.{});
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][OBJECT_magic][object:4][UINT_magic][method:4][...data...][END]
+        // object = 1 (0x01 0x00 0x00 0x00)
+        // method = 2 (0x02 0x00 0x00 0x00)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.generic_protocol_message),
+            @intFromEnum(MessageMagic.type_object),
+            0x01,                                 0x00, 0x00, 0x00, // object = 1
+            @intFromEnum(MessageMagic.type_uint),
+            0x02,                           0x00, 0x00, 0x00, // method = 2
+            @intFromEnum(MessageMagic.end),
+        };
+        var fds_list: std.ArrayList(i32) = .empty;
+        defer fds_list.deinit(alloc);
+        var message = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
 }

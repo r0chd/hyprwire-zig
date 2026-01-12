@@ -1,12 +1,13 @@
 const std = @import("std");
 const mem = std.mem;
 
-const Message = @import("Message.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 
 versions: []const u32,
-base: Message,
+data: []const u8,
+message_type: MessageType = .invalid,
+len: usize = 0,
 
 const Self = @This();
 
@@ -36,11 +37,9 @@ pub fn init(gpa: mem.Allocator, versions_list: []const u32) !Self {
     const versions_slice = try gpa.dupe(u32, versions_list);
 
     return Self{
-        .base = Message{
-            .data = data_slice,
-            .len = data_slice.len,
-            .message_type = .handshake_begin,
-        },
+        .data = data_slice,
+        .len = data_slice.len,
+        .message_type = .handshake_begin,
         .versions = versions_slice,
     };
 }
@@ -74,7 +73,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     errdefer gpa.free(versions_slice);
 
     for (0..arr_len) |i| {
-        versions_slice[i] = mem.readInt(u32, data[needle + (i * 4)..][0..4], .little);
+        versions_slice[i] = mem.readInt(u32, data[needle + (i * 4) ..][0..4], .little);
     }
 
     needle += arr_len * 4;
@@ -85,11 +84,9 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     const message_len = needle - offset;
 
     return Self{
-        .base = Message{
-            .data = try gpa.dupe(u8, data[offset..]),
-            .len = message_len,
-            .message_type = .handshake_begin,
-        },
+        .data = try gpa.dupe(u8, data[offset..]),
+        .len = message_len,
+        .message_type = .handshake_begin,
         .versions = versions_slice,
     };
 }
@@ -101,5 +98,40 @@ pub fn fds(self: *const Self) []const i32 {
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.versions);
-    gpa.free(self.base.data);
+    gpa.free(self.data);
+}
+
+test "HandshakeBegin" {
+    const ServerClient = @import("../../server/ServerClient.zig");
+
+    const alloc = std.testing.allocator;
+
+    {
+        const versions = [_]u32{ 1, 2 };
+        var message = try Self.init(alloc, &versions);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
+    {
+        // Message format: [type][ARRAY_magic][UINT_magic][varint_arr_len][version1:4][version2:4]...[END]
+        // Array length = 2 (0x02)
+        // version1 = 1 (0x01 0x00 0x00 0x00)
+        // version2 = 2 (0x02 0x00 0x00 0x00)
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.handshake_begin),
+            @intFromEnum(MessageMagic.type_array),
+            @intFromEnum(MessageMagic.type_uint),
+            0x02, // array length = 2
+            0x01, 0x00, 0x00, 0x00, // version = 1
+            0x02,                           0x00, 0x00, 0x00, // version = 2
+            @intFromEnum(MessageMagic.end),
+        };
+        var message = try Self.fromBytes(alloc, &bytes, 0);
+        defer message.deinit(alloc);
+
+        const server_client = try ServerClient.init(0);
+        server_client.sendMessage(alloc, message);
+    }
 }
