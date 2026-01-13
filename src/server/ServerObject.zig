@@ -45,7 +45,7 @@ pub fn errd(self: *Self) void {
     }
 }
 
-pub fn sendMessage(self: *Self, gpa: mem.Allocator, msg: anytype) void {
+pub fn sendMessage(self: *Self, gpa: mem.Allocator, msg: *const Message) void {
     comptime Message(@TypeOf(msg));
 
     if (self.client) |client| {
@@ -71,7 +71,7 @@ pub fn serverSock(self: *const Self) ?*ServerSocket {
 pub fn err(self: *Self, gpa: mem.Allocator, id: u32, message: [:0]const u8) !void {
     const msg = try FatalErrorMessage.init(gpa, self.base.id, id, message);
     if (self.client) |client| {
-        client.sendMessage(gpa, msg);
+        client.sendMessage(gpa, &msg.interface);
     }
     self.errd();
 }

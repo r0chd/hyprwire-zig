@@ -3,7 +3,7 @@ const types = @import("../implementation/types.zig");
 
 const mem = std.mem;
 
-const Message = @import("../message/messages/root.zig").Message;
+const Message = @import("../message/messages/root.zig");
 const ClientSocket = @import("ClientSocket.zig");
 const WireObject = @import("../implementation/WireObject.zig");
 const Method = types.Method;
@@ -42,9 +42,7 @@ pub fn errd(self: *Self) void {
     }
 }
 
-pub fn sendMessage(self: *Self, message: anytype) void {
-    comptime Message(@TypeOf(message));
-
+pub fn sendMessage(self: *Self, message: *const Message) void {
     if (self.client) |client| {
         client.sendMessage(message);
     }

@@ -3,14 +3,13 @@ const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
+const Message = @import("root.zig");
 
 object: u32 = 0,
 method: u32 = 0,
 data_span: []const u8,
 fds_list: []const i32,
-data: []const u8,
-message_type: MessageType = .invalid,
-len: usize = 0,
+interface: Message,
 
 const Self = @This();
 
@@ -19,13 +18,16 @@ pub fn init(gpa: mem.Allocator, data: []const u8, fds_list: []const i32) !Self {
     const fds_copy = try gpa.dupe(i32, fds_list);
 
     return Self{
-        .data = data_copy,
-        .len = data_copy.len,
-        .message_type = .generic_protocol_message,
         .object = 0,
         .method = 0,
         .data_span = data_copy,
         .fds_list = fds_copy,
+        .interface = .{
+            .data = data_copy,
+            .len = data_copy.len,
+            .message_type = .generic_protocol_message,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
@@ -137,23 +139,27 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
     const fds_copy = try fds_consumed.toOwnedSlice(gpa);
 
     return Self{
-        .data = data_copy,
-        .len = message_len,
-        .message_type = .generic_protocol_message,
         .object = object_id,
         .method = method_id,
         .data_span = data_copy[11..],
         .fds_list = fds_copy,
+        .interface = .{
+            .data = data_copy,
+            .len = message_len,
+            .message_type = .generic_protocol_message,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
-pub fn fds(self: *const Self) []const i32 {
+pub fn fdsFn(ptr: *const Message) []const i32 {
+    const self: *const Self = @fieldParentPtr("interface", ptr);
     return self.fds_list;
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.fds_list);
-    gpa.free(self.data);
+    gpa.free(self.interface.data);
 }
 
 test "GenericProtocolMessage" {
@@ -180,7 +186,7 @@ test "GenericProtocolMessage" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
     {
         // Message format: [type][OBJECT_magic][object:4][UINT_magic][method:4][...data...][END]
@@ -205,6 +211,6 @@ test "GenericProtocolMessage" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
 }

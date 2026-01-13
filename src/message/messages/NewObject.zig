@@ -4,12 +4,11 @@ const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
+const Message = @import("root.zig");
 
 id: u32,
 seq: u32,
-data: []const u8,
-message_type: MessageType = .invalid,
-len: usize = 0,
+interface: Message,
 
 const Self = @This();
 
@@ -33,11 +32,14 @@ pub fn init(seq: u32, id: u32) Self {
     mem.writeInt(u32, data[7..11], seq, .little);
 
     return Self{
-        .data = &data,
-        .len = data.len,
-        .message_type = .new_object,
         .id = id,
         .seq = seq,
+        .interface = .{
+            .data = &data,
+            .len = data.len,
+            .message_type = .new_object,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
@@ -51,27 +53,30 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     if (data[offset + 1] != @intFromEnum(MessageMagic.type_uint))
         return error.InvalidMessage;
 
-    const id = mem.readVarInt(u32, data[offset + 2 .. offset + 6], .little);
+    const id = mem.readInt(u32, data[offset + 2 .. offset + 6][0..4], .little);
 
     if (data[offset + 6] != @intFromEnum(MessageMagic.type_uint))
         return error.InvalidMessage;
 
-    const seq = mem.readVarInt(u32, data[offset + 7 .. offset + 11], .little);
+    const seq = mem.readInt(u32, data[offset + 7 .. offset + 11][0..4], .little);
 
     if (data[offset + 11] != @intFromEnum(MessageMagic.end))
         return error.InvalidMessage;
 
     return Self{
-        .data = data[offset .. offset + 12],
-        .len = 12,
-        .message_type = .new_object,
         .id = id,
         .seq = seq,
+        .interface = .{
+            .data = data,
+            .len = 12,
+            .message_type = .new_object,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
-pub fn fds(self: *const Self) []const i32 {
-    _ = self;
+pub fn fdsFn(ptr: *const Message) []const i32 {
+    _ = ptr;
     return &.{};
 }
 
@@ -90,7 +95,7 @@ test "NewObject" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
     {
         const bytes = [_]u8{
@@ -109,6 +114,6 @@ test "NewObject" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
 }

@@ -3,7 +3,7 @@ const c = @cImport(@cInclude("sys/socket.h"));
 const std = @import("std");
 const root = @import("../root.zig");
 const builtin = @import("builtin");
-const messages = @import("../message/messages/root.zig");
+const Message = @import("../message/messages/root.zig");
 const types = @import("../implementation/types.zig");
 const helpers = @import("helpers");
 
@@ -17,8 +17,6 @@ const ServerObject = @import("ServerObject.zig");
 const ServerSocket = @import("ServerSocket.zig");
 
 const Fd = helpers.Fd;
-const Message = messages.Message;
-const parseData = messages.parseData;
 const steadyMillis = root.steadyMillis;
 
 fn CMSG_DATA(cmsg: *c.struct_cmsghdr) [*]u8 {
@@ -81,10 +79,8 @@ pub fn dispatchFirstPoll(self: *Self) void {
     self.pid = cred.pid;
 }
 
-pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: anytype) void {
-    comptime Message(@TypeOf(message));
-
-    const parsed = parseData(gpa, message) catch |err| {
+pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: *const Message) void {
+    const parsed = message.parseData(gpa) catch |err| {
         log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
         return;
     };
@@ -184,7 +180,7 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
     errdefer gpa.free(obj.base.protocol_name);
 
     const ret = NewObject.init(seq, obj.base.id);
-    self.sendMessage(gpa, ret);
+    self.sendMessage(gpa, &ret.interface);
 
     self.onBind(obj);
 

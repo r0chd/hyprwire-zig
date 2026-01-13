@@ -3,11 +3,10 @@ const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
+const Message = @import("root.zig");
 
 versions: []const u32,
-data: []const u8,
-message_type: MessageType = .invalid,
-len: usize = 0,
+interface: Message,
 
 const Self = @This();
 
@@ -37,10 +36,13 @@ pub fn init(gpa: mem.Allocator, versions_list: []const u32) !Self {
     const versions_slice = try gpa.dupe(u32, versions_list);
 
     return Self{
-        .data = data_slice,
-        .len = data_slice.len,
-        .message_type = .handshake_begin,
         .versions = versions_slice,
+        .interface = .{
+            .data = data_slice,
+            .len = data_slice.len,
+            .message_type = .handshake_begin,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
@@ -83,22 +85,27 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     const message_len = needle - offset;
 
+    const data_copy = try gpa.dupe(u8, data[offset..]);
+
     return Self{
-        .data = try gpa.dupe(u8, data[offset..]),
-        .len = message_len,
-        .message_type = .handshake_begin,
         .versions = versions_slice,
+        .interface = .{
+            .data = data_copy,
+            .len = message_len,
+            .message_type = .handshake_begin,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
-pub fn fds(self: *const Self) []const i32 {
-    _ = self;
+pub fn fdsFn(ptr: *const Message) []const i32 {
+    _ = ptr;
     return &.{};
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.versions);
-    gpa.free(self.data);
+    gpa.free(self.interface.data);
 }
 
 test "HandshakeBegin" {
@@ -118,7 +125,7 @@ test "HandshakeBegin" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
     {
         // Message format: [type][ARRAY_magic][UINT_magic][varint_arr_len][version1:4][version2:4]...[END]
@@ -143,6 +150,6 @@ test "HandshakeBegin" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
 }

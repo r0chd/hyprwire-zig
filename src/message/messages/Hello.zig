@@ -4,10 +4,9 @@ const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
+const Message = @import("root.zig");
 
-data: []const u8,
-message_type: MessageType = .invalid,
-len: usize = 0,
+interface: Message,
 
 const Self = @This();
 
@@ -22,10 +21,13 @@ pub fn init() Self {
         @intFromEnum(MessageMagic.end),
     };
 
-    return Self{
-        .data = data,
-        .len = data.len,
-        .message_type = .sup,
+    return .{
+        .interface = .{
+            .data = data,
+            .len = data.len,
+            .message_type = .sup,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
@@ -44,15 +46,18 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
 
     if (!mem.eql(u8, &expected, data[offset .. offset + 7])) return error.InvalidMessage;
 
-    return Self{
-        .data = data,
-        .len = expected.len,
-        .message_type = .sup,
+    return .{
+        .interface = .{
+            .data = data,
+            .len = expected.len,
+            .message_type = .sup,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
-pub fn fds(self: *const Self) []const i32 {
-    _ = self;
+pub fn fdsFn(ptr: *const Message) []const i32 {
+    _ = ptr;
     return &.{};
 }
 
@@ -71,7 +76,7 @@ test "Hello" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
     {
         const bytes = [_]u8{
@@ -91,6 +96,6 @@ test "Hello" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
 }

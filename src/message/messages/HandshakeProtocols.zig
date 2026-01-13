@@ -3,11 +3,10 @@ const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
+const Message = @import("root.zig");
 
 protocols: [][]const u8,
-data: []const u8,
-message_type: MessageType = .invalid,
-len: usize = 0,
+interface: Message,
 
 const Self = @This();
 
@@ -55,10 +54,13 @@ pub fn init(gpa: mem.Allocator, protocol_list: []const []const u8) !Self {
     }
 
     return Self{
-        .data = data_slice,
-        .len = data_slice.len,
-        .message_type = .handshake_protocols,
         .protocols = protocols_slice,
+        .interface = .{
+            .data = data_slice,
+            .len = data_slice.len,
+            .message_type = .handshake_protocols,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
@@ -122,18 +124,21 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     const message_len = needle - offset;
 
+    const data_copy = try gpa.dupe(u8, data[offset..]);
+
     return Self{
-        // Let's allocate to keep it consistent with data being
-        // allocated on heap in init()
-        .data = try gpa.dupe(u8, data[offset..]),
-        .len = message_len,
-        .message_type = .handshake_protocols,
         .protocols = protocols_slice,
+        .interface = .{
+            .data = data_copy,
+            .len = message_len,
+            .message_type = .handshake_protocols,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
-pub fn fds(self: *const Self) []const i32 {
-    _ = self;
+pub fn fdsFn(ptr: *const Message) []const i32 {
+    _ = ptr;
     return &.{};
 }
 
@@ -142,7 +147,7 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
         gpa.free(protocol);
     }
     gpa.free(self.protocols);
-    gpa.free(self.data);
+    gpa.free(self.interface.data);
 }
 
 test "HandshakeProtocols" {
@@ -162,7 +167,7 @@ test "HandshakeProtocols" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
     {
         // Message format: [type][ARRAY_magic][VARCHAR_magic][varint_arr_len][varint_str_len][str]...[END]
@@ -189,6 +194,6 @@ test "HandshakeProtocols" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
 }

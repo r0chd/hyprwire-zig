@@ -3,13 +3,12 @@ const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
+const Message = @import("root.zig");
 
 object_id: u32 = 0,
 error_id: u32 = 0,
 error_msg: []const u8,
-data: []const u8,
-message_type: MessageType = .invalid,
-len: usize = 0,
+interface: Message,
 
 const Self = @This();
 
@@ -41,12 +40,15 @@ pub fn init(gpa: mem.Allocator, object_id: u32, error_id: u32, error_msg: []cons
     const error_msg_copy = try gpa.dupe(u8, error_msg);
 
     return Self{
-        .data = data_slice,
-        .len = data_slice.len,
-        .message_type = .fatal_protocol_error,
         .object_id = object_id,
         .error_id = error_id,
         .error_msg = error_msg_copy,
+        .interface = .{
+            .data = data_slice,
+            .len = data_slice.len,
+            .message_type = .fatal_protocol_error,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
@@ -91,24 +93,29 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     const message_len = needle - offset;
 
+    const data_copy = try gpa.dupe(u8, data[offset..]);
+
     return Self{
-        .data = try gpa.dupe(u8, data[offset..]),
-        .len = message_len,
-        .message_type = .fatal_protocol_error,
         .object_id = object_id,
         .error_id = error_id,
         .error_msg = error_msg_copy,
+        .interface = .{
+            .data = data_copy,
+            .len = message_len,
+            .message_type = .fatal_protocol_error,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
-pub fn fds(self: *const Self) []const i32 {
-    _ = self;
+pub fn fdsFn(ptr: *const Message) []const i32 {
+    _ = ptr;
     return &.{};
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.error_msg);
-    gpa.free(self.data);
+    gpa.free(self.interface.data);
 }
 
 test "FatalProtocolError" {
@@ -127,7 +134,7 @@ test "FatalProtocolError" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
     {
         // Message format: [type][UINT_magic][objectId:4][UINT_magic][errorId:4][VARCHAR_magic][varint_len][errorMsg][END]
@@ -154,6 +161,6 @@ test "FatalProtocolError" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
 }

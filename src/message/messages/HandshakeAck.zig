@@ -3,11 +3,10 @@ const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
+const Message = @import("root.zig");
 
 version: u32 = 0,
-data: []const u8,
-message_type: MessageType = .invalid,
-len: usize = 0,
+interface: Message,
 
 const Self = @This();
 
@@ -25,10 +24,13 @@ pub fn init(version: u32) Self {
     mem.writeInt(u32, data[2..6], version, .little);
 
     return Self{
-        .data = &data,
-        .len = data.len,
-        .message_type = .handshake_ack,
         .version = version,
+        .interface = .{
+            .data = &data,
+            .len = data.len,
+            .message_type = .handshake_ack,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
@@ -44,15 +46,18 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     if (data[offset + 6] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
 
     return Self{
-        .data = data[offset..],
-        .len = 7,
-        .message_type = .handshake_ack,
         .version = version,
+        .interface = .{
+            .data = data,
+            .len = 7,
+            .message_type = .handshake_ack,
+            .fdsFn = Self.fdsFn,
+        },
     };
 }
 
-pub fn fds(self: *const Self) []const i32 {
-    _ = self;
+pub fn fdsFn(ptr: *const Message) []const i32 {
+    _ = ptr;
     return &.{};
 }
 
@@ -71,7 +76,7 @@ test "HandshakeAck" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
     {
         // Message format: [type][UINT_magic][version:4][END]
@@ -90,6 +95,6 @@ test "HandshakeAck" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, message);
+        server_client.sendMessage(alloc, &message.interface);
     }
 }

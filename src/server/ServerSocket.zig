@@ -373,7 +373,7 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
             client.@"error" = true;
             return;
         };
-        client.sendMessage(gpa, fatal_msg);
+        client.sendMessage(gpa, &fatal_msg.interface);
         client.@"error" = true;
         return;
     }
@@ -387,13 +387,14 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
             client.@"error" = true;
             return;
         };
-        client.sendMessage(gpa, fatal_msg);
+        client.sendMessage(gpa, &fatal_msg.interface);
         client.@"error" = true;
         return;
     }
 
     if (client.scheduled_roundtrip_seq > 0) {
-        client.sendMessage(gpa, RoundtripDone.init(client.scheduled_roundtrip_seq));
+        const roundtrip_done = RoundtripDone.init(client.scheduled_roundtrip_seq);
+        client.sendMessage(gpa, &roundtrip_done.interface);
         client.scheduled_roundtrip_seq = 0;
     }
 }

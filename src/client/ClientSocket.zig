@@ -1,6 +1,6 @@
 const std = @import("std");
 const types = @import("../implementation/types.zig");
-const message = @import("../message/messages/root.zig");
+const Message = @import("../message/messages/root.zig");
 const helpers = @import("helpers");
 
 const mem = std.mem;
@@ -10,11 +10,9 @@ const fs = std.fs;
 
 const ClientObject = @import("ClientObject.zig");
 
-const Message = message.Message;
 const ProtocolClientImplementation = types.ProtocolClientImplementation;
 const ProtocolSpec = types.ProtocolSpec;
 
-const parseData = message.parseData;
 const steadyMillis = @import("../root.zig").steadyMillis;
 
 fd: i32,
@@ -27,6 +25,7 @@ objects: std.ArrayList(ClientObject) = .empty,
 const Self = @This();
 
 pub fn open(gpa: mem.Allocator, path: [:0]const u8) !Self {
+    _ = path;
     const sock = try gpa.create(Self);
     sock.* = .{};
 }
@@ -53,12 +52,11 @@ pub fn attempt(self: *Self, path: [:0]const u8) void {
         };
         break :blk false;
     };
+    _ = failure;
 }
 
-pub fn sendMessage(self: *Self, gpa: mem.Allocator, msg: anytype) void {
-    comptime Message(msg);
-
-    const parsed = parseData(gpa, msg) catch |err| {
+pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: *const Message) void {
+    const parsed = message.parseData(gpa) catch |err| {
         log.debug("[{} @ {}] -> parse error: {}", .{ self.fd, steadyMillis(), err });
         return;
     };
