@@ -12,7 +12,6 @@ interface: Message,
 
 const Self = @This();
 
-// TODO: rething error_id
 pub fn init(gpa: mem.Allocator, object_id: u32, error_id: u32, error_msg: []const u8) !Self {
     var data: std.ArrayList(u8) = .empty;
     errdefer data.deinit(gpa);

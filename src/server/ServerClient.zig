@@ -68,7 +68,7 @@ pub fn dispatchFirstPoll(self: *Self) void {
     var cred: Credential = undefined;
 
     posix.getsockopt(
-        self.fd,
+        self.fd.raw,
         posix.SOL.SOCKET,
         posix.SO.PEERCRED,
         std.mem.asBytes(&cred),
@@ -133,10 +133,10 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
     const obj = try gpa.create(ServerObject);
     errdefer gpa.destroy(obj);
     obj.* = ServerObject.init(self);
-    obj.base.id = self.max_id;
+    obj.interface.id = self.max_id;
     self.max_id += 1;
-    obj.base.self = obj;
-    obj.base.version = version;
+    obj.interface.self = obj;
+    obj.interface.version = version;
     try self.objects.append(gpa, obj);
 
     var found_spec: ?*const types.ProtocolObjectSpec = null;
@@ -155,13 +155,13 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
         protocol_name = protocol_spec.specName();
 
         if (found_spec == null) {
-            log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd, steadyMillis() });
+            log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd.raw, steadyMillis() });
             self.@"@\"error\"" = true;
             return null;
         }
 
         if (protocol_spec.specVer() < version) {
-            log.err("[{} @ {}] Error: createObject for protocol {s} object {s} for version {}, but we have only {}", .{ self.fd, steadyMillis(), protocol_name, object, version, protocol_spec.specVer() });
+            log.err("[{} @ {}] Error: createObject for protocol {s} object {s} for version {}, but we have only {}", .{ self.fd.raw, steadyMillis(), protocol_name, object, version, protocol_spec.specVer() });
             self.@"@\"error\"" = true;
             return null;
         }
@@ -170,16 +170,16 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
     }
 
     if (found_spec == null) {
-        log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd, steadyMillis() });
+        log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd.raw, steadyMillis() });
         self.@"@\"error\"" = true;
         return null;
     }
 
-    obj.base.spec = found_spec;
-    obj.base.protocol_name = try gpa.dupe(u8, protocol_name);
-    errdefer gpa.free(obj.base.protocol_name);
+    obj.interface.spec = found_spec;
+    obj.interface.protocol_name = try gpa.dupe(u8, protocol_name);
+    errdefer gpa.free(obj.interface.protocol_name);
 
-    const ret = NewObject.init(seq, obj.base.id);
+    const ret = NewObject.init(seq, obj.interface.id);
     self.sendMessage(gpa, &ret.interface);
 
     self.onBind(obj);
@@ -190,12 +190,12 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
 pub fn onBind(self: *Self, obj: *ServerObject) void {
     if (self.server) |server| {
         for (server.impls.items) |impl| {
-            if (!mem.eql(u8, impl.protocol().spec_name, obj.base.protocol_name)) {
+            if (!mem.eql(u8, impl.protocol().spec_name, obj.interface.protocol_name)) {
                 continue;
             }
 
             for (impl.implementations) |implementation| {
-                if (mem.eql(u8, implementation.object_name, obj.base.spec.?.objectName())) {
+                if (mem.eql(u8, implementation.object_name, obj.interface.spec.?.objectName())) {
                     continue;
                 }
 
@@ -212,7 +212,7 @@ pub fn onBind(self: *Self, obj: *ServerObject) void {
 
 pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: GenericProtocol) !void {
     for (self.objects.items) |obj| {
-        if (obj.base.id == msg.object) {
+        if (obj.interface.id == msg.object) {
             try obj.called(gpa, msg.method, msg.data_span, msg.fds_list);
             break;
         }

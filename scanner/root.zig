@@ -113,46 +113,6 @@ fn findChildElements(element: *const Node.Element, name: []const u8) std.ArrayLi
     return result;
 }
 
-fn parseType(type_str: []const u8, gpa: mem.Allocator) ![]const u8 {
-    if (mem.startsWith(u8, type_str, "array ")) {
-        const element_type = type_str[6..];
-        const element_magic = try parseType(element_type, gpa);
-        defer gpa.free(element_magic);
-        var result: std.ArrayList(u8) = .empty;
-        errdefer result.deinit(gpa);
-        try result.append(gpa, @intFromEnum(MessageMagic.type_array));
-        try result.appendSlice(gpa, element_magic);
-        return try result.toOwnedSlice(gpa);
-    } else if (mem.eql(u8, type_str, "varchar")) {
-        var result: std.ArrayList(u8) = .empty;
-        errdefer result.deinit(gpa);
-        try result.append(gpa, @intFromEnum(MessageMagic.type_varchar));
-        return try result.toOwnedSlice(gpa);
-    } else if (mem.eql(u8, type_str, "uint")) {
-        var result: std.ArrayList(u8) = .empty;
-        errdefer result.deinit(gpa);
-        try result.append(gpa, @intFromEnum(MessageMagic.type_uint));
-        return try result.toOwnedSlice(gpa);
-    } else if (mem.eql(u8, type_str, "int")) {
-        var result: std.ArrayList(u8) = .empty;
-        errdefer result.deinit(gpa);
-        try result.append(gpa, @intFromEnum(MessageMagic.type_int));
-        return try result.toOwnedSlice(gpa);
-    } else if (mem.eql(u8, type_str, "fd")) {
-        var result: std.ArrayList(u8) = .empty;
-        errdefer result.deinit(gpa);
-        try result.append(gpa, @intFromEnum(MessageMagic.type_fd));
-        return try result.toOwnedSlice(gpa);
-    } else if (mem.eql(u8, type_str, "enum")) {
-        var result: std.ArrayList(u8) = .empty;
-        errdefer result.deinit(gpa);
-        try result.append(gpa, @intFromEnum(MessageMagic.type_uint));
-        return try result.toOwnedSlice(gpa);
-    } else {
-        return error.UnknownType;
-    }
-}
-
 fn generateMethodParams(method: *const Node.Element, gpa: mem.Allocator) ![]const u8 {
     var params: std.ArrayList(u8) = .empty;
     errdefer params.deinit(gpa);
@@ -160,12 +120,7 @@ fn generateMethodParams(method: *const Node.Element, gpa: mem.Allocator) ![]cons
     for (method.children) |child| {
         switch (child) {
             .element => |e| {
-                if (mem.eql(u8, e.name, "arg")) {
-                    const type_attr = e.attributes.get("type") orelse return error.MissingType;
-                    const param_bytes = try parseType(type_attr, gpa);
-                    defer gpa.free(param_bytes);
-                    try params.appendSlice(gpa, param_bytes);
-                }
+                if (mem.eql(u8, e.name, "arg")) {}
             },
             else => {},
         }
@@ -207,117 +162,6 @@ pub fn generateServerCode(gpa: mem.Allocator, doc: *const Document) ![]const u8 
         \\    .spec_ver = {},
         \\    .objects = &.{{
     , .{ protocol_name, protocol_version });
-
-    var object_idx: u32 = 0;
-    for (protocol_elem.children) |child| {
-        switch (child) {
-            .element => |e| {
-                if (!mem.eql(u8, e.name, "object")) continue;
-
-                const object_name = e.attributes.get("name") orelse return error.MissingObjectName;
-                const object_version_str = e.attributes.get("version") orelse "1";
-                const object_version = try fmt.parseInt(u32, object_version_str, 10);
-
-                var c2s_methods: std.ArrayList(*const Node.Element) = .empty;
-                var s2c_methods: std.ArrayList(*const Node.Element) = .empty;
-
-                for (e.children) |method_child| {
-                    switch (method_child) {
-                        .element => |method_elem| {
-                            if (mem.eql(u8, method_elem.name, "c2s")) {
-                                try c2s_methods.append(gpa, &method_elem);
-                            } else if (mem.eql(u8, method_elem.name, "s2c")) {
-                                try s2c_methods.append(gpa, &method_elem);
-                            }
-                        },
-                        else => {},
-                    }
-                }
-
-                try writer.print(
-                    \\
-                    \\        ProtocolObjectSpec{{
-                    \\            .object_name = "{s}",
-                    \\            .c2s_methods = &.{{
-                , .{object_name});
-                try writer.writeAll("\n");
-
-                for (c2s_methods.items, 0..) |method, idx| {
-                    try writer.writeAll("                ");
-                    const params = try generateMethodParams(method, gpa);
-                    defer gpa.free(params);
-                    const has_returns = hasReturns(method);
-                    const returns_type = if (has_returns) "@intFromEnum(MessageMagic.type_seq)" else "\"\"";
-
-                    try writer.print("Method{{ .idx = {}, .params = &[_]u8{{", .{idx});
-                    if (params.len > 0) {
-                        for (params, 0..) |byte, i| {
-                            if (i > 0) try writer.writeAll(", ");
-                            const magic_name = switch (@as(MessageMagic, @enumFromInt(byte))) {
-                                MessageMagic.type_array => "type_array",
-                                MessageMagic.type_varchar => "type_varchar",
-                                MessageMagic.type_uint => "type_uint",
-                                MessageMagic.type_int => "type_int",
-                                MessageMagic.type_fd => "type_fd",
-                                MessageMagic.type_seq => "type_seq",
-                                else => return error.UnknownMagicType,
-                            };
-                            try writer.print("@intFromEnum(MessageMagic.{s})", .{magic_name});
-                        }
-                    }
-
-                    try writer.print("}}, .returns_type = {s}, .since = {} }},\n", .{ returns_type, object_version });
-                }
-
-                try writer.writeAll(
-                    \\            },
-                    \\            .s2c_methods = &.{
-                );
-                try writer.writeAll("\n");
-
-                for (s2c_methods.items, 0..) |method, idx| {
-                    const params = try generateMethodParams(method, gpa);
-                    defer gpa.free(params);
-                    const has_returns = hasReturns(method);
-                    const returns_type = if (has_returns) "@intFromEnum(MessageMagic.type_seq)" else "\"\"";
-
-                    try writer.print("                Method{{ .idx = {}, .params = &[_]u8{{", .{idx});
-
-                    if (params.len > 0) {
-                        for (params, 0..) |byte, i| {
-                            if (i > 0) try writer.writeAll(", ");
-                            const magic_name = switch (@as(MessageMagic, @enumFromInt(byte))) {
-                                MessageMagic.type_array => "type_array",
-                                MessageMagic.type_varchar => "type_varchar",
-                                MessageMagic.type_uint => "type_uint",
-                                MessageMagic.type_int => "type_int",
-                                MessageMagic.type_fd => "type_fd",
-                                MessageMagic.type_seq => "type_seq",
-                                else => return error.UnknownMagicType,
-                            };
-                            try writer.print("@intFromEnum(MessageMagic.{s})", .{magic_name});
-                        }
-                    }
-
-                    try writer.print("}}, .returns_type = {s}, .since = {} }},\n", .{ returns_type, object_version });
-                }
-
-                try writer.writeAll(
-                    \\            },
-                    \\        },
-                );
-
-                object_idx += 1;
-            },
-            else => {},
-        }
-    }
-
-    try writer.writeAll(
-        \\
-        \\    },
-        \\};
-    );
 
     return try output.toOwnedSlice(gpa);
 }

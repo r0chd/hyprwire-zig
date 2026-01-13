@@ -71,7 +71,7 @@ pub const SocketRawParsedMessage = struct {
                 ptr.* = data[i];
             }
 
-            log.debug("parseFromFd: got {} fds on the control wire", .{num_fds});
+            log.debug("SocketRawParsedMessage.fromFd: got {} fds on the control wire", .{num_fds});
         }
 
         return self;

@@ -374,7 +374,7 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
 
     if (data.data.items.len == 0) return;
 
-    const ret = message_parser.message_parser.handleMessageServer(data, client);
+    const ret = message_parser.message_parser.handleMessage(data, .{ .server = client });
     if (ret != MessageParsingResult.ok) {
         const fatal_msg = FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire") catch |err| {
             log.err("Failed to create fatal error message: {}", .{err});
@@ -427,8 +427,8 @@ pub fn createObject(gpa: mem.Allocator, client: ?*ServerClient, reference: ?*Ser
 
     if (reference) |ref| {
         if (client) |c| {
-            const protocol_name = ref.base.protocol_name;
-            const version = ref.base.version;
+            const protocol_name = ref.interface.protocol_name;
+            const version = ref.interface.version;
 
             const new_object = c.createObject(gpa, protocol_name, object, version, seq) catch return null;
             return new_object;

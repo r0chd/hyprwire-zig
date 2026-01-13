@@ -1,6 +1,5 @@
 const std = @import("std");
-
-const VERSION: [:0]const u8 = "0.2.1";
+const zon = @import("./build.zig.zon");
 
 pub fn buildHyprwire(b: *std.Build, target: std.Build.ResolvedTarget, helpers: *std.Build.Module) *std.Build.Module {
     const mod = b.addModule("hyprwire", .{
@@ -22,13 +21,12 @@ pub fn buildHelpers(b: *std.Build, target: std.Build.ResolvedTarget) *std.Build.
     return mod;
 }
 
-pub fn buildScanner(b: *std.Build, target: std.Build.ResolvedTarget, xml: *std.Build.Dependency, hw: *std.Build.Module) *std.Build.Module {
+pub fn buildScanner(b: *std.Build, target: std.Build.ResolvedTarget, xml: *std.Build.Dependency) *std.Build.Module {
     const scanner = b.addModule("scanner", .{
         .root_source_file = b.path("scanner/root.zig"),
         .target = target,
     });
     scanner.addImport("xml", xml.module("xml"));
-    scanner.addImport("hyprwire", hw);
 
     return scanner;
 }
@@ -92,15 +90,16 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const exe_options = b.addOptions();
+    exe_options.addOption([:0]const u8, "version", zon.version);
+    exe_options.addOption(u32, "protocol_version", 1);
+
     const helpers = buildHelpers(b, target);
     const hyprwire = buildHyprwire(b, target, helpers);
-    const scanner_mod = buildScanner(b, target, xml, hyprwire);
+    hyprwire.addOptions("build_options", exe_options);
+    const scanner_mod = buildScanner(b, target, xml);
 
     hyprwire.addImport("scanner", scanner_mod);
-
-    const exe_options = b.addOptions();
-
-    exe_options.addOption([:0]const u8, "version", VERSION);
 
     const scanner = b.addExecutable(.{
         .name = "hyprwire_scanner",
