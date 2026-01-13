@@ -40,21 +40,15 @@ export_poll_mtx_locked: bool = false,
 is_empty_listener: bool = false,
 path: ?[:0]const u8 = null,
 
-fn init() !Self {
-    const pipes = try posix.pipe2(.{
-        .CLOEXEC = true,
-    });
-
-    return .{
-        .wakeup_fd = Fd{ .raw = pipes[0] },
-        .wakeup_write_fd = Fd{ .raw = pipes[1] },
-    };
-}
-
 pub fn open(gpa: mem.Allocator, path: ?[:0]const u8) !*Self {
     const socket = try gpa.create(Self);
     errdefer gpa.destroy(socket);
-    socket.* = try Self.init();
+
+    const pipes = try posix.pipe2(.{ .CLOEXEC = true });
+    socket.* = .{
+        .wakeup_fd = Fd{ .raw = pipes[0] },
+        .wakeup_write_fd = Fd{ .raw = pipes[1] },
+    };
 
     if (path) |p| {
         try socket.attempt(gpa, p);

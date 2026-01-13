@@ -1,8 +1,6 @@
 const std = @import("std");
 const types = @import("../implementation/types.zig");
 
-const mem = std.mem;
-
 const Message = @import("../message/messages/root.zig");
 const ClientSocket = @import("ClientSocket.zig");
 const WireObject = @import("../implementation/WireObject.zig");

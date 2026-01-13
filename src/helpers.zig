@@ -14,13 +14,13 @@ pub const Fd = struct {
 
     const Self = @This();
 
-    pub fn setFlags(self: *Self, flags: u32) !void {
+    pub fn setFlags(self: *const Self, flags: u32) !void {
         if (!self.isValid() or self.isClosed()) return error.InvalidFd;
 
         _ = try posix.fcntl(self.raw, posix.F.SETFD, flags);
     }
 
-    pub fn isClosed(self: *Self) bool {
+    pub fn isClosed(self: *const Self) bool {
         if (!self.isValid()) return false;
 
         const raw_fd = self.raw;
@@ -36,7 +36,7 @@ pub const Fd = struct {
         return (pfd.revents & (posix.POLL.HUP | posix.POLL.ERR)) != 0;
     }
 
-    pub fn isValid(self: *Self) bool {
+    pub fn isValid(self: *const Self) bool {
         return self.raw != -1;
     }
 

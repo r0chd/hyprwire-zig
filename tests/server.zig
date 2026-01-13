@@ -9,7 +9,7 @@ pub fn main() !void {
     const alloc = gpa.allocator();
     defer {
         const deinit_status = gpa.deinit();
-        if (deinit_status == .leak) @panic("TEST FAIL");
+        if (deinit_status == .leak) @panic("LEAK DETECTED");
     }
 
     const xdg_runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;

@@ -1,4 +1,5 @@
 const std = @import("std");
+const hw = @import("hyprwire");
 
 const posix = std.posix;
 const fmt = std.fmt;
@@ -12,8 +13,9 @@ pub fn main() !void {
     }
 
     const xdg_runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
-    const socket_path = try fmt.allocPrint(alloc, "{s}/test-hw.sock", .{xdg_runtime_dir});
+    const socket_path = try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{xdg_runtime_dir}, 0);
     defer alloc.free(socket_path);
 
-    std.debug.print("Client would connect to: {s}\n", .{socket_path});
+    const sock = try hw.ClientSocket.open(alloc, .{ .path = socket_path });
+    defer sock.deinit(alloc);
 }

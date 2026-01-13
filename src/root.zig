@@ -2,17 +2,19 @@ const std = @import("std");
 
 const time = std.time;
 
-const helpers = @import("helpers");
 pub const types = @import("implementation/types.zig");
+pub const messages = @import("message/messages/root.zig");
+
 pub const ServerSocket = @import("server/ServerSocket.zig");
+pub const ClientSocket = @import("client/ClientSocket.zig");
+
 pub const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 pub const Scanner = @import("scanner");
-pub const messages = @import("message/messages/root.zig");
 
 var start: ?time.Instant = null;
 
 pub fn steadyMillis() u64 {
-    const now = time.Instant.now() catch unreachable;
+    const now = time.Instant.now() catch return 0;
     if (start) |s| {
         return now.since(s);
     } else {
