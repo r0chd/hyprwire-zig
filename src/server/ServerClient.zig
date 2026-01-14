@@ -79,7 +79,7 @@ pub fn dispatchFirstPoll(self: *Self) void {
     self.pid = cred.pid;
 }
 
-pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: *const Message) void {
+pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void {
     const parsed = message.parseData(gpa) catch |err| {
         log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
         return;
@@ -87,11 +87,13 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: *const Messag
     defer gpa.free(parsed);
     log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
 
-    const fds = message.fds();
+    const msg_fds = message.getFds();
+    const msg_data = message.getData();
+    const msg_len = message.getLen();
 
     var io: posix.iovec = .{
-        .base = @constCast(message.data.ptr),
-        .len = message.data.len,
+        .base = @constCast(msg_data.ptr),
+        .len = msg_len,
     };
     var msg: c.msghdr = .{
         .msg_iov = @ptrCast(&io),
@@ -104,8 +106,8 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: *const Messag
     };
 
     var control_buf: std.ArrayList(u8) = .empty;
-    if (fds.len != 0) {
-        control_buf.resize(gpa, c.CMSG_SPACE(@sizeOf(i32) * fds.len)) catch |err| {
+    if (msg_fds.len != 0) {
+        control_buf.resize(gpa, c.CMSG_SPACE(@sizeOf(i32) * msg_fds.len)) catch |err| {
             log.debug("Failed to resize control buffer: {}", .{err});
             return;
         };
@@ -115,12 +117,12 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: *const Messag
         const cmsg = c.CMSG_FIRSTHDR(&msg);
         cmsg.*.cmsg_level = c.SOL_SOCKET;
         cmsg.*.cmsg_type = c.SCM_RIGHTS;
-        cmsg.*.cmsg_len = c.CMSG_LEN(@sizeOf(i32) * fds.len);
+        cmsg.*.cmsg_len = c.CMSG_LEN(@sizeOf(i32) * msg_fds.len);
 
         const data_ptr = CMSG_DATA(cmsg);
         const data: [*]i32 = @ptrCast(@alignCast(data_ptr));
-        for (0..fds.len) |i| {
-            data[i] = fds[i];
+        for (0..msg_fds.len) |i| {
+            data[i] = msg_fds[i];
         }
     }
 
@@ -179,8 +181,8 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
     obj.interface.protocol_name = try gpa.dupe(u8, protocol_name);
     errdefer gpa.free(obj.interface.protocol_name);
 
-    const ret = NewObject.init(seq, obj.interface.id);
-    self.sendMessage(gpa, &ret.interface);
+    var ret = Message.NewObject.init(seq, obj.interface.id);
+    self.sendMessage(gpa, ret.message());
 
     self.onBind(obj);
 

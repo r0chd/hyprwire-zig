@@ -53,7 +53,7 @@ pub fn errd(self: *Self) void {
     }
 }
 
-pub fn sendMessage(self: *Self, message: *const Message) void {
+pub fn sendMessage(self: *Self, message: Message) void {
     if (self.client) |client| {
         client.sendMessage(message);
     }

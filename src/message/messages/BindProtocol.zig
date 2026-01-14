@@ -5,7 +5,36 @@ const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const Message = @import("root.zig");
 
-interface: Message,
+pub const vtable: Message.VTable = .{
+    .getFds = getFds,
+    .getData = getData,
+    .getLen = getLen,
+    .getMessageType = getMessageType,
+};
+
+pub fn getFds(ptr: *anyopaque) []const i32 {
+    _ = ptr;
+    return &.{};
+}
+
+pub fn getData(ptr: *anyopaque) []const u8 {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.data;
+}
+
+pub fn getLen(ptr: *anyopaque) usize {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.len;
+}
+
+pub fn getMessageType(ptr: *anyopaque) MessageType {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.message_type;
+}
+
+data: []const u8,
+len: usize,
+message_type: MessageType = .bind_protocol,
 
 const Self = @This();
 
@@ -32,15 +61,10 @@ pub fn init(gpa: mem.Allocator, protocol: []const u8, seq: u32, version: u32) !S
 
     try data.append(gpa, @intFromEnum(MessageMagic.end));
 
-    const data_slice = try data.toOwnedSlice(gpa);
-
-    return Self{
-        .interface = .{
-            .data = data_slice,
-            .len = data_slice.len,
-            .message_type = .bind_protocol,
-            .fdsFn = Self.fdsFn,
-        },
+    return .{
+        .len = data.items.len,
+        .data = try data.toOwnedSlice(gpa),
+        .message_type = .bind_protocol,
     };
 }
 
@@ -84,27 +108,22 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
     needle += 1;
 
-    const message_len = needle - offset;
-
-    const data_copy = try gpa.dupe(u8, data[offset..]);
-
-    return Self{
-        .interface = .{
-            .data = data_copy,
-            .len = message_len,
-            .message_type = .bind_protocol,
-            .fdsFn = Self.fdsFn,
-        },
+    return .{
+        .data = try gpa.dupe(u8, data[offset..]),
+        .len = needle - offset,
+        .message_type = .bind_protocol,
     };
 }
 
-pub fn fdsFn(ptr: *const Message) []const i32 {
-    _ = ptr;
-    return &.{};
+pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    gpa.free(self.data);
 }
 
-pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    gpa.free(self.interface.data);
+pub fn message(self: *Self) Message {
+    return .{
+        .ptr = self,
+        .vtable = &vtable,
+    };
 }
 
 test "BindProtocol" {
@@ -114,8 +133,8 @@ test "BindProtocol" {
     const alloc = std.testing.allocator;
 
     {
-        var message = try Self.init(alloc, "test@1", 5, 1);
-        defer message.deinit(alloc);
+        var msg = try Self.init(alloc, "test@1", 5, 1);
+        defer msg.deinit(alloc);
 
         const pipes = try posix.pipe();
         defer {
@@ -123,7 +142,7 @@ test "BindProtocol" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, &message.interface);
+        server_client.sendMessage(alloc, msg.message());
     }
     {
         // Message format: [type][UINT_magic][seq:4][VARCHAR_magic][varint_len][protocol][UINT_magic][version:4][END]
@@ -141,8 +160,8 @@ test "BindProtocol" {
             0x01,                           0x00, 0x00, 0x00, // version = 1
             @intFromEnum(MessageMagic.end),
         };
-        var message = try Self.fromBytes(alloc, &bytes, 0);
-        defer message.deinit(alloc);
+        var msg = try Self.fromBytes(alloc, &bytes, 0);
+        defer msg.deinit(alloc);
 
         const pipes = try posix.pipe();
         defer {
@@ -150,6 +169,6 @@ test "BindProtocol" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, &message.interface);
+        server_client.sendMessage(alloc, msg.message());
     }
 }

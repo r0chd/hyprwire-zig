@@ -5,11 +5,40 @@ const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const Message = @import("root.zig");
 
+pub const vtable: Message.VTable = .{
+    .getFds = getFds,
+    .getData = getData,
+    .getLen = getLen,
+    .getMessageType = getMessageType,
+};
+
+pub fn getFds(ptr: *anyopaque) []const i32 {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.fds_list;
+}
+
+pub fn getData(ptr: *anyopaque) []const u8 {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.data;
+}
+
+pub fn getLen(ptr: *anyopaque) usize {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.len;
+}
+
+pub fn getMessageType(ptr: *anyopaque) MessageType {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.message_type;
+}
+
 object: u32 = 0,
 method: u32 = 0,
 data_span: []const u8,
 fds_list: []const i32,
-interface: Message,
+data: []const u8,
+len: usize,
+message_type: MessageType = .generic_protocol_message,
 
 const Self = @This();
 
@@ -17,17 +46,14 @@ pub fn init(gpa: mem.Allocator, data: []const u8, fds_list: []const i32) !Self {
     const data_copy = try gpa.dupe(u8, data);
     const fds_copy = try gpa.dupe(i32, fds_list);
 
-    return Self{
+    return .{
         .object = 0,
         .method = 0,
         .data_span = data_copy,
         .fds_list = fds_copy,
-        .interface = .{
-            .data = data_copy,
-            .len = data_copy.len,
-            .message_type = .generic_protocol_message,
-            .fdsFn = Self.fdsFn,
-        },
+        .data = data_copy,
+        .len = data_copy.len,
+        .message_type = .generic_protocol_message,
     };
 }
 
@@ -136,30 +162,28 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
     const message_len = data_needle - offset;
 
     const data_copy = try gpa.dupe(u8, data[offset .. offset + message_len]);
-    const fds_copy = try fds_consumed.toOwnedSlice(gpa);
 
-    return Self{
+    return .{
         .object = object_id,
         .method = method_id,
         .data_span = data_copy[11..],
-        .fds_list = fds_copy,
-        .interface = .{
-            .data = data_copy,
-            .len = message_len,
-            .message_type = .generic_protocol_message,
-            .fdsFn = Self.fdsFn,
-        },
+        .fds_list = try fds_consumed.toOwnedSlice(gpa),
+        .data = data_copy,
+        .len = message_len,
+        .message_type = .generic_protocol_message,
     };
 }
 
-pub fn fdsFn(ptr: *const Message) []const i32 {
-    const self: *const Self = @fieldParentPtr("interface", ptr);
-    return self.fds_list;
+pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    gpa.free(self.data);
+    gpa.free(self.fds_list);
 }
 
-pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    gpa.free(self.fds_list);
-    gpa.free(self.interface.data);
+pub fn message(self: *Self) Message {
+    return .{
+        .ptr = self,
+        .vtable = &vtable,
+    };
 }
 
 test "GenericProtocolMessage" {
@@ -177,8 +201,8 @@ test "GenericProtocolMessage" {
             0x02,                           0x00, 0x00, 0x00, // method = 2
             @intFromEnum(MessageMagic.end),
         };
-        var message = try Self.init(alloc, &data, &.{});
-        defer message.deinit(alloc);
+        var msg = try Self.init(alloc, &data, &.{});
+        defer msg.deinit(alloc);
 
         const pipes = try posix.pipe();
         defer {
@@ -186,7 +210,7 @@ test "GenericProtocolMessage" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, &message.interface);
+        server_client.sendMessage(alloc, msg.message());
     }
     {
         // Message format: [type][OBJECT_magic][object:4][UINT_magic][method:4][...data...][END]
@@ -202,8 +226,8 @@ test "GenericProtocolMessage" {
         };
         var fds_list: std.ArrayList(i32) = .empty;
         defer fds_list.deinit(alloc);
-        var message = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
-        defer message.deinit(alloc);
+        var msg = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
+        defer msg.deinit(alloc);
 
         const pipes = try posix.pipe();
         defer {
@@ -211,6 +235,6 @@ test "GenericProtocolMessage" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, &message.interface);
+        server_client.sendMessage(alloc, msg.message());
     }
 }

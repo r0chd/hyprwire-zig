@@ -83,7 +83,7 @@ pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
     self.fd = fd;
 
     var message = Message.Hello.init();
-    self.sendMessage(gpa, &message.interface);
+    self.sendMessage(gpa, message.message());
 }
 
 pub fn attemptFromFd(self: *Self, gpa: mem.Allocator, raw_fd: i32) !void {
@@ -99,7 +99,7 @@ pub fn attemptFromFd(self: *Self, gpa: mem.Allocator, raw_fd: i32) !void {
     self.fd = fd;
 
     var message = Message.Hello.init();
-    self.sendMessage(gpa, &message.interface);
+    self.sendMessage(gpa, message.message());
 }
 
 pub fn waitForHandshake(self: *Self) !void {
@@ -162,7 +162,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
     // const ret = message_parser.MessageParser.handleMessageServer(self: *MessageParser, data: SocketRawParsedMessage, client: *ServerClient)
 }
 
-pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: *const Message) void {
+pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) void {
     const parsed = message.parseData(gpa) catch |err| {
         log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
         return;

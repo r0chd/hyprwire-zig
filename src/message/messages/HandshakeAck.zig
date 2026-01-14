@@ -5,13 +5,42 @@ const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const Message = @import("root.zig");
 
+pub const vtable: Message.VTable = .{
+    .getFds = getFds,
+    .getData = getData,
+    .getLen = getLen,
+    .getMessageType = getMessageType,
+};
+
+pub fn getFds(ptr: *anyopaque) []const i32 {
+    _ = ptr;
+    return &.{};
+}
+
+pub fn getData(ptr: *anyopaque) []const u8 {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.data;
+}
+
+pub fn getLen(ptr: *anyopaque) usize {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.len;
+}
+
+pub fn getMessageType(ptr: *anyopaque) MessageType {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.message_type;
+}
+
 version: u32 = 0,
-interface: Message,
+data: []const u8,
+len: usize,
+message_type: MessageType = .handshake_ack,
 
 const Self = @This();
 
 pub fn init(version: u32) Self {
-    var data = [_]u8{
+    var data_array = [_]u8{
         @intFromEnum(MessageType.handshake_ack),
         @intFromEnum(MessageMagic.type_uint),
         0,
@@ -21,16 +50,13 @@ pub fn init(version: u32) Self {
         @intFromEnum(MessageMagic.end),
     };
 
-    mem.writeInt(u32, data[2..6], version, .little);
+    mem.writeInt(u32, data_array[2..6], version, .little);
 
-    return Self{
+    return .{
         .version = version,
-        .interface = .{
-            .data = &data,
-            .len = data.len,
-            .message_type = .handshake_ack,
-            .fdsFn = Self.fdsFn,
-        },
+        .data = &data_array,
+        .len = data_array.len,
+        .message_type = .handshake_ack,
     };
 }
 
@@ -45,20 +71,19 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
 
     if (data[offset + 6] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
 
-    return Self{
+    return .{
         .version = version,
-        .interface = .{
-            .data = data,
-            .len = 7,
-            .message_type = .handshake_ack,
-            .fdsFn = Self.fdsFn,
-        },
+        .data = data[offset..][0..7],
+        .len = 7,
+        .message_type = .handshake_ack,
     };
 }
 
-pub fn fdsFn(ptr: *const Message) []const i32 {
-    _ = ptr;
-    return &.{};
+pub fn message(self: *Self) Message {
+    return .{
+        .ptr = self,
+        .vtable = &vtable,
+    };
 }
 
 test "HandshakeAck" {
@@ -68,7 +93,7 @@ test "HandshakeAck" {
     const alloc = std.testing.allocator;
 
     {
-        const message = Self.init(1);
+        var msg = Self.init(1);
 
         const pipes = try posix.pipe();
         defer {
@@ -76,7 +101,7 @@ test "HandshakeAck" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, &message.interface);
+        server_client.sendMessage(alloc, msg.message());
     }
     {
         // Message format: [type][UINT_magic][version:4][END]
@@ -87,7 +112,7 @@ test "HandshakeAck" {
             0x01,                           0x00, 0x00, 0x00, // version = 1
             @intFromEnum(MessageMagic.end),
         };
-        const message = try Self.fromBytes(&bytes, 0);
+        var msg = try Self.fromBytes(&bytes, 0);
 
         const pipes = try posix.pipe();
         defer {
@@ -95,6 +120,6 @@ test "HandshakeAck" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, &message.interface);
+        server_client.sendMessage(alloc, msg.message());
     }
 }

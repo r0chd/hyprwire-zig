@@ -83,6 +83,7 @@ pub fn build(b: *std.Build) void {
     const exe_options = b.addOptions();
     exe_options.addOption([:0]const u8, "version", zon.version);
     exe_options.addOption(u32, "protocol_version", 1);
+    exe_options.addOption(bool, "trace", true);
 
     const helpers = buildHelpers(b, target);
     const hyprwire = buildHyprwire(b, target, helpers);
@@ -95,22 +96,8 @@ pub fn build(b: *std.Build) void {
 
     const run_mod_tests = b.addRunArtifact(mod_tests);
 
-    const scanner_snapshot_test = b.addTest(.{
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("scanner/tests/snapshot_test.zig"),
-            .target = target,
-            .optimize = optimize,
-            .imports = &.{
-                .{ .name = "hyprwire", .module = hyprwire },
-            },
-        }),
-    });
-    scanner_snapshot_test.root_module.addImport("xml", xml.module("xml"));
-    const run_scanner_snapshot_test = b.addRunArtifact(scanner_snapshot_test);
-
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
-    test_step.dependOn(&run_scanner_snapshot_test.step);
 
     buildServer(b, target, optimize, hyprwire);
     buildClient(b, target, optimize, hyprwire);

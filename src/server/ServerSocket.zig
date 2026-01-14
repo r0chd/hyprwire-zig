@@ -362,12 +362,12 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
     _ = self;
     const data = try SocketRawParsedMessage.fromFd(gpa, client.fd.raw);
     if (data.bad) {
-        const fatal_msg = FatalError.init(gpa, 0, 0, "fatal: invalid message on wire") catch |err| {
+        var fatal_msg = FatalError.init(gpa, 0, 0, "fatal: invalid message on wire") catch |err| {
             log.err("Failed to create fatal error message: {}", .{err});
             client.@"error" = true;
             return;
         };
-        client.sendMessage(gpa, &fatal_msg.interface);
+        client.sendMessage(gpa, fatal_msg.message());
         client.@"error" = true;
         return;
     }
@@ -376,19 +376,15 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
 
     const ret = message_parser.message_parser.handleMessage(data, .{ .server = client });
     if (ret != MessageParsingResult.ok) {
-        const fatal_msg = FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire") catch |err| {
-            log.err("Failed to create fatal error message: {}", .{err});
-            client.@"error" = true;
-            return;
-        };
-        client.sendMessage(gpa, &fatal_msg.interface);
+        var fatal_msg = try FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire");
+        client.sendMessage(gpa, fatal_msg.message());
         client.@"error" = true;
         return;
     }
 
     if (client.scheduled_roundtrip_seq > 0) {
-        const roundtrip_done = RoundtripDone.init(client.scheduled_roundtrip_seq);
-        client.sendMessage(gpa, &roundtrip_done.interface);
+        var roundtrip_done = RoundtripDone.init(client.scheduled_roundtrip_seq);
+        client.sendMessage(gpa, roundtrip_done.message());
         client.scheduled_roundtrip_seq = 0;
     }
 }

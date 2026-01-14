@@ -5,8 +5,37 @@ const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const Message = @import("root.zig");
 
+pub const vtable: Message.VTable = .{
+    .getFds = getFds,
+    .getData = getData,
+    .getLen = getLen,
+    .getMessageType = getMessageType,
+};
+
+pub fn getFds(ptr: *anyopaque) []const i32 {
+    _ = ptr;
+    return &.{};
+}
+
+pub fn getData(ptr: *anyopaque) []const u8 {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.data;
+}
+
+pub fn getLen(ptr: *anyopaque) usize {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.len;
+}
+
+pub fn getMessageType(ptr: *anyopaque) MessageType {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.message_type;
+}
+
 protocols: [][]const u8,
-interface: Message,
+data: []const u8,
+len: usize,
+message_type: MessageType = .handshake_protocols,
 
 const Self = @This();
 
@@ -53,14 +82,11 @@ pub fn init(gpa: mem.Allocator, protocol_list: []const []const u8) !Self {
         protocols_slice[i] = protocol_copy;
     }
 
-    return Self{
+    return .{
         .protocols = protocols_slice,
-        .interface = .{
-            .data = data_slice,
-            .len = data_slice.len,
-            .message_type = .handshake_protocols,
-            .fdsFn = Self.fdsFn,
-        },
+        .data = data_slice,
+        .len = data_slice.len,
+        .message_type = .handshake_protocols,
     };
 }
 
@@ -124,30 +150,27 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     const message_len = needle - offset;
 
-    const data_copy = try gpa.dupe(u8, data[offset..]);
-
-    return Self{
+    return .{
         .protocols = protocols_slice,
-        .interface = .{
-            .data = data_copy,
-            .len = message_len,
-            .message_type = .handshake_protocols,
-            .fdsFn = Self.fdsFn,
-        },
+        .data = try gpa.dupe(u8, data[offset..][0..message_len]),
+        .len = message_len,
+        .message_type = .handshake_protocols,
     };
 }
 
-pub fn fdsFn(ptr: *const Message) []const i32 {
-    _ = ptr;
-    return &.{};
-}
-
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    gpa.free(self.data);
     for (self.protocols) |protocol| {
         gpa.free(protocol);
     }
     gpa.free(self.protocols);
-    gpa.free(self.interface.data);
+}
+
+pub fn message(self: *Self) Message {
+    return .{
+        .ptr = self,
+        .vtable = &vtable,
+    };
 }
 
 test "HandshakeProtocols" {
@@ -158,8 +181,8 @@ test "HandshakeProtocols" {
 
     {
         const protocols = [_][]const u8{ "test@1", "test2@2" };
-        var message = try Self.init(alloc, &protocols);
-        defer message.deinit(alloc);
+        var msg = try Self.init(alloc, &protocols);
+        defer msg.deinit(alloc);
 
         const pipes = try posix.pipe();
         defer {
@@ -167,7 +190,7 @@ test "HandshakeProtocols" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, &message.interface);
+        server_client.sendMessage(alloc, msg.message());
     }
     {
         // Message format: [type][ARRAY_magic][VARCHAR_magic][varint_arr_len][varint_str_len][str]...[END]
@@ -185,8 +208,8 @@ test "HandshakeProtocols" {
             't',                            'e', 's', 't', '2', '@', '2', // "test2@2"
             @intFromEnum(MessageMagic.end),
         };
-        var message = try Self.fromBytes(alloc, &bytes, 0);
-        defer message.deinit(alloc);
+        var msg = try Self.fromBytes(alloc, &bytes, 0);
+        defer msg.deinit(alloc);
 
         const pipes = try posix.pipe();
         defer {
@@ -194,6 +217,6 @@ test "HandshakeProtocols" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, &message.interface);
+        server_client.sendMessage(alloc, msg.message());
     }
 }

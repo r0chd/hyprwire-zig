@@ -81,41 +81,40 @@ pub const MessageParser = struct {
         if (meta.intToEnum(MessageType, raw.data.items[off])) |message_type| {
             switch (message_type) {
                 .sup => {
-                    const msg = Message.Hello.init();
-                    const parsed = msg.interface.parseData(gpa) catch |err| {
+                    var msg = Message.Hello.init();
+                    const parsed = msg.message().parseData(gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
-                        return msg.interface.len;
+                        return msg.message().getLen();
                     };
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] -> {s}", .{ client.fd.raw, steadyMillis(), parsed });
                     client.dispatchFirstPoll();
-                    client.sendMessage(gpa, &msg.interface);
-                    return msg.interface.len;
+                    client.sendMessage(gpa, msg.message());
+                    return msg.message().getLen();
                 },
                 .handshake_ack => {
-                    const msg = try Message.HandshakeAck.fromBytes(raw.data.items, off);
-                    const imsg = &msg.interface;
-                    if (imsg.len == 0) {
+                    var msg = try Message.HandshakeAck.fromBytes(raw.data.items, off);
+                    if (msg.message().getLen() == 0) {
                         log.debug("client at fd {} core protocol error: malformed message recvd (handshake_ack)", .{client.fd.raw});
                         return 0;
                     }
 
                     client.version = msg.version;
-                    const parsed = imsg.parseData(gpa) catch |err| {
+                    const parsed = msg.message().parseData(gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
                         return error.ParseError;
                     };
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
 
-                    client.sendMessage(gpa, imsg);
+                    client.sendMessage(gpa, msg.message());
 
-                    return imsg.len;
+                    return msg.message().getLen();
                 },
                 .bind_protocol => {
-                    const msg = try Message.BindProtocol.fromBytes(gpa, raw.data.items, off);
-                    const imsg = &msg.interface;
-                    const parsed = imsg.parseData(gpa) catch |err| {
+                    var msg = try Message.BindProtocol.fromBytes(gpa, raw.data.items, off);
+                    const msg_interface = msg.message();
+                    const parsed = msg_interface.parseData(gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
                         return error.ParseError;
                     };
@@ -123,9 +122,9 @@ pub const MessageParser = struct {
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
                 },
                 .generic_protocol_message => {
-                    const msg = try Message.GenericProtocolMessage.fromBytes(gpa, raw.data.items, &fds, off);
-                    var imsg = &msg.interface;
-                    const parsed = imsg.parseData(gpa) catch |err| {
+                    var msg = try Message.GenericProtocolMessage.fromBytes(gpa, raw.data.items, &fds, off);
+                    const msg_interface = msg.message();
+                    const parsed = msg_interface.parseData(gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
                         return error.ParseError;
                     };
@@ -133,15 +132,15 @@ pub const MessageParser = struct {
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
                 },
                 .roundtrip_request => {
-                    const msg = try Message.RoundtripRequest.fromBytes(raw.data.items, off);
-                    const imsg = &msg.interface;
+                    var msg = try Message.RoundtripRequest.fromBytes(raw.data.items, off);
+                    const msg_interface = msg.message();
 
-                    if (imsg.len == 0) {
+                    if (msg_interface.getLen() == 0) {
                         log.debug("client at fd {} core protocol error: malformed message recvd (roundtrip_request)", .{client.fd.raw});
                         return 0;
                     }
 
-                    const parsed = imsg.parseData(gpa) catch |err| {
+                    const parsed = msg_interface.parseData(gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
                         return error.ParseError;
                     };
@@ -149,7 +148,7 @@ pub const MessageParser = struct {
 
                     client.scheduled_roundtrip_seq = msg.seq;
 
-                    return imsg.len;
+                    return msg_interface.getLen();
                 },
                 .roundtrip_done,
                 .fatal_protocol_error,
@@ -182,9 +181,7 @@ pub const MessageParser = struct {
                         client.@"error" = true;
                         return 0;
                     };
-                    defer msg.deinit(gpa);
-                    const imsg = &msg.interface;
-                    if (imsg.len == 0) {
+                    if (msg.message().getLen() == 0) {
                         log.err("server at fd {} core protocol error: malformed message recvd (handshake_begin)", .{client.fd.raw});
                         client.@"error" = true;
                         return 0;
@@ -204,17 +201,17 @@ pub const MessageParser = struct {
                         return 0;
                     }
 
-                    const parsed = imsg.parseData(gpa) catch |err| {
+                    const parsed = msg.message().parseData(gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
-                        return imsg.len;
+                        return msg.message().getLen();
                     };
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
 
-                    const ack_msg = Message.HandshakeAck.init(1);
-                    client.sendMessage(gpa, &ack_msg.interface);
+                    var ack_msg = Message.HandshakeAck.init(1);
+                    client.sendMessage(gpa, ack_msg.message());
 
-                    return imsg.len;
+                    return msg.message().getLen();
                 },
                 .handshake_protocols => {
                     var msg = Message.HandshakeProtocols.fromBytes(gpa, raw.data.items, off) catch |err| {
@@ -222,41 +219,40 @@ pub const MessageParser = struct {
                         client.@"error" = true;
                         return 0;
                     };
-                    defer msg.deinit(gpa);
-                    const imsg = &msg.interface;
-                    if (imsg.len == 0) {
+                    const msg_interface = msg.message();
+                    if (msg_interface.getLen() == 0) {
                         log.err("server at fd {} core protocol error: malformed message recvd (handshake_protocols)", .{client.fd.raw});
                         client.@"error" = true;
                         return 0;
                     }
 
-                    const parsed = imsg.parseData(gpa) catch |err| {
+                    const parsed = msg_interface.parseData(gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
-                        return imsg.len;
+                        return msg_interface.getLen();
                     };
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
 
                     client.handshake_done = true;
 
-                    return imsg.len;
+                    return msg_interface.getLen();
                 },
                 .new_object => {
-                    const msg = Message.NewObject.fromBytes(raw.data.items, off) catch |err| {
+                    var msg = Message.NewObject.fromBytes(raw.data.items, off) catch |err| {
                         log.err("server at fd {} core protocol error: malformed message recvd (new_object): {s}", .{ client.fd.raw, @errorName(err) });
                         client.@"error" = true;
                         return 0;
                     };
-                    const imsg = &msg.interface;
-                    if (imsg.len == 0) {
+                    const msg_interface = msg.message();
+                    if (msg_interface.getLen() == 0) {
                         log.err("server at fd {} core protocol error: malformed message recvd (new_object)", .{client.fd.raw});
                         client.@"error" = true;
                         return 0;
                     }
 
-                    const parsed = imsg.parseData(gpa) catch |err| {
+                    const parsed = msg_interface.parseData(gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
-                        return imsg.len;
+                        return msg_interface.getLen();
                     };
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
@@ -264,24 +260,24 @@ pub const MessageParser = struct {
                     // Handle new object (need to implement onSeq method)
                     // client.onSeq(msg.seq, msg.id);
 
-                    return imsg.len;
+                    return msg_interface.getLen();
                 },
                 .generic_protocol_message => {
-                    const msg = Message.GenericProtocolMessage.fromBytes(gpa, raw.data.items, &fds, off) catch |err| {
+                    var msg = Message.GenericProtocolMessage.fromBytes(gpa, raw.data.items, &fds, off) catch |err| {
                         log.err("server at fd {} core protocol error: malformed message recvd (generic_protocol_message): {s}", .{ client.fd.raw, @errorName(err) });
                         client.@"error" = true;
                         return 0;
                     };
-                    const imsg = &msg.interface;
-                    if (imsg.len == 0) {
+                    const msg_interface = msg.message();
+                    if (msg_interface.getLen() == 0) {
                         log.err("server at fd {} core protocol error: malformed message recvd (generic_protocol_message)", .{client.fd.raw});
                         client.@"error" = true;
                         return 0;
                     }
 
-                    const parsed = imsg.parseData(gpa) catch |err| {
+                    const parsed = msg_interface.parseData(gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
-                        return imsg.len;
+                        return msg_interface.getLen();
                     };
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
@@ -289,7 +285,7 @@ pub const MessageParser = struct {
                     // Handle generic message (need to implement onGeneric method)
                     // client.onGeneric(msg);
 
-                    return imsg.len;
+                    return msg_interface.getLen();
                 },
                 .fatal_protocol_error => {
                     var msg = Message.FatalProtocolError.fromBytes(gpa, raw.data.items, off) catch |err| {
@@ -297,28 +293,27 @@ pub const MessageParser = struct {
                         client.@"error" = true;
                         return 0;
                     };
-                    defer msg.deinit(gpa);
 
                     log.err("fatal protocol error: object {} error {}: {s}", .{ msg.object_id, msg.error_id, msg.error_msg });
                     client.@"error" = true;
-                    return msg.interface.len;
+                    return msg.message().getLen();
                 },
                 .roundtrip_done => {
-                    const msg = Message.RoundtripDone.fromBytes(raw.data.items, off) catch |err| {
+                    var msg = Message.RoundtripDone.fromBytes(raw.data.items, off) catch |err| {
                         log.err("server at fd {} core protocol error: malformed message recvd (roundtrip_done): {s}", .{ client.fd.raw, @errorName(err) });
                         client.@"error" = true;
                         return 0;
                     };
-                    const imsg = &msg.interface;
-                    if (imsg.len == 0) {
+                    const msg_interface = msg.message();
+                    if (msg_interface.getLen() == 0) {
                         log.err("server at fd {} core protocol error: malformed message recvd (roundtrip_done)", .{client.fd.raw});
                         client.@"error" = true;
                         return 0;
                     }
 
-                    const parsed = imsg.parseData(gpa) catch |err| {
+                    const parsed = msg_interface.parseData(gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
-                        return imsg.len;
+                        return msg_interface.getLen();
                     };
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
@@ -326,7 +321,7 @@ pub const MessageParser = struct {
                     // Update last acked roundtrip seq (need to add field)
                     // client.last_ackd_roundtrip_seq = msg.seq;
 
-                    return imsg.len;
+                    return msg_interface.getLen();
                 },
                 .sup,
                 .handshake_ack,

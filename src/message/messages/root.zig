@@ -16,89 +16,103 @@ pub const NewObject = @import("NewObject.zig");
 pub const RoundtripDone = @import("RoundtripDone.zig");
 pub const RoundtripRequest = @import("RoundtripRequest.zig");
 
-data: []const u8,
-message_type: MessageType = .invalid,
-len: usize = 0,
+ptr: *anyopaque,
+vtable: *const VTable,
 
-fdsFn: *const fn (ptr: *const Self) []const i32,
+pub const VTable = struct {
+    getFds: *const fn (*anyopaque) []const i32,
+    getData: *const fn (*anyopaque) []const u8,
+    getLen: *const fn (*anyopaque) usize,
+    getMessageType: *const fn (*anyopaque) MessageType,
+};
+
+pub fn getFds(self: Self) []const i32 {
+    return self.vtable.getFds(self.ptr);
+}
+
+pub fn getData(self: Self) []const u8 {
+    return self.vtable.getData(self.ptr);
+}
+
+pub fn getLen(self: Self) usize {
+    return self.vtable.getLen(self.ptr);
+}
+
+pub fn getMessageType(self: Self) MessageType {
+    return self.vtable.getMessageType(self.ptr);
+}
 
 const Self = @This();
-
-pub fn fds(self: *const Self) []const i32 {
-    return self.fdsFn(self);
-}
 
 pub fn parseData(self: *const Self, gpa: mem.Allocator) ![]const u8 {
     var result = std.ArrayList(u8).initCapacity(gpa, 64) catch return error.OutOfMemory;
     defer result.deinit(gpa);
-    try result.writer(gpa).print("{s} ( ", .{@tagName(self.message_type)});
+    try result.writer(gpa).print("{s} ( ", .{@tagName(self.getMessageType())});
 
     var needle: usize = 1;
-    while (needle < self.data.len) {
-        const magic_byte = self.data[needle];
+    while (needle < self.getLen()) {
+        const magic_byte = self.getData()[needle];
 
         switch (try std.meta.intToEnum(MessageMagic, magic_byte)) {
             .end => {
                 break;
             },
             .type_seq => {
-                if (needle + 5 > self.data.len) break;
-                const value = std.mem.readInt(u32, self.data[needle + 1 .. needle + 5][0..4], .little);
+                if (needle + 5 > self.getLen()) break;
+                const value = std.mem.readInt(u32, self.getData()[needle + 1 .. needle + 5][0..4], .little);
                 try result.writer(gpa).print("seq: {}", .{value});
                 needle += 5;
                 continue;
             },
             .type_uint => {
-                if (needle + 5 > self.data.len) break;
-                const value = std.mem.readInt(u32, self.data[needle + 1 .. needle + 5][0..4], .little);
+                if (needle + 5 > self.getLen()) break;
+                const value = std.mem.readInt(u32, self.getData()[needle + 1 .. needle + 5][0..4], .little);
                 try result.writer(gpa).print("{}", .{value});
                 needle += 5;
                 continue;
             },
             .type_int => {
-                if (needle + 5 > self.data.len) break;
-                const value = std.mem.readInt(i32, self.data[needle + 1 .. needle + 5][0..4], .little);
+                if (needle + 5 > self.getLen()) break;
+                const value = std.mem.readInt(i32, self.getData()[needle + 1 .. needle + 5][0..4], .little);
                 try result.writer(gpa).print("{}", .{value});
                 needle += 5;
                 continue;
             },
             .type_f32 => {
-                if (needle + 5 > self.data.len) break;
-                const int_value = std.mem.readInt(u32, self.data[needle + 1 .. needle + 5][0..4], .little);
+                if (needle + 5 > self.getLen()) break;
+                const int_value = std.mem.readInt(u32, self.getData()[needle + 1 .. needle + 5][0..4], .little);
                 const value: f32 = @bitCast(int_value);
                 try result.writer(gpa).print("{}", .{value});
                 needle += 5;
                 continue;
             },
             .type_object_id => {
-                if (needle + 5 > self.data.len) break;
-                const value = std.mem.readInt(u32, self.data[needle + 1 .. needle + 5][0..4], .little);
+                if (needle + 5 > self.getLen()) break;
+                const value = std.mem.readInt(u32, self.getData()[needle + 1 .. needle + 5][0..4], .little);
                 try result.writer(gpa).print("object_id({})", .{value});
                 needle += 5;
                 continue;
             },
             .type_varchar => {
-                needle += 1; // Skip magic byte
-                // Parse varint length
+                needle += 1;
                 var str_len: usize = 0;
                 var shift: u6 = 0;
-                while (needle < self.data.len) {
-                    const byte = self.data[needle];
+                while (needle < self.getLen()) {
+                    const byte = self.getData()[needle];
                     str_len |= @as(usize, byte & 0x7F) << shift;
                     needle += 1;
                     if ((byte & 0x80) == 0) break;
                     shift += 7;
                     if (shift >= 64) break;
                 }
-                if (needle + str_len > self.data.len) break;
-                // For formatting, we could print the string, but for now just skip it
+                if (needle + str_len > self.getLen()) break;
                 needle += str_len;
                 continue;
             },
             .type_array => {
-                needle += 1; // Skip magic byte
-                if (needle >= self.data.len) break;
-                const arr_type_byte = self.data[needle];
+                needle += 1;
+                if (needle >= self.getLen()) break;
+                const arr_type_byte = self.getData()[needle];
                 const arr_type: ?MessageMagic = blk: {
                     if (arr_type_byte == @intFromEnum(MessageMagic.type_uint)) break :blk MessageMagic.type_uint;
                     if (arr_type_byte == @intFromEnum(MessageMagic.type_int)) break :blk MessageMagic.type_int;
@@ -111,11 +125,10 @@ pub fn parseData(self: *const Self, gpa: mem.Allocator) ![]const u8 {
                 };
                 needle += 1;
 
-                // Parse varint array length
                 var arr_len: usize = 0;
                 var arr_shift: u6 = 0;
-                while (needle < self.data.len) {
-                    const byte = self.data[needle];
+                while (needle < self.getLen()) {
+                    const byte = self.getData()[needle];
                     arr_len |= @as(usize, byte & 0x7F) << arr_shift;
                     needle += 1;
                     if ((byte & 0x80) == 0) break;
@@ -123,60 +136,55 @@ pub fn parseData(self: *const Self, gpa: mem.Allocator) ![]const u8 {
                     if (arr_shift >= 64) break;
                 }
 
-                // Skip array elements based on type
                 if (arr_type) |at| {
                     switch (at) {
                         .type_uint, .type_int, .type_f32, .type_object_id, .type_seq => {
-                            if (needle + (arr_len * 4) > self.data.len) break;
+                            if (needle + (arr_len * 4) > self.getLen()) break;
                             needle += arr_len * 4;
                         },
                         .type_varchar => {
                             for (0..arr_len) |_| {
                                 var str_len2: usize = 0;
                                 var str_shift: u6 = 0;
-                                while (needle < self.data.len) {
-                                    const byte = self.data[needle];
+                                while (needle < self.getLen()) {
+                                    const byte = self.getData()[needle];
                                     str_len2 |= @as(usize, byte & 0x7F) << str_shift;
                                     needle += 1;
                                     if ((byte & 0x80) == 0) break;
                                     str_shift += 7;
                                     if (str_shift >= 64) break;
                                 }
-                                if (needle + str_len2 > self.data.len) break;
+                                if (needle + str_len2 > self.getLen()) break;
                                 needle += str_len2;
                             }
                         },
-                        .type_fd => {
-                            // FDs are passed via control, not in data
-                        },
+                        .type_fd => {},
                         else => break,
                     }
                 }
                 continue;
             },
             .type_object => {
-                needle += 1; // Skip magic byte
-                if (needle + 4 > self.data.len) break;
-                _ = std.mem.readInt(u32, self.data[needle..][0..4], .little); // object_id, not used in formatting
+                needle += 1;
+                if (needle + 4 > self.getLen()) break;
+                _ = std.mem.readInt(u32, self.getData()[needle..][0..4], .little);
                 needle += 4;
 
-                // Parse varint name length
                 var name_len: usize = 0;
                 var name_shift: u6 = 0;
-                while (needle < self.data.len) {
-                    const byte = self.data[needle];
+                while (needle < self.getLen()) {
+                    const byte = self.getData()[needle];
                     name_len |= @as(usize, byte & 0x7F) << name_shift;
                     needle += 1;
                     if ((byte & 0x80) == 0) break;
                     name_shift += 7;
                     if (name_shift >= 64) break;
                 }
-                if (needle + name_len > self.data.len) break;
+                if (needle + name_len > self.getLen()) break;
                 needle += name_len;
                 continue;
             },
             .type_fd => {
-                // FD is passed via control, not in data, just skip the magic byte
                 needle += 1;
                 continue;
             },
