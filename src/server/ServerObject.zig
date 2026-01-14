@@ -2,39 +2,45 @@ const std = @import("std");
 const types = @import("../implementation/types.zig");
 
 const mem = std.mem;
+const ClientSocket = @import("../client/ClientSocket.zig");
 
 const FatalErrorMessage = @import("../message/messages/FatalProtocolError.zig");
 const ServerSocket = @import("ServerSocket.zig");
 const ServerClient = @import("ServerClient.zig");
 const WireObject = @import("../implementation/WireObject.zig");
+const Object = @import("../implementation/Object.zig");
 const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 const Message = @import("../message/messages/root.zig");
 const Method = types.Method;
 
 interface: WireObject,
 client: ?*ServerClient,
+spec: ?*types.ProtocolObjectSpec = null,
 
 const Self = @This();
 
 pub fn init(client: *ServerClient) Self {
     return .{
         .interface = .{
-            .serverSockFn = Self.serverSockFn,
+            .methodsInFn = Self.methodsIn,
+            .methodsOutFn = Self.methodsOut,
         },
         .client = client,
     };
 }
 
-pub fn methodsOut(self: *const Self) []const Method {
-    if (self.interface.spec) |spec| {
+pub fn methodsOut(ptr: *const WireObject) []const Method {
+    const self: *const Self = @fieldParentPtr("interface", ptr);
+    if (self.spec) |spec| {
         return spec.s2c();
     } else {
         return &.{};
     }
 }
 
-pub fn methodsIn(self: *const Self) []const Method {
-    if (self.interface.spec) |spec| {
+pub fn methodsIn(ptr: *const WireObject) []const Method {
+    const self: *const Self = @fieldParentPtr("interface", ptr);
+    if (self.spec) |spec| {
         return spec.c2s();
     } else {
         return &.{};
@@ -71,8 +77,75 @@ pub fn serverSockFn(ptr: *const WireObject) ?*ServerSocket {
     return null;
 }
 
+pub fn object(self: *Self) Object {
+    return .{
+        .ptr = self,
+        .vtable = &.{
+            .getClientSock = Self.getClientSock,
+            .getServerSock = Self.getServerSock,
+            .getData = Self.getData,
+            .setData = Self.setData,
+            .err = Self.objectErr,
+            .deinit = Self.objectDeinit,
+            .setOnDeinit = Self.setOnDeinit,
+            .getOnDeinit = Self.getOnDeinit,
+        },
+    };
+}
+
+pub fn getClientSock(ptr: *anyopaque) ?*ClientSocket {
+    _ = ptr;
+    return null;
+}
+
+pub fn getServerSock(ptr: *anyopaque) ?*ServerSocket {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    if (self.client) |client| {
+        if (client.server) |server| {
+            return server;
+        }
+    }
+    return null;
+}
+
+pub fn getData(ptr: *anyopaque) ?*anyopaque {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.interface.data;
+}
+
+pub fn setData(ptr: *anyopaque, data: ?*anyopaque) void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    self.interface.data = data;
+}
+
+pub fn objectErr(ptr: *anyopaque, id: u32, message: [:0]const u8) void {
+    _ = ptr;
+    _ = id;
+    _ = message;
+    // Default implementation does nothing
+}
+
+pub fn objectDeinit(ptr: *anyopaque, id: u32, message: [:0]const u8) void {
+    _ = id;
+    _ = message;
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    if (self.interface.on_deinit) |onDeinit| {
+        onDeinit();
+    }
+}
+
+pub fn setOnDeinit(ptr: *anyopaque, cb: *const fn () void) void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    self.interface.on_deinit = cb;
+}
+
+pub fn getOnDeinit(ptr: *anyopaque) ?*const fn () void {
+    const self: *const Self = @ptrCast(@alignCast(ptr));
+    return self.interface.on_deinit;
+}
+
 pub fn err(self: *Self, gpa: mem.Allocator, id: u32, message: [:0]const u8) !void {
-    const msg = try FatalErrorMessage.init(gpa, self.interface.id, id, message);
+    const msg = try FatalErrorMessage.init(gpa, self.id, id, message);
     if (self.client) |client| {
         client.sendMessage(gpa, &msg.interface);
     }
@@ -80,35 +153,35 @@ pub fn err(self: *Self, gpa: mem.Allocator, id: u32, message: [:0]const u8) !voi
 }
 
 pub fn listen(self: *Self, gpa: mem.Allocator, id: u32, callback: *anyopaque) !void {
-    if (self.interface.listeners.len <= id) {
+    if (self.listeners.len <= id) {
         const new_len = id + 1;
-        const new_listeners = try gpa.realloc(self.interface.listeners, new_len);
-        @memset(new_listeners[self.interface.listeners.len..], null);
-        self.interface.listeners = new_listeners;
+        const new_listeners = try gpa.realloc(self.listeners, new_len);
+        @memset(new_listeners[self.listeners.len..], null);
+        self.listeners = new_listeners;
     }
-    self.interface.listeners[id] = callback;
+    self.listeners[id] = callback;
 }
 
 pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: []const i32) !void {
     const methods = self.methodsIn();
 
     if (id >= methods.len) {
-        const msg = try std.fmt.allocPrintZ(gpa, "invalid method {} for object {}", .{ id, self.interface.id });
+        const msg = try std.fmt.allocPrintZ(gpa, "invalid method {} for object {}", .{ id, self.id });
         defer gpa.free(msg);
-        try self.err(gpa, self.interface.id, msg);
+        try self.err(gpa, self.id, msg);
         return;
     }
 
-    if (id >= self.interface.listeners.len or self.interface.listeners[id] == null) {
+    if (id >= self.listeners.len or self.listeners[id] == null) {
         return;
     }
 
     const method = methods[id];
 
-    if (method.since > self.interface.version) {
-        const msg = try std.fmt.allocPrintZ(gpa, "method {} since {} but has {}", .{ id, method.since, self.interface.version });
+    if (method.since > self.version) {
+        const msg = try std.fmt.allocPrintZ(gpa, "method {} since {} but has {}", .{ id, method.since, self.version });
         defer gpa.free(msg);
-        try self.err(gpa, self.interface.id, msg);
+        try self.err(gpa, self.id, msg);
         return;
     }
 
@@ -127,7 +200,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
         if (data_idx >= data.len) {
             const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: unexpected end of data", .{ id, param_idx });
             defer gpa.free(msg);
-            try self.err(gpa, self.interface.id, msg);
+            try self.err(gpa, self.id, msg);
             return;
         }
 
@@ -137,7 +210,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
         if (param_type != wire_type) {
             const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {} should be {} but was {}", .{ id, param_idx, param_type, wire_type });
             defer gpa.free(msg);
-            try self.err(gpa, self.interface.id, msg);
+            try self.err(gpa, self.id, msg);
             return;
         }
 
@@ -152,7 +225,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                 if (fds.len == 0) {
                     const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: expected FD but none provided", .{ id, param_idx });
                     defer gpa.free(msg);
-                    try self.err(gpa, self.interface.id, msg);
+                    try self.err(gpa, self.id, msg);
                     return;
                 }
             },
@@ -160,7 +233,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                 if (data_idx + 4 > data.len) {
                     const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: incomplete data", .{ id, param_idx });
                     defer gpa.free(msg);
-                    try self.err(gpa, self.interface.id, msg);
+                    try self.err(gpa, self.id, msg);
                     return;
                 }
                 data_idx += 4;
@@ -169,7 +242,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                 if (data_idx >= data.len) {
                     const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: incomplete varchar length", .{ id, param_idx });
                     defer gpa.free(msg);
-                    try self.err(gpa, self.interface.id, msg);
+                    try self.err(gpa, self.id, msg);
                     return;
                 }
                 var str_len: usize = 0;
@@ -184,14 +257,14 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                     if (shift >= 64) {
                         const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: invalid varchar length", .{ id, param_idx });
                         defer gpa.free(msg);
-                        try self.err(gpa, self.interface.id, msg);
+                        try self.err(gpa, self.id, msg);
                         return;
                     }
                 }
                 if (len_idx + str_len > data.len) {
                     const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: incomplete varchar data", .{ id, param_idx });
                     defer gpa.free(msg);
-                    try self.err(gpa, self.interface.id, msg);
+                    try self.err(gpa, self.id, msg);
                     return;
                 }
                 data_idx = len_idx + str_len;
@@ -201,7 +274,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                 if (param_idx >= params.items.len or data_idx >= data.len) {
                     const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: incomplete array type", .{ id, param_idx });
                     defer gpa.free(msg);
-                    try self.err(gpa, self.interface.id, msg);
+                    try self.err(gpa, self.id, msg);
                     return;
                 }
                 const arr_type = params.items[param_idx];
@@ -209,7 +282,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                 if (arr_type != wire_arr_type) {
                     const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: array type mismatch", .{ id, param_idx });
                     defer gpa.free(msg);
-                    try self.err(gpa, self.interface.id, msg);
+                    try self.err(gpa, self.id, msg);
                     return;
                 }
                 data_idx += 1;
@@ -225,7 +298,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                     if (shift >= 64) {
                         const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: invalid array length", .{ id, param_idx });
                         defer gpa.free(msg);
-                        try self.err(gpa, self.interface.id, msg);
+                        try self.err(gpa, self.id, msg);
                         return;
                     }
                 }
@@ -235,7 +308,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                         if (data_idx + arr_len * 4 > data.len) {
                             const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: incomplete array data", .{ id, param_idx });
                             defer gpa.free(msg);
-                            try self.err(gpa, self.interface.id, msg);
+                            try self.err(gpa, self.id, msg);
                             return;
                         }
                         data_idx += arr_len * 4;
@@ -246,7 +319,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                             if (data_idx >= data.len) {
                                 const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: incomplete array element {}", .{ id, param_idx, i });
                                 defer gpa.free(msg);
-                                try self.err(gpa, self.interface.id, msg);
+                                try self.err(gpa, self.id, msg);
                                 return;
                             }
                             var elem_len: usize = 0;
@@ -261,14 +334,14 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                                 if (elem_shift >= 64) {
                                     const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: invalid array element length", .{ id, param_idx });
                                     defer gpa.free(msg);
-                                    try self.err(gpa, self.interface.id, msg);
+                                    try self.err(gpa, self.id, msg);
                                     return;
                                 }
                             }
                             if (elem_len_idx + elem_len > data.len) {
                                 const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: incomplete array element data", .{ id, param_idx });
                                 defer gpa.free(msg);
-                                try self.err(gpa, self.interface.id, msg);
+                                try self.err(gpa, self.id, msg);
                                 return;
                             }
                             data_idx = elem_len_idx + elem_len;
@@ -281,7 +354,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                 if (data_idx + 4 > data.len) {
                     const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: incomplete object ID", .{ id, param_idx });
                     defer gpa.free(msg);
-                    try self.err(gpa, self.interface.id, msg);
+                    try self.err(gpa, self.id, msg);
                     return;
                 }
                 data_idx += 4;
@@ -297,14 +370,14 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
                     if (shift >= 64) {
                         const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: invalid object name length", .{ id, param_idx });
                         defer gpa.free(msg);
-                        try self.err(gpa, self.interface.id, msg);
+                        try self.err(gpa, self.id, msg);
                         return;
                     }
                 }
                 if (len_idx + name_len > data.len) {
                     const msg = try std.fmt.allocPrintZ(gpa, "method {} param idx {}: incomplete object name", .{ id, param_idx });
                     defer gpa.free(msg);
-                    try self.err(gpa, self.interface.id, msg);
+                    try self.err(gpa, self.id, msg);
                     return;
                 }
                 data_idx = len_idx + name_len;
@@ -312,7 +385,7 @@ pub fn called(self: *Self, gpa: mem.Allocator, id: u32, data: []const u8, fds: [
         }
     }
 
-    const callback = self.interface.listeners[id];
+    const callback = self.listeners[id];
 
     const c = @cImport(@cInclude("ffi.h"));
 
