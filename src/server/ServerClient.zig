@@ -19,12 +19,6 @@ const ServerSocket = @import("ServerSocket.zig");
 const Fd = helpers.Fd;
 const steadyMillis = root.steadyMillis;
 
-fn CMSG_DATA(cmsg: *c.struct_cmsghdr) [*]u8 {
-    const cmsg_bytes: [*]u8 = @ptrCast(cmsg);
-    const header_size = c.CMSG_LEN(0);
-    return cmsg_bytes + header_size;
-}
-
 const Self = @This();
 
 fd: Fd,
@@ -87,13 +81,9 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void
     defer gpa.free(parsed);
     log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
 
-    const msg_fds = message.getFds();
-    const msg_data = message.getData();
-    const msg_len = message.getLen();
-
     var io: posix.iovec = .{
-        .base = @constCast(msg_data.ptr),
-        .len = msg_len,
+        .base = @constCast(message.getData().ptr),
+        .len = message.getLen(),
     };
     var msg: c.msghdr = .{
         .msg_iov = @ptrCast(&io),
@@ -106,8 +96,8 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void
     };
 
     var control_buf: std.ArrayList(u8) = .empty;
-    if (msg_fds.len != 0) {
-        control_buf.resize(gpa, c.CMSG_SPACE(@sizeOf(i32) * msg_fds.len)) catch |err| {
+    if (message.getFds().len != 0) {
+        control_buf.resize(gpa, c.CMSG_SPACE(@sizeOf(i32) * message.getFds().len)) catch |err| {
             log.debug("Failed to resize control buffer: {}", .{err});
             return;
         };
@@ -117,12 +107,12 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void
         const cmsg = c.CMSG_FIRSTHDR(&msg);
         cmsg.*.cmsg_level = c.SOL_SOCKET;
         cmsg.*.cmsg_type = c.SCM_RIGHTS;
-        cmsg.*.cmsg_len = c.CMSG_LEN(@sizeOf(i32) * msg_fds.len);
+        cmsg.*.cmsg_len = c.CMSG_LEN(@sizeOf(i32) * message.getFds().len);
 
-        const data_ptr = CMSG_DATA(cmsg);
+        const data_ptr = helpers.CMSG_DATA(@ptrCast(cmsg));
         const data: [*]i32 = @ptrCast(@alignCast(data_ptr));
-        for (0..msg_fds.len) |i| {
-            data[i] = msg_fds[i];
+        for (0..message.getFds().len) |i| {
+            data[i] = message.getFds()[i];
         }
     }
 
@@ -158,13 +148,13 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
 
         if (found_spec == null) {
             log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd.raw, steadyMillis() });
-            self.@"@\"error\"" = true;
+            self.@"error" = true;
             return null;
         }
 
         if (protocol_spec.specVer() < version) {
             log.err("[{} @ {}] Error: createObject for protocol {s} object {s} for version {}, but we have only {}", .{ self.fd.raw, steadyMillis(), protocol_name, object, version, protocol_spec.specVer() });
-            self.@"@\"error\"" = true;
+            self.@"error" = true;
             return null;
         }
 
@@ -173,7 +163,7 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
 
     if (found_spec == null) {
         log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd.raw, steadyMillis() });
-        self.@"@\"error\"" = true;
+        self.@"error" = true;
         return null;
     }
 

@@ -18,4 +18,10 @@ pub fn main() !void {
 
     const sock = try hw.ClientSocket.open(alloc, .{ .path = socket_path });
     defer sock.deinit(alloc);
+
+    // sock.addImplementation(impl);
+
+    try sock.waitForHandshake(alloc);
+
+    // const spec = sock.getSpec()
 }

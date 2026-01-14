@@ -50,7 +50,7 @@ pub fn parseData(self: *const Self, gpa: mem.Allocator) ![]const u8 {
     try result.writer(gpa).print("{s} ( ", .{@tagName(self.getMessageType())});
 
     var needle: usize = 1;
-    while (needle < self.getLen()) {
+    while (needle < self.getData().len) {
         const magic_byte = self.getData()[needle];
 
         switch (try std.meta.intToEnum(MessageMagic, magic_byte)) {

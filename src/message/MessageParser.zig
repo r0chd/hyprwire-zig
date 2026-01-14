@@ -39,8 +39,8 @@ pub const MessageParser = struct {
     fn handleClientMessage(self: *Self, data: SocketRawParsedMessage, client: *ClientSocket) MessageParsingResult {
         var needle: usize = 0;
         var mut_data = data;
-        while (needle < mut_data.data.items.len and !client.@"error") {
-            const ret = parseSingleMessageClient(self.allocator, &mut_data, needle, client);
+        while (needle < mut_data.data.items.len) {
+            const ret = parseSingleMessageClient(self.allocator, &mut_data, needle, client) catch return .parse_error;
             if (ret == 0) return .parse_error;
 
             needle += ret;
@@ -57,8 +57,9 @@ pub const MessageParser = struct {
 
     fn handleServerMessage(self: *Self, data: SocketRawParsedMessage, client: *ServerClient) MessageParsingResult {
         var needle: usize = 0;
-        while (needle < data.data.items.len) {
-            const ret = parseSingleMessageServer(self.allocator, data, needle, client) catch return .parse_error;
+        var mut_data = data;
+        while (needle < data.data.items.len and !client.@"error") {
+            const ret = parseSingleMessageServer(self.allocator, &mut_data, needle, client) catch return .parse_error;
             if (ret == 0) {
                 return .parse_error;
             }
@@ -75,7 +76,7 @@ pub const MessageParser = struct {
         return .ok;
     }
 
-    pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: SocketRawParsedMessage, off: usize, client: *ServerClient) !usize {
+    pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage, off: usize, client: *ServerClient) !usize {
         var fds = raw.fds;
 
         if (meta.intToEnum(MessageType, raw.data.items[off])) |message_type| {
@@ -170,7 +171,7 @@ pub const MessageParser = struct {
         return 0;
     }
 
-    pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage, off: usize, client: *ClientSocket) usize {
+    pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage, off: usize, client: *ClientSocket) !usize {
         var fds = raw.fds;
 
         if (meta.intToEnum(MessageType, raw.data.items[off])) |message_type| {
@@ -209,7 +210,7 @@ pub const MessageParser = struct {
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
 
                     var ack_msg = Message.HandshakeAck.init(1);
-                    client.sendMessage(gpa, ack_msg.message());
+                    try client.sendMessage(gpa, ack_msg.message());
 
                     return msg.message().getLen();
                 },
@@ -257,8 +258,7 @@ pub const MessageParser = struct {
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
 
-                    // Handle new object (need to implement onSeq method)
-                    // client.onSeq(msg.seq, msg.id);
+                    client.onSeq(msg.seq, msg.id);
 
                     return msg_interface.getLen();
                 },
@@ -282,8 +282,7 @@ pub const MessageParser = struct {
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
 
-                    // Handle generic message (need to implement onGeneric method)
-                    // client.onGeneric(msg);
+                    client.onGeneric(&msg);
 
                     return msg_interface.getLen();
                 },
@@ -318,8 +317,7 @@ pub const MessageParser = struct {
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
 
-                    // Update last acked roundtrip seq (need to add field)
-                    // client.last_ackd_roundtrip_seq = msg.seq;
+                    client.last_ackd_roundtrip_seq = msg.seq;
 
                     return msg_interface.getLen();
                 },
@@ -342,36 +340,36 @@ pub const MessageParser = struct {
         return 0;
     }
 
-    pub fn parseVarInt(self: *Self, data: []const u8, offset: usize) meta.Tuple(&[_]usize{ usize, usize }) {
+    pub fn parseVarInt(self: *Self, data: []const u8, offset: usize) std.meta.Tuple(&.{ usize, usize }) {
         return self.parseVarIntSpan(data[offset..]);
     }
 
-    fn parseVarIntSpan(self: *Self, data: []const u8) meta.Tuple(&[_]usize{ usize, usize }) {
+    fn parseVarIntSpan(self: *Self, data: []const u8) meta.Tuple(&.{ usize, usize }) {
         _ = self;
         var rolling: usize = 0;
         var i: usize = 0;
 
         while (true) : (i += 1) {
             const chunk = data[i] & 0x7F;
-            rolling |= (@as(usize, chunk)) << (i * 7);
+            rolling |= (@as(usize, chunk)) << @as(u6, @intCast(i * 7));
 
-            if (i < data.len or data[i] & 0x80 == 0) break;
+            if (i >= data.len or (data[i] & 0x80) == 0) break;
         }
 
         return .{ rolling, i };
     }
 
-    pub fn encodeVarInt(self: *Self, num: usize) []u8 {
+    pub fn encodeVarInt(self: *Self, num: usize) [4]u8 {
         _ = self;
         var buffer: [4]u8 = undefined;
         var data: std.ArrayList(u8) = .initBuffer(&buffer);
-        data.items[0] = @as(u8, @truncate(num >> 0)) | 0x80;
-        data.items[1] = @as(u8, @truncate(num >> 7)) | 0x80;
-        data.items[2] = @as(u8, @truncate(num >> 14)) | 0x80;
-        data.items[3] = @as(u8, @truncate(num >> 21)) | 0x80;
+        data.appendAssumeCapacity(@as(u8, @truncate(num >> 0)) | 0x80);
+        data.appendAssumeCapacity(@as(u8, @truncate(num >> 7)) | 0x80);
+        data.appendAssumeCapacity(@as(u8, @truncate(num >> 14)) | 0x80);
+        data.appendAssumeCapacity(@as(u8, @truncate(num >> 21)) | 0x80);
 
-        while (data.getLast() == 0x80 and data.items.len > 1) |_| {
-            data.pop();
+        while (data.getLast() == 0x80 and data.items.len > 1) {
+            _ = data.pop();
         }
 
         return buffer;

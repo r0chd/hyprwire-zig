@@ -2,9 +2,11 @@ const std = @import("std");
 const types = @import("../implementation/types.zig");
 const helpers = @import("helpers");
 const message_parser = @import("../message/MessageParser.zig");
+const c = @cImport(@cInclude("sys/socket.h"));
 
 const Message = @import("../message/messages/root.zig");
 const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
+const GenericProtocolMessage = Message.GenericProtocolMessage;
 
 const mem = std.mem;
 const posix = std.posix;
@@ -19,7 +21,7 @@ const Fd = helpers.Fd;
 
 const steadyMillis = @import("../root.zig").steadyMillis;
 
-const HANDSHAKE_MAX_MS: u64 = 5000;
+const HANDSHAKE_MAX_MS: i64 = 5000;
 
 fd: Fd,
 impls: std.ArrayList(*const ProtocolClientImplementation) = .empty,
@@ -30,6 +32,7 @@ handshake_begin: std.time.Instant,
 @"error": bool = false,
 handshake_done: bool,
 pending_socket_data: std.ArrayList(SocketRawParsedMessage) = .empty,
+last_ackd_roundtrip_seq: u32 = 0,
 
 const Self = @This();
 
@@ -83,7 +86,7 @@ pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
     self.fd = fd;
 
     var message = Message.Hello.init();
-    self.sendMessage(gpa, message.message());
+    try self.sendMessage(gpa, message.message());
 }
 
 pub fn attemptFromFd(self: *Self, gpa: mem.Allocator, raw_fd: i32) !void {
@@ -99,28 +102,32 @@ pub fn attemptFromFd(self: *Self, gpa: mem.Allocator, raw_fd: i32) !void {
     self.fd = fd;
 
     var message = Message.Hello.init();
-    self.sendMessage(gpa, message.message());
+    try self.sendMessage(gpa, message.message());
 }
 
-pub fn waitForHandshake(self: *Self) !void {
+pub fn waitForHandshake(self: *Self, gpa: mem.Allocator) !void {
     self.handshake_begin = try std.time.Instant.now();
 
-    while (!self.@"error" and !self.handshake_done) {}
+    while (!self.@"error" and !self.handshake_done) {
+        try self.dispatchEvents(gpa, true);
+    }
+
+    return error.TODO;
 }
 
 pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
     if (self.@"error") return error.TODO;
 
     if (!self.handshake_done) {
-        const now = std.time.Instant.now();
-        const elapsed_ns = now.since(self.handshake_begin);
+        const now = try std.time.Instant.now();
+        const elapsed_ns: i64 = @intCast(now.since(self.handshake_begin));
 
-        const max_ms = std.math.max(HANDSHAKE_MAX_MS - @as(i64, elapsed_ns / std.time.ns_per_ms), 0);
+        const max_ms: i32 = @intCast(@max(HANDSHAKE_MAX_MS - @divFloor(elapsed_ns, std.time.ns_per_ms), 0));
 
         const ret = try posix.poll(self.pollfds.items, if (block) max_ms else 0);
         if (block and ret == 0) {
             log.debug("handshake error: timed out", .{});
-            self.disconnectError();
+            self.disconnectOnError();
             return error.TimedOut;
         }
     }
@@ -128,7 +135,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
     if (self.pending_socket_data.items.len > 0) {
         const datas = try self.pending_socket_data.toOwnedSlice(gpa);
         for (datas) |data| {
-            const ret = message_parser.message_parser.handleMessage(data, self);
+            const ret = message_parser.message_parser.handleMessage(data, .{ .client = self });
             if (ret != .ok) {
                 log.debug("fatal: failed to handle message on wire", .{});
                 self.disconnectOnError();
@@ -138,7 +145,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
     }
 
     if (self.handshake_done) {
-        posix.poll(self.pollfds.items, if (block) -1 else 0);
+        _ = try posix.poll(self.pollfds.items, if (block) -1 else 0);
     }
 
     const revents = self.pollfds.items[0].revents;
@@ -150,7 +157,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
 
     // dispatch
 
-    const data = try SocketRawParsedMessage.fromFd(gpa, self.fd);
+    const data = try SocketRawParsedMessage.fromFd(gpa, self.fd.raw);
     if (data.bad) {
         log.debug("fatal: received malformed message from server", .{});
         self.disconnectOnError();
@@ -159,16 +166,86 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
 
     if (data.data.items.len == 0) return error.NoData;
 
-    // const ret = message_parser.MessageParser.handleMessageServer(self: *MessageParser, data: SocketRawParsedMessage, client: *ServerClient)
+    const ret = message_parser.message_parser.handleMessage(data, .{
+        .client = self,
+    });
+
+    if (ret != .ok) {
+        log.debug("fatal: failed to handle message on wire", .{});
+        self.disconnectOnError();
+        // make handleMessage return an error instead of enum
+        return error.TODO;
+    }
+
+    if (self.@"error") {
+        return error.TODO;
+    }
 }
 
-pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) void {
+pub fn onSeq(self: *Self, seq: u32, id: u32) void {
+    for (self.objects.items) |object| {
+        _ = seq;
+        _ = id;
+        _ = object;
+        // if (object.seq == seq) {
+        //     object.id = id;
+        //     break;
+        // }
+    }
+}
+
+pub fn onGeneric(self: *Self, msg: *GenericProtocolMessage) void {
+    for (self.objects.items) |object| {
+        _ = msg;
+        _ = object;
+        // if (object.id == msg.object) {
+        //     object.called(msg.method, msg.data_span, msg.fds_list);
+        // }
+    }
+}
+
+pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) !void {
     const parsed = message.parseData(gpa) catch |err| {
         log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
         return;
     };
     defer gpa.free(parsed);
     log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
+
+    var io: posix.iovec = .{
+        .base = @constCast(message.getData().ptr),
+        .len = message.getLen(),
+    };
+    var msg: c.msghdr = .{
+        .msg_iov = @ptrCast(&io),
+        .msg_iovlen = 1,
+        .msg_control = null,
+        .msg_controllen = 0,
+        .msg_flags = 0,
+        .msg_name = null,
+        .msg_namelen = 0,
+    };
+
+    var control_buf: std.ArrayList(u8) = .empty;
+    if (message.getFds().len > 0) {
+        try control_buf.resize(gpa, c.CMSG_LEN(@sizeOf(i32) * message.getFds().len));
+
+        msg.msg_control = control_buf.items.ptr;
+        msg.msg_controllen = control_buf.items.len;
+
+        const cmsg = c.CMSG_FIRSTHDR(&msg);
+        cmsg.*.cmsg_level = c.SOL_SOCKET;
+        cmsg.*.cmsg_type = c.SCM_RIGHTS;
+        cmsg.*.cmsg_len = c.CMSG_LEN(@sizeOf(i32) * message.getFds().len);
+
+        const data_ptr = helpers.CMSG_DATA(@ptrCast(cmsg));
+        const data: [*]i32 = @ptrCast(@alignCast(data_ptr));
+        for (0..message.getFds().len) |i| {
+            data[i] = message.getFds()[i];
+        }
+    }
+
+    _ = c.sendmsg(self.fd.raw, &msg, 0);
 }
 
 pub fn disconnectOnError(self: *Self) void {

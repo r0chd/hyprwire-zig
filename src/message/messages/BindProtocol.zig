@@ -1,4 +1,6 @@
 const std = @import("std");
+const build_options = @import("build_options");
+
 const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
@@ -35,6 +37,9 @@ pub fn getMessageType(ptr: *anyopaque) MessageType {
 data: []const u8,
 len: usize,
 message_type: MessageType = .bind_protocol,
+seq: u32 = 0,
+version: u32 = 0,
+protocol: []const u8,
 
 const Self = @This();
 
@@ -65,6 +70,7 @@ pub fn init(gpa: mem.Allocator, protocol: []const u8, seq: u32, version: u32) !S
         .len = data.items.len,
         .data = try data.toOwnedSlice(gpa),
         .message_type = .bind_protocol,
+        .protocol = protocol,
     };
 }
 
@@ -77,25 +83,25 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
     needle += 1;
     if (needle + 4 > data.len) return error.OutOfRange;
-    _ = mem.readInt(u32, data[needle..][0..4], .little);
+    const seq = mem.readInt(u32, data[needle..][0..4], .little);
     needle += 4;
 
     if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_varchar)) return error.InvalidMessage;
     needle += 1;
 
     var protocol_len: usize = 0;
-    var shift: u6 = 0;
-    while (needle < data.len) {
-        const byte = data[needle];
-        protocol_len |= @as(usize, byte & 0x7F) << shift;
-        needle += 1;
+    var var_int_len: usize = 0;
+    while (needle + var_int_len < data.len) : (var_int_len += 1) {
+        const byte = data[needle + var_int_len];
+        protocol_len |= @as(usize, byte & 0x7F) << @intCast(var_int_len * 7);
         if ((byte & 0x80) == 0) break;
-        shift += 7;
-        if (shift >= 64) return error.InvalidMessage;
+        if (var_int_len >= 8) return error.InvalidMessage;
     }
+    var_int_len += 1;
+    needle += var_int_len;
 
     if (needle + protocol_len > data.len) return error.OutOfRange;
-    _ = data[needle..][0..protocol_len];
+    const protocol = data[needle .. needle + protocol_len];
     needle += protocol_len;
 
     if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
@@ -109,9 +115,12 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     needle += 1;
 
     return .{
-        .data = try gpa.dupe(u8, data[offset..]),
+        .data = if (build_options.trace) try gpa.dupe(u8, data[offset .. offset + needle - offset]) else &[_]u8{},
         .len = needle - offset,
         .message_type = .bind_protocol,
+        .seq = seq,
+        .protocol = protocol,
+        .version = version,
     };
 }
 

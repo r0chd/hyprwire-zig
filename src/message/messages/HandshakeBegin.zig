@@ -1,4 +1,6 @@
 const std = @import("std");
+const message_parser = @import("../MessageParser.zig");
+
 const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
@@ -39,7 +41,7 @@ message_type: MessageType = .handshake_begin,
 
 const Self = @This();
 
-pub fn init(gpa: mem.Allocator, versions_list: []const u32) !Self {
+pub fn init(gpa: mem.Allocator, versions: []const u32) !Self {
     var data: std.ArrayList(u8) = .empty;
     errdefer data.deinit(gpa);
 
@@ -47,14 +49,12 @@ pub fn init(gpa: mem.Allocator, versions_list: []const u32) !Self {
     try data.append(gpa, @intFromEnum(MessageMagic.type_array));
     try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
 
-    var arr_len = versions_list.len;
-    while (arr_len > 0x7F) {
-        try data.append(gpa, @as(u8, @truncate(arr_len & 0x7F)) | 0x80);
-        arr_len >>= 7;
+    const var_int = message_parser.message_parser.encodeVarInt(versions.len);
+    for (var_int) |int| {
+        try data.append(gpa, int);
     }
-    try data.append(gpa, @as(u8, @truncate(arr_len)));
 
-    for (versions_list) |version| {
+    for (versions) |version| {
         try data.writer(gpa).writeInt(u32, version, .little);
     }
 
@@ -62,7 +62,7 @@ pub fn init(gpa: mem.Allocator, versions_list: []const u32) !Self {
 
     const data_slice = try data.toOwnedSlice(gpa);
 
-    const versions_slice = try gpa.dupe(u32, versions_list);
+    const versions_slice = try gpa.dupe(u32, versions);
 
     return .{
         .versions = versions_slice,
@@ -84,16 +84,10 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
     needle += 1;
 
-    var arr_len: usize = 0;
-    var shift: u6 = 0;
-    while (needle < data.len) {
-        const byte = data[needle];
-        arr_len |= @as(usize, byte & 0x7F) << shift;
-        needle += 1;
-        if ((byte & 0x80) == 0) break;
-        shift += 7;
-        if (shift >= 64) return error.InvalidMessage;
-    }
+    const parse_result = message_parser.message_parser.parseVarInt(data, needle);
+    const arr_len = parse_result[0];
+    const var_int_len = parse_result[1];
+    needle += var_int_len;
 
     if (needle + (arr_len * 4) > data.len) return error.OutOfRange;
 

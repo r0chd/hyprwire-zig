@@ -1,4 +1,5 @@
 const std = @import("std");
+const c = @cImport(@cInclude("sys/socket.h"));
 
 const posix = std.posix;
 const mem = std.mem;
@@ -7,6 +8,12 @@ pub fn sunLen(addr: *const posix.sockaddr.un) usize {
     const path_ptr: [*:0]const u8 = @ptrCast(&addr.path);
     const path_len = mem.span(path_ptr).len;
     return @offsetOf(posix.sockaddr.un, "path") + path_len + 1;
+}
+
+pub fn CMSG_DATA(cmsg: *c.struct_cmsghdr) [*]u8 {
+    const cmsg_bytes: [*]u8 = @ptrCast(cmsg);
+    const header_size = c.CMSG_LEN(0);
+    return cmsg_bytes + header_size;
 }
 
 pub const Fd = struct {
