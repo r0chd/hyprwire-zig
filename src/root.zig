@@ -9,7 +9,7 @@ pub const ServerSocket = @import("server/ServerSocket.zig");
 pub const ClientSocket = @import("client/ClientSocket.zig");
 
 pub const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
-pub const Scanner = @import("scanner");
+pub const Scanner = @import("scanner.zig");
 
 var start: ?time.Instant = null;
 

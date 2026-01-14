@@ -1,5 +1,5 @@
 const ClientSocket = @import("../client/ClientSocket.zig");
-const ServerSocket = @import("../client/ServerSocket.zig");
+const ServerSocket = @import("../server/ServerSocket.zig");
 
 const Self = @This();
 
