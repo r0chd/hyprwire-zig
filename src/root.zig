@@ -2,6 +2,7 @@ const std = @import("std");
 
 const time = std.time;
 
+pub const version = @import("build_options").version;
 pub const types = @import("implementation/types.zig");
 pub const messages = @import("message/messages/root.zig");
 
@@ -9,7 +10,6 @@ pub const ServerSocket = @import("server/ServerSocket.zig");
 pub const ClientSocket = @import("client/ClientSocket.zig");
 
 pub const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
-pub const Scanner = @import("scanner.zig");
 
 const ServerObject = @import("server/ServerObject.zig");
 const ClientObject = @import("client/ClientObject.zig");
