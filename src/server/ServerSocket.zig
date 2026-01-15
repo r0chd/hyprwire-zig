@@ -411,7 +411,7 @@ pub fn extractLoopFD(self: *Self, gpa: mem.Allocator) !i32 {
 
         try self.recheckPollFds(gpa);
 
-        self.poll_thread = try std.Thread.spawn(.{}, pollThread, .{self});
+        self.poll_thread = try std.Thread.spawn(.{}, pollThread, .{ self, gpa });
     }
 
     return self.export_fd.?.raw;
@@ -435,9 +435,9 @@ pub fn createObject(gpa: mem.Allocator, client: ?*ServerClient, reference: ?*Ser
     return null;
 }
 
-fn pollThread(self: *Self) void {
-    var pollfds = std.ArrayList(posix.pollfd).init(std.heap.page_allocator);
-    defer pollfds.deinit();
+fn pollThread(self: *Self, gpa: mem.Allocator) void {
+    var pollfds: std.ArrayList(posix.pollfd) = .empty;
+    defer pollfds.deinit(gpa);
 
     while (self.thread_can_poll) {
         self.export_poll_mtx.lock();
@@ -452,7 +452,7 @@ fn pollThread(self: *Self) void {
         pollfds.clearRetainingCapacity();
 
         if (!self.is_empty_listener and self.fd) |fd| {
-            pollfds.append(.{
+            pollfds.append(gpa, .{
                 .fd = fd,
                 .events = posix.POLL.IN,
             }) catch {
@@ -462,7 +462,7 @@ fn pollThread(self: *Self) void {
         }
 
         if (self.exit_fd) |fd| {
-            pollfds.append(.{
+            pollfds.append(gpa, .{
                 .fd = fd.raw,
                 .events = posix.POLL.IN,
             }) catch {
@@ -471,7 +471,7 @@ fn pollThread(self: *Self) void {
             };
         }
 
-        pollfds.append(.{
+        pollfds.append(gpa, .{
             .fd = self.wakeup_fd,
             .events = posix.POLL.IN,
         }) catch {
@@ -480,7 +480,7 @@ fn pollThread(self: *Self) void {
         };
 
         for (self.clients.items) |client| {
-            pollfds.append(.{
+            pollfds.append(gpa, .{
                 .fd = client.fd,
                 .events = posix.POLL.IN,
             }) catch {

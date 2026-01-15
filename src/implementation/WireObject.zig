@@ -1,44 +1,26 @@
 const std = @import("std");
 const types = @import("types.zig");
 const c = @cImport(@cInclude("sys/socket.h"));
+const helpers = @import("helpers");
 
 const mem = std.mem;
 
 const Message = @import("../message/messages/root.zig").Message;
 const ServerSocket = @import("../server/ServerSocket.zig");
 const ClientSocket = @import("../server/ServerClient.zig");
-const Object = @import("Object.zig");
+const Object = @import("Object.zig").Object;
 const Method = types.Method;
 const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 
-pub const VTable = struct {
-    getListeners: *const fn (*anyopaque) std.ArrayList(*const fn (*anyopaque) void),
-    methodsOut: *const fn (*anyopaque) []const Method,
-    methodsIn: *const fn (*anyopaque) []const Method,
-    errd: *const fn (*anyopaque) void,
-    sendMessage: *const fn (*anyopaque, mem.Allocator, Message) anyerror!void,
-    server: *const fn (*anyopaque) bool,
-};
+pub const WireObject = helpers.trait.Trait(.{
+    .methodsOut = fn () []const Method,
+    .methodsIn = fn () []const Method,
+    .errd = fn () void,
+    .sendMessage = fn (mem.Allocator, Message) anyerror!void,
+    .server = fn () bool,
+}, .{Object});
 
-ptr: *anyopaque,
-vtable: *const VTable,
-
-pub fn object(self: *Self) Object {
-    return .{
-        .ptr = self,
-        .vtable = &.{
-            .getData = Self.getData,
-            .setData = Self.setData,
-            .setOnDeinit = Self.setOnDeinit,
-            .getOnDeinit = Self.getOnDeinit,
-        },
-    };
-}
-
-const Self = @This();
-
-pub fn call(ptr: *anyopaque, id: u32, args: anytype) !u32 {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
+pub fn call(self: WireObject, id: u32, args: anytype) !u32 {
     _ = self;
     _ = id;
     const ArgsType = @TypeOf(args);
@@ -61,8 +43,7 @@ pub fn call(ptr: *anyopaque, id: u32, args: anytype) !u32 {
     return 0;
 }
 
-pub fn listen(ptr: *anyopaque, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) !void {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
+pub fn listen(self: WireObject, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) !void {
     var listeners = self.vtable.getListeners(self.ptr);
 
     if (listeners.items.len <= id) {
@@ -71,9 +52,8 @@ pub fn listen(ptr: *anyopaque, gpa: mem.Allocator, id: u32, callback: *const fn 
     listeners.appendAssumeCapacity(callback);
 }
 
-pub fn called(ptr: *anyopaque, gpa: mem.Allocator, id: u32, data: []const u8, fds: std.ArrayList(i32)) !void {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
-    const obj: Object = self.object();
+pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, fds: std.ArrayList(i32)) !void {
+    const obj = Object.from(self.ptr);
 
     const methods = self.vtable.methodsIn(self.ptr);
 
@@ -97,13 +77,13 @@ pub fn called(ptr: *anyopaque, gpa: mem.Allocator, id: u32, data: []const u8, fd
         return;
     }
 
-    var params = std.ArrayList(u8).init(gpa);
-    defer params.deinit();
+    var params: std.ArrayList(u8) = .empty;
+    defer params.deinit(gpa);
 
     if (method.returns_type.len > 0) {
-        try params.append(@intFromEnum(MessageMagic.type_seq));
+        try params.append(gpa, @intFromEnum(MessageMagic.type_seq));
     }
-    try params.appendSlice(method.params);
+    try params.appendSlice(gpa, method.params);
 
     var data_idx: usize = 0;
     var param_idx: usize = 0;
@@ -392,24 +372,4 @@ pub fn called(ptr: *anyopaque, gpa: mem.Allocator, id: u32, data: []const u8, fd
     for (arg_values.items[1..]) |arg| {
         gpa.destroy(arg);
     }
-}
-
-pub fn getData(ptr: *anyopaque) ?*anyopaque {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
-    return self.data;
-}
-
-pub fn setData(ptr: *anyopaque, data: ?*anyopaque) void {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
-    self.data = data;
-}
-
-pub fn setOnDeinit(ptr: *anyopaque, cb: *const fn () void) void {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    self.on_deinit = cb;
-}
-
-pub fn getOnDeinit(ptr: *anyopaque) ?*const fn () void {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
-    return self.on_deinit;
 }
