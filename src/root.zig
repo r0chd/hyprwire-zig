@@ -11,6 +11,9 @@ pub const ClientSocket = @import("client/ClientSocket.zig");
 pub const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 pub const Scanner = @import("scanner.zig");
 
+const ServerObject = @import("server/ServerObject.zig");
+const ClientObject = @import("client/ClientObject.zig");
+
 var start: ?time.Instant = null;
 
 pub fn steadyMillis() u64 {
@@ -24,6 +27,8 @@ pub fn steadyMillis() u64 {
 }
 
 test {
+    _ = ServerObject;
+    _ = ClientObject;
     _ = messages.BindProtocol;
     _ = messages.FatalProtocolError;
     _ = messages.GenericProtocolMessage;
@@ -31,7 +36,6 @@ test {
     _ = messages.HandshakeBegin;
     _ = messages.HandshakeProtocols;
     _ = messages.Hello;
-    _ = messages.NewObject;
     _ = messages.RoundtripDone;
     _ = messages.RoundtripRequest;
 }

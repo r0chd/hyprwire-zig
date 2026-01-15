@@ -5,32 +5,22 @@ const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
-const Message = @import("root.zig");
+const Message = @import("root.zig").Message;
 
-pub const vtable: Message.VTable = .{
-    .getFds = getFds,
-    .getData = getData,
-    .getLen = getLen,
-    .getMessageType = getMessageType,
-};
-
-pub fn getFds(ptr: *anyopaque) []const i32 {
-    _ = ptr;
+pub fn getFds(self: *const Self) []const i32 {
+    _ = self;
     return &.{};
 }
 
-pub fn getData(ptr: *anyopaque) []const u8 {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
+pub fn getData(self: *const Self) []const u8 {
     return self.data;
 }
 
-pub fn getLen(ptr: *anyopaque) usize {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
+pub fn getLen(self: *const Self) usize {
     return self.len;
 }
 
-pub fn getMessageType(ptr: *anyopaque) MessageType {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
+pub fn getMessageType(self: *const Self) MessageType {
     return self.message_type;
 }
 
@@ -80,13 +70,6 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     };
 }
 
-pub fn message(self: *Self) Message {
-    return .{
-        .ptr = self,
-        .vtable = &vtable,
-    };
-}
-
 test "RoundtripDone" {
     const ServerClient = @import("../../server/ServerClient.zig");
     const posix = std.posix;
@@ -102,7 +85,7 @@ test "RoundtripDone" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, msg.message());
+        server_client.sendMessage(alloc, Message.from(&msg));
     }
     {
         // Message format: [type][UINT_magic][seq:4][END]
@@ -121,6 +104,6 @@ test "RoundtripDone" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, msg.message());
+        server_client.sendMessage(alloc, Message.from(&msg));
     }
 }

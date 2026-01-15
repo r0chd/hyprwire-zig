@@ -4,6 +4,7 @@ const message_parser = @import("../message/MessageParser.zig");
 const root = @import("../root.zig");
 const helpers = @import("helpers");
 
+const Message = @import("../message/messages/root.zig").Message;
 const ServerObject = @import("ServerObject.zig");
 const ServerClient = @import("ServerClient.zig");
 const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
@@ -367,7 +368,7 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
             client.@"error" = true;
             return;
         };
-        client.sendMessage(gpa, fatal_msg.message());
+        client.sendMessage(gpa, Message.from(&fatal_msg));
         client.@"error" = true;
         return;
     }
@@ -377,14 +378,14 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
     const ret = message_parser.message_parser.handleMessage(data, .{ .server = client });
     if (ret != MessageParsingResult.ok) {
         var fatal_msg = try FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire");
-        client.sendMessage(gpa, fatal_msg.message());
+        client.sendMessage(gpa, Message.from(&fatal_msg));
         client.@"error" = true;
         return;
     }
 
     if (client.scheduled_roundtrip_seq > 0) {
         var roundtrip_done = RoundtripDone.init(client.scheduled_roundtrip_seq);
-        client.sendMessage(gpa, roundtrip_done.message());
+        client.sendMessage(gpa, Message.from(&roundtrip_done));
         client.scheduled_roundtrip_seq = 0;
     }
 }

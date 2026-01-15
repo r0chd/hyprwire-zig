@@ -1,5 +1,6 @@
 const std = @import("std");
 const c = @cImport(@cInclude("sys/socket.h"));
+pub const trait = @import("trait.zig");
 
 const posix = std.posix;
 const mem = std.mem;
@@ -48,7 +49,7 @@ pub const Fd = struct {
     }
 
     pub fn close(self: *Self) void {
-        if (self.isValid()) {
+        if (self.isValid() and !self.isClosed()) {
             posix.close(self.raw);
             self.raw = -1;
         }

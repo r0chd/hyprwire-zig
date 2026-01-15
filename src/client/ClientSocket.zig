@@ -4,9 +4,10 @@ const helpers = @import("helpers");
 const message_parser = @import("../message/MessageParser.zig");
 const c = @cImport(@cInclude("sys/socket.h"));
 
-const Message = @import("../message/messages/root.zig");
+const messages = @import("../message/messages/root.zig");
+const Message = messages.Message;
 const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
-const GenericProtocolMessage = Message.GenericProtocolMessage;
+const GenericProtocolMessage = messages.GenericProtocolMessage;
 
 const mem = std.mem;
 const posix = std.posix;
@@ -30,7 +31,7 @@ pollfds: std.ArrayList(posix.pollfd) = .empty,
 objects: std.ArrayList(ClientObject) = .empty,
 handshake_begin: std.time.Instant,
 @"error": bool = false,
-handshake_done: bool,
+handshake_done: bool = false,
 pending_socket_data: std.ArrayList(SocketRawParsedMessage) = .empty,
 last_ackd_roundtrip_seq: u32 = 0,
 
@@ -42,7 +43,6 @@ pub fn open(gpa: mem.Allocator, source: union(enum) { fd: i32, path: [:0]const u
     sock.* = .{
         .fd = undefined,
         .handshake_begin = try std.time.Instant.now(),
-        .handshake_done = false,
     };
 
     switch (source) {
@@ -85,8 +85,8 @@ pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
 
     self.fd = fd;
 
-    var message = Message.Hello.init();
-    try self.sendMessage(gpa, message.message());
+    var message = messages.Hello.init();
+    try self.sendMessage(gpa, Message.from(&message));
 }
 
 pub fn attemptFromFd(self: *Self, gpa: mem.Allocator, raw_fd: i32) !void {
@@ -101,8 +101,8 @@ pub fn attemptFromFd(self: *Self, gpa: mem.Allocator, raw_fd: i32) !void {
 
     self.fd = fd;
 
-    var message = Message.Hello.init();
-    try self.sendMessage(gpa, message.message());
+    var message = messages.Hello.init();
+    try self.sendMessage(gpa, Message.from(&message));
 }
 
 pub fn waitForHandshake(self: *Self, gpa: mem.Allocator) !void {
@@ -205,7 +205,7 @@ pub fn onGeneric(self: *Self, msg: *GenericProtocolMessage) void {
 }
 
 pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) !void {
-    const parsed = message.parseData(gpa) catch |err| {
+    const parsed = messages.parseData(message, gpa) catch |err| {
         log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
         return;
     };
@@ -213,8 +213,8 @@ pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) !void {
     log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
 
     var io: posix.iovec = .{
-        .base = @constCast(message.getData().ptr),
-        .len = message.getLen(),
+        .base = @constCast(message.vtable.getData(message.ptr).ptr),
+        .len = message.vtable.getLen(message.ptr),
     };
     var msg: c.msghdr = .{
         .msg_iov = @ptrCast(&io),
@@ -227,8 +227,9 @@ pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) !void {
     };
 
     var control_buf: std.ArrayList(u8) = .empty;
-    if (message.getFds().len > 0) {
-        try control_buf.resize(gpa, c.CMSG_LEN(@sizeOf(i32) * message.getFds().len));
+    const fds = message.vtable.getFds(message.ptr);
+    if (fds.len > 0) {
+        try control_buf.resize(gpa, c.CMSG_LEN(@sizeOf(i32) * fds.len));
 
         msg.msg_control = control_buf.items.ptr;
         msg.msg_controllen = control_buf.items.len;
@@ -236,12 +237,12 @@ pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) !void {
         const cmsg = c.CMSG_FIRSTHDR(&msg);
         cmsg.*.cmsg_level = c.SOL_SOCKET;
         cmsg.*.cmsg_type = c.SCM_RIGHTS;
-        cmsg.*.cmsg_len = c.CMSG_LEN(@sizeOf(i32) * message.getFds().len);
+        cmsg.*.cmsg_len = c.CMSG_LEN(@sizeOf(i32) * fds.len);
 
         const data_ptr = helpers.CMSG_DATA(@ptrCast(cmsg));
         const data: [*]i32 = @ptrCast(@alignCast(data_ptr));
-        for (0..message.getFds().len) |i| {
-            data[i] = message.getFds()[i];
+        for (0..fds.len) |i| {
+            data[i] = fds[i];
         }
     }
 

@@ -14,7 +14,7 @@ pub fn buildHyprwire(b: *std.Build, target: std.Build.ResolvedTarget, helpers: *
 
 pub fn buildHelpers(b: *std.Build, target: std.Build.ResolvedTarget) *std.Build.Module {
     const mod = b.addModule("helpers", .{
-        .root_source_file = b.path("src/helpers.zig"),
+        .root_source_file = b.path("src/helpers/root.zig"),
         .target = target,
     });
 

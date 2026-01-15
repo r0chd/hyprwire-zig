@@ -3,16 +3,16 @@ const c = @cImport(@cInclude("sys/socket.h"));
 const std = @import("std");
 const root = @import("../root.zig");
 const builtin = @import("builtin");
-const Message = @import("../message/messages/root.zig");
 const types = @import("../implementation/types.zig");
 const helpers = @import("helpers");
+const messages = @import("../message/messages/root.zig");
 
 const posix = std.posix;
 const log = std.log;
 const mem = std.mem;
 
+const Message = messages.Message;
 const GenericProtocol = @import("../message/messages/GenericProtocolMessage.zig");
-const NewObject = @import("../message/messages/NewObject.zig");
 const ServerObject = @import("ServerObject.zig");
 const ServerSocket = @import("ServerSocket.zig");
 
@@ -74,7 +74,7 @@ pub fn dispatchFirstPoll(self: *Self) void {
 }
 
 pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void {
-    const parsed = message.parseData(gpa) catch |err| {
+    const parsed = messages.parseData(message, gpa) catch |err| {
         log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
         return;
     };
@@ -82,8 +82,8 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void
     log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
 
     var io: posix.iovec = .{
-        .base = @constCast(message.getData().ptr),
-        .len = message.getLen(),
+        .base = @constCast(message.vtable.getData(message.ptr).ptr),
+        .len = message.vtable.getLen(message.ptr),
     };
     var msg: c.msghdr = .{
         .msg_iov = @ptrCast(&io),
@@ -96,8 +96,9 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void
     };
 
     var control_buf: std.ArrayList(u8) = .empty;
-    if (message.getFds().len != 0) {
-        control_buf.resize(gpa, c.CMSG_SPACE(@sizeOf(i32) * message.getFds().len)) catch |err| {
+    const fds = message.vtable.getFds(message.ptr);
+    if (fds.len != 0) {
+        control_buf.resize(gpa, c.CMSG_SPACE(@sizeOf(i32) * fds.len)) catch |err| {
             log.debug("Failed to resize control buffer: {}", .{err});
             return;
         };
@@ -107,12 +108,12 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void
         const cmsg = c.CMSG_FIRSTHDR(&msg);
         cmsg.*.cmsg_level = c.SOL_SOCKET;
         cmsg.*.cmsg_type = c.SCM_RIGHTS;
-        cmsg.*.cmsg_len = c.CMSG_LEN(@sizeOf(i32) * message.getFds().len);
+        cmsg.*.cmsg_len = c.CMSG_LEN(@sizeOf(i32) * fds.len);
 
         const data_ptr = helpers.CMSG_DATA(@ptrCast(cmsg));
         const data: [*]i32 = @ptrCast(@alignCast(data_ptr));
-        for (0..message.getFds().len) |i| {
-            data[i] = message.getFds()[i];
+        for (0..fds.len) |i| {
+            data[i] = fds[i];
         }
     }
 
@@ -171,7 +172,7 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
     obj.interface.protocol_name = try gpa.dupe(u8, protocol_name);
     errdefer gpa.free(obj.interface.protocol_name);
 
-    var ret = Message.NewObject.init(seq, obj.interface.id);
+    var ret = messages.NewObject.init(seq, obj.interface.id);
     self.sendMessage(gpa, ret.message());
 
     self.onBind(obj);

@@ -1,3 +1,7 @@
+const std = @import("std");
+
+const mem = std.mem;
+
 const ClientSocket = @import("../client/ClientSocket.zig");
 const ServerSocket = @import("../server/ServerSocket.zig");
 
@@ -12,15 +16,9 @@ const Defaults = struct {
         return null;
     }
 
-    fn deinit(ptr: *anyopaque) void {
-        const self: *const Self = @ptrCast(@alignCast(ptr));
-        if (self.getOnDeinit()) |onDeinit| {
-            onDeinit();
-        }
-    }
-
-    pub fn err(self: *Self, id: u32, message: [:0]const u8) void {
-        _ = self;
+    pub fn err(ptr: *anyopaque, alloc: mem.Allocator, id: u32, message: [:0]const u8) !void {
+        _ = alloc;
+        _ = ptr;
         _ = id;
         _ = message;
     }
@@ -31,8 +29,8 @@ pub const VTable = struct {
     getServerSock: *const fn (*anyopaque) ?*ServerSocket = Defaults.getServerSock,
     setData: *const fn (*anyopaque, ?*anyopaque) void,
     getData: *const fn (*anyopaque) ?*anyopaque,
-    err: *const fn (*anyopaque, u32, [:0]const u8) Defaults.err,
-    deinit: *const fn (*anyopaque, u32, [:0]const u8) void = Defaults.deinit,
+    err: *const fn (*anyopaque, mem.Allocator, u32, [:0]const u8) anyerror!void = Defaults.err,
+    deinit: *const fn (*anyopaque) void,
     setOnDeinit: *const fn (*anyopaque, *const fn () void) void,
     getOnDeinit: *const fn (*anyopaque) ?*const fn () void,
 };
@@ -58,8 +56,8 @@ pub fn getData(self: *Self) *anyopaque {
     return self.vtable.getData(self.ptr);
 }
 
-pub fn err(self: *Self, id: u32, message: [:0]const u8) void {
-    self.vtable.err(self.ptr, id, message);
+pub fn err(self: *const Self, alloc: mem.Allocator, id: u32, message: [:0]const u8) !void {
+    try self.vtable.err(self.ptr, alloc, id, message);
 }
 
 pub fn deinit(self: *Self, id: u32, message: [:0]const u8) void {
@@ -70,6 +68,6 @@ pub fn setOnDeinit(self: *Self, cb: *const fn () void) void {
     self.vtable.setOnDeinit(self.ptr, cb);
 }
 
-pub fn getOnDeinit(self: *Self) ?*const fn () void {
+pub fn getOnDeinit(self: *const Self) ?*const fn () void {
     return self.vtable.getOnDeinit(self.ptr);
 }

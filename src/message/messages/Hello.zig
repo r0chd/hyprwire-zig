@@ -4,38 +4,7 @@ const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
-const Message = @import("root.zig");
-
-pub const vtable: Message.VTable = .{
-    .getFds = getFds,
-    .getData = getData,
-    .getLen = getLen,
-    .getMessageType = getMessageType,
-};
-
-pub fn getFds(ptr: *anyopaque) []const i32 {
-    _ = ptr;
-
-    return &.{};
-}
-
-pub fn getData(ptr: *anyopaque) []const u8 {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
-
-    return self.data;
-}
-
-pub fn getLen(ptr: *anyopaque) usize {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
-
-    return self.len;
-}
-
-pub fn getMessageType(ptr: *anyopaque) MessageType {
-    const self: *const Self = @ptrCast(@alignCast(ptr));
-
-    return self.message_type;
-}
+const Message = @import("root.zig").Message;
 
 data: []const u8,
 len: usize,
@@ -83,11 +52,22 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     };
 }
 
-pub fn message(self: *Self) Message {
-    return .{
-        .ptr = self,
-        .vtable = &vtable,
-    };
+pub fn getFds(self: *Self) []const i32 {
+    _ = self;
+
+    return &.{};
+}
+
+pub fn getData(self: *Self) []const u8 {
+    return self.data;
+}
+
+pub fn getLen(self: *Self) usize {
+    return self.len;
+}
+
+pub fn getMessageType(self: *Self) MessageType {
+    return self.message_type;
 }
 
 test "Hello" {
@@ -105,7 +85,7 @@ test "Hello" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, msg.message());
+        server_client.sendMessage(alloc, Message.from(&msg));
     }
     {
         const bytes = [_]u8{
@@ -125,6 +105,6 @@ test "Hello" {
             posix.close(pipes[1]);
         }
         const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, msg.message());
+        server_client.sendMessage(alloc, Message.from(&msg));
     }
 }
