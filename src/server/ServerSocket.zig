@@ -11,7 +11,7 @@ const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRaw
 const FatalError = @import("../message/messages/FatalProtocolError.zig");
 const RoundtripDone = @import("../message/messages/RoundtripDone.zig");
 
-const ProtocolServerImplementation = types.ProtocolServerImplementation;
+const ProtocolServerImplementation = types.server_impl.ProtocolServerImplementation;
 const MessageParsingResult = message_parser.MessageParsingResult;
 const Fd = helpers.Fd;
 
@@ -32,7 +32,7 @@ wakeup_fd: Fd,
 wakeup_write_fd: Fd,
 pollfds: std.ArrayList(posix.pollfd) = .empty,
 clients: std.ArrayList(*ServerClient) = .empty,
-impls: std.ArrayList(*const ProtocolServerImplementation) = .empty,
+impls: std.ArrayList(ProtocolServerImplementation) = .empty,
 thread_can_poll: bool = false,
 poll_thread: ?std.Thread = null,
 poll_mtx: std.Thread.Mutex.Recursive = .init,
@@ -144,7 +144,7 @@ pub fn attemptEmpty(self: *Self, gpa: mem.Allocator) !void {
     try self.recheckPollFds(gpa);
 }
 
-pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: *const ProtocolServerImplementation) !void {
+pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: ProtocolServerImplementation) !void {
     try self.impls.append(gpa, impl);
 }
 
@@ -424,8 +424,8 @@ pub fn createObject(gpa: mem.Allocator, client: ?*ServerClient, reference: ?*Ser
 
     if (reference) |ref| {
         if (client) |c| {
-            const protocol_name = ref.interface.protocol_name;
-            const version = ref.interface.version;
+            const protocol_name = ref.protocol_name;
+            const version = ref.version;
 
             const new_object = c.createObject(gpa, protocol_name, object, version, seq) catch return null;
             return new_object;

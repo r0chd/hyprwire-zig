@@ -23,5 +23,10 @@ pub fn main() !void {
 
     try sock.waitForHandshake(alloc);
 
+    // Bind to the test protocol
+    var bind_msg = try hw.messages.BindProtocol.init(alloc, "test_protocol_v1", 1, 1);
+    defer bind_msg.deinit(alloc);
+    try sock.sendMessage(alloc, hw.messages.Message.from(&bind_msg));
+
     // const spec = sock.getSpec()
 }

@@ -16,7 +16,7 @@ const fs = std.fs;
 
 const ClientObject = @import("ClientObject.zig");
 
-const ProtocolClientImplementation = types.ProtocolClientImplementation;
+const ProtocolClientImplementation = types.client_impl.ProtocolClientImplementation;
 const ProtocolSpec = types.ProtocolSpec;
 const Fd = helpers.Fd;
 

@@ -96,10 +96,11 @@ pub fn main() !void {
 
     const proto_data = try ProtoData.init(alloc, cli.protopath, &document);
 
-    const kinds = [_]GeneratedKind{ .client, .server, .spec };
-    for (kinds) |kind| {
-        try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, kind);
+    switch (cli.role) {
+        .client => try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .client),
+        .server => try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .server),
     }
+    try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .spec);
 }
 
 const GeneratedKind = enum {

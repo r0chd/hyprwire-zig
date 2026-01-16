@@ -15,6 +15,7 @@ const Message = messages.Message;
 const GenericProtocol = @import("../message/messages/GenericProtocolMessage.zig");
 const ServerObject = @import("ServerObject.zig");
 const ServerSocket = @import("ServerSocket.zig");
+const Object = types.Object;
 
 const Fd = helpers.Fd;
 const steadyMillis = root.steadyMillis;
@@ -126,26 +127,25 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
     const obj = try gpa.create(ServerObject);
     errdefer gpa.destroy(obj);
     obj.* = ServerObject.init(self);
-    obj.interface.id = self.max_id;
+    obj.id = self.max_id;
     self.max_id += 1;
-    obj.interface.self = obj;
-    obj.interface.version = version;
+    obj.version = version;
     try self.objects.append(gpa, obj);
 
     var found_spec: ?*const types.ProtocolObjectSpec = null;
     var protocol_name: []const u8 = "";
 
     for (self.server.?.impls.items) |impl| {
-        const protocol_spec = impl.protocol();
-        if (!mem.eql(u8, protocol_spec.specName(), protocol)) continue;
+        const protocol_spec = impl.vtable.protocol(impl.ptr);
+        if (!mem.eql(u8, protocol_spec.vtable.specName(protocol_spec.ptr), protocol)) continue;
 
-        for (protocol_spec.getObjects()) |spec| {
-            if (object.len > 0 and !mem.eql(u8, spec.objectName(), object)) continue;
+        for (protocol_spec.vtable.objects(protocol_spec.ptr)) |spec| {
+            if (object.len > 0 and !mem.eql(u8, spec.vtable.objectName(spec.ptr), object)) continue;
             found_spec = &spec;
             break;
         }
 
-        protocol_name = protocol_spec.specName();
+        protocol_name = protocol_spec.vtable.specName(protocol_spec.ptr);
 
         if (found_spec == null) {
             log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd.raw, steadyMillis() });
@@ -153,8 +153,8 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
             return null;
         }
 
-        if (protocol_spec.specVer() < version) {
-            log.err("[{} @ {}] Error: createObject for protocol {s} object {s} for version {}, but we have only {}", .{ self.fd.raw, steadyMillis(), protocol_name, object, version, protocol_spec.specVer() });
+        if (protocol_spec.vtable.specVer(protocol_spec.ptr) < version) {
+            log.err("[{} @ {}] Error: createObject for protocol {s} object {s} for version {}, but we have only {}", .{ self.fd.raw, steadyMillis(), protocol_name, object, version, protocol_spec.vtable.specVer(protocol_spec.ptr) });
             self.@"error" = true;
             return null;
         }
@@ -168,44 +168,44 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
         return null;
     }
 
-    obj.interface.spec = found_spec;
-    obj.interface.protocol_name = try gpa.dupe(u8, protocol_name);
-    errdefer gpa.free(obj.interface.protocol_name);
+    obj.spec = found_spec;
+    obj.protocol_name = try gpa.dupe(u8, protocol_name);
+    errdefer gpa.free(obj.protocol_name);
 
-    var ret = messages.NewObject.init(seq, obj.interface.id);
-    self.sendMessage(gpa, ret.message());
+    var ret = messages.NewObject.init(seq, obj.id);
+    self.sendMessage(gpa, Message.from(&ret));
 
-    self.onBind(obj);
+    try self.onBind(gpa, obj);
 
     return obj;
 }
 
-pub fn onBind(self: *Self, obj: *ServerObject) void {
-    if (self.server) |server| {
-        for (server.impls.items) |impl| {
-            if (!mem.eql(u8, impl.protocol().spec_name, obj.interface.protocol_name)) {
-                continue;
+pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
+    const server = self.server orelse return;
+    for (server.impls.items) |impl| {
+        const protocol = impl.vtable.protocol(impl.ptr);
+        if (!mem.eql(u8, protocol.vtable.specName(protocol.ptr), obj.protocol_name)) continue;
+
+        const implementations = try impl.vtable.implementation(impl.ptr, gpa);
+        defer gpa.free(implementations);
+
+        for (implementations) |implementation| {
+            const spec = obj.spec orelse continue;
+            if (!mem.eql(u8, implementation.object_name, spec.vtable.objectName(spec.ptr))) continue;
+
+            if (implementation.onBind) |on_bind| {
+                on_bind(Object.from(obj));
             }
-
-            for (impl.implementations) |implementation| {
-                if (mem.eql(u8, implementation.object_name, obj.interface.spec.?.objectName())) {
-                    continue;
-                }
-
-                if (implementation.on_bind) |on_bind| {
-                    on_bind(obj);
-                }
-                break;
-            }
-
             break;
         }
+
+        break;
     }
 }
 
 pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: GenericProtocol) !void {
     for (self.objects.items) |obj| {
-        if (obj.interface.id == msg.object) {
+        if (obj.id == msg.object) {
             try obj.called(gpa, msg.method, msg.data_span, msg.fds_list);
             break;
         }

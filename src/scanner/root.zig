@@ -1,9 +1,4 @@
 const std = @import("std");
-const parser = @import("parser.zig");
-const xml = @import("xml");
-const client = @import("client.zig");
-const server = @import("server.zig");
-const spec = @import("spec.zig");
 
 const fs = std.fs;
 

@@ -7,6 +7,8 @@ const ClientSocket = @import("../client/ClientSocket.zig");
 const ServerSocket = @import("../server/ServerSocket.zig");
 
 pub const Object = helpers.trait.Trait(.{
+    .call = fn (u32, ...) callconv(.c) void,
+    .listen = fn (mem.Allocator, u32, *const fn (*anyopaque) void) anyerror!void,
     .clientSock = fn () ?*ClientSocket,
     .serverSock = fn () ?*ServerSocket,
     .setData = fn (?*anyopaque) void,

@@ -20,40 +20,8 @@ pub const WireObject = helpers.trait.Trait(.{
     .server = fn () bool,
 }, .{Object});
 
-pub fn call(self: WireObject, id: u32, args: anytype) !u32 {
-    _ = self;
-    _ = id;
-    const ArgsType = @TypeOf(args);
-    const args_type_info = @typeInfo(ArgsType);
-    if (args_type_info != .@"struct") {
-        @compileError("expected tuple or struct argument, found " ++ @typeName(ArgsType));
-    }
-
-    const fields_info = args_type_info.@"struct".fields;
-    const max_format_args = @typeInfo(std.fmt.ArgSetType).int.bits;
-    if (fields_info.len > max_format_args) {
-        @compileError("32 arguments max are supported per call");
-    }
-
-    inline for (fields_info) |field_info| {
-        const arg = @field(args, field_info.name);
-        _ = arg;
-    }
-
-    return 0;
-}
-
-pub fn listen(self: WireObject, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) !void {
-    var listeners = self.vtable.getListeners(self.ptr);
-
-    if (listeners.items.len <= id) {
-        try listeners.resize(gpa, id + 1);
-    }
-    listeners.appendAssumeCapacity(callback);
-}
-
 pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, fds: std.ArrayList(i32)) !void {
-    const obj = Object.from(self.ptr);
+    const obj = Object.from(&self);
 
     const methods = self.vtable.methodsIn(self.ptr);
 

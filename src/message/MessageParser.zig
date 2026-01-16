@@ -83,7 +83,8 @@ pub const MessageParser = struct {
         if (meta.intToEnum(MessageType, raw.data.items[off])) |message_type| {
             switch (message_type) {
                 .sup => {
-                    var msg = messages.Hello.init();
+                    const versions = [_]u32{1};
+                    var msg = try messages.HandshakeBegin.init(gpa, &versions);
                     const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
                         return msg.getLen();
@@ -121,6 +122,11 @@ pub const MessageParser = struct {
                     };
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
+
+                    // Handle binding to protocol
+                    _ = try client.createObject(gpa, msg.protocol, "", msg.version, msg.seq);
+
+                    return msg.getLen();
                 },
                 .generic_protocol_message => {
                     var msg = try messages.GenericProtocolMessage.fromBytes(gpa, raw.data.items, &fds, off);
@@ -209,6 +215,29 @@ pub const MessageParser = struct {
 
                     var ack_msg = messages.HandshakeAck.init(1);
                     try client.sendMessage(gpa, Message.from(&ack_msg));
+
+                    return msg.getLen();
+                },
+                .handshake_ack => {
+                    var msg = messages.HandshakeAck.fromBytes(raw.data.items, off) catch |err| {
+                        log.err("server at fd {} core protocol error: malformed message recvd (handshake_ack): {s}", .{ client.fd.raw, @errorName(err) });
+                        client.@"error" = true;
+                        return 0;
+                    };
+                    if (msg.getLen() == 0) {
+                        log.err("server at fd {} core protocol error: malformed message recvd (handshake_ack)", .{client.fd.raw});
+                        client.@"error" = true;
+                        return 0;
+                    }
+
+                    const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
+                        log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
+                        return msg.getLen();
+                    };
+                    defer gpa.free(parsed);
+                    log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
+
+                    client.handshake_done = true;
 
                     return msg.getLen();
                 },
@@ -316,7 +345,6 @@ pub const MessageParser = struct {
                     return msg.getLen();
                 },
                 .sup,
-                .handshake_ack,
                 .bind_protocol,
                 .roundtrip_request,
                 => |tag| {

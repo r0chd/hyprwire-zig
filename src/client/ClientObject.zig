@@ -71,7 +71,7 @@ pub fn setOnDeinit(self: *Self, cb: *const fn () void) void {
 
 pub fn methodsOut(self: *Self) []const Method {
     if (self.spec) |spec| {
-        return spec.c2s();
+        return spec.vtable.c2s(spec.ptr);
     } else {
         return &.{};
     }
@@ -79,7 +79,7 @@ pub fn methodsOut(self: *Self) []const Method {
 
 pub fn methodsIn(self: *Self) []const Method {
     if (self.spec) |spec| {
-        return spec.s2c();
+        return spec.vtable.s2c(spec.ptr);
     } else {
         return &.{};
     }
@@ -117,6 +117,18 @@ pub fn deinit(self: *Self) void {
     if (self.on_deinit) |onDeinit| {
         onDeinit();
     }
+}
+
+pub fn call(self: *Self, id: u32, ...) callconv(.c) void {
+    _ = self;
+    _ = id;
+}
+
+pub fn listen(self: *Self, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) !void {
+    if (self.listeners.items.len <= id) {
+        try self.listeners.resize(gpa, id + 1);
+    }
+    self.listeners.appendAssumeCapacity(callback);
 }
 
 test {
