@@ -132,6 +132,14 @@ pub const MyObjectV1Spec = struct {
     }
 };
 
+pub const MyManagerV1 = struct {
+    pub const interface = ProtocolObjectSpec.from(&MyManagerV1Spec.init());
+};
+
+pub const MyObjectV1 = struct {
+    pub const interface = ProtocolObjectSpec.from(&MyObjectV1Spec.init());
+};
+
 pub const TestProtocolV1ProtocolSpec = struct {
     const Self = @This();
 
@@ -139,7 +147,7 @@ pub const TestProtocolV1ProtocolSpec = struct {
         return .{};
     }
 
-    pub fn specName(self: *Self) []const u8 {
+    pub fn specName(self: *Self) [:0]const u8 {
         _ = self;
         return "test_protocol_v1";
     }
@@ -152,8 +160,10 @@ pub const TestProtocolV1ProtocolSpec = struct {
     pub fn objects(self: *Self) []const ProtocolObjectSpec {
         _ = self;
         return &.{
-            ProtocolObjectSpec.from(&MyManagerV1Spec.init()),
-            ProtocolObjectSpec.from(&MyObjectV1Spec.init()),
+            MyManagerV1.interface,
+            MyObjectV1.interface,
         };
     }
 };
+
+pub const protocol = TestProtocolV1ProtocolSpec{};

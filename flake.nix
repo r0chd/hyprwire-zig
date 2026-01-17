@@ -33,6 +33,7 @@
               nixfmt-rfc-style
               valgrind
               zig-zlint
+              libffi
               ;
           };
         };

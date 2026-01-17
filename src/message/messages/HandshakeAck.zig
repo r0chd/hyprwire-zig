@@ -69,40 +69,34 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     };
 }
 
-test "HandshakeAck" {
-    const ServerClient = @import("../../server/ServerClient.zig");
-    const posix = std.posix;
-
+test "HandshakeAck.init" {
+    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    {
-        var msg = Self.init(1);
+    var msg = Self.init(1);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
-    {
-        // Message format: [type][UINT_magic][version:4][END]
-        // version = 1 (0x01 0x00 0x00 0x00)
-        const bytes = [_]u8{
-            @intFromEnum(MessageType.handshake_ack),
-            @intFromEnum(MessageMagic.type_uint),
-            0x01,                           0x00, 0x00, 0x00, // version = 1
-            @intFromEnum(MessageMagic.end),
-        };
-        var msg = try Self.fromBytes(&bytes, 0);
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
+    std.debug.print("HandshakeAck: {s}\n", .{data});
+}
+
+test "HandshakeAck.fromBytes" {
+    const messages = @import("./root.zig");
+    const alloc = std.testing.allocator;
+
+    // Message format: [type][UINT_magic][version:4][END]
+    // version = 1 (0x01 0x00 0x00 0x00)
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.handshake_ack),
+        @intFromEnum(MessageMagic.type_uint),
+        0x01,                           0x00, 0x00, 0x00, // version = 1
+        @intFromEnum(MessageMagic.end),
+    };
+    var msg = try Self.fromBytes(&bytes, 0);
+
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
+
+    std.debug.print("HandshakeAck: {s}\n", .{data});
 }

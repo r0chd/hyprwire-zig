@@ -12,7 +12,7 @@ const log = std.log;
 const mem = std.mem;
 
 const Message = messages.Message;
-const GenericProtocol = @import("../message/messages/GenericProtocolMessage.zig");
+const WireObject = types.WireObject;
 const ServerObject = @import("ServerObject.zig");
 const ServerSocket = @import("ServerSocket.zig");
 const Object = types.Object;
@@ -203,10 +203,10 @@ pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
     }
 }
 
-pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: GenericProtocol) !void {
+pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
-            try obj.called(gpa, msg.method, msg.data_span, msg.fds_list);
+            try types.called(WireObject.from(&obj), gpa, msg.method, msg.data_span, msg.fds_list);
             break;
         }
     }

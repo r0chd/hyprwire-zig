@@ -1,8 +1,14 @@
 const std = @import("std");
 const hw = @import("hyprwire");
+const client = @import("test_protocol_v1-client.zig");
+const spec = @import("test_protocol_v1-spec.zig");
 
 const posix = std.posix;
 const fmt = std.fmt;
+
+const ProtocolClientImplementation = hw.types.client_impl.ProtocolClientImplementation;
+
+const TEST_PROTOCOL_VERSION: u32 = 1;
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -16,17 +22,62 @@ pub fn main() !void {
     const socket_path = try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{xdg_runtime_dir}, 0);
     defer alloc.free(socket_path);
 
-    const sock = try hw.ClientSocket.open(alloc, .{ .path = socket_path });
-    defer sock.deinit(alloc);
+    const socket = try hw.ClientSocket.open(alloc, .{ .path = socket_path });
+    defer socket.deinit(alloc);
 
-    // sock.addImplementation(impl);
+    var impl = client.TestProtocolV1Impl.init(1);
+    try socket.addImplementation(alloc, ProtocolClientImplementation.from(&impl));
 
-    try sock.waitForHandshake(alloc);
+    try socket.waitForHandshake(alloc);
 
-    // Bind to the test protocol
-    var bind_msg = try hw.messages.BindProtocol.init(alloc, "test_protocol_v1", 1, 1);
-    defer bind_msg.deinit(alloc);
-    try sock.sendMessage(alloc, hw.messages.Message.from(&bind_msg));
+    var protocol = impl.protocol();
+    const SPEC = socket.getSpec(protocol.vtable.specName(protocol.ptr)) orelse {
+        std.debug.print("err: test protocol unsupported\n", .{});
+        std.process.exit(1);
+    };
 
-    // const spec = sock.getSpec()
+    std.debug.print("test protocol supported at version {}. Binding.\n", .{SPEC.vtable.specVer(SPEC.ptr)});
+
+    const obj = try socket.bindProtocol(alloc, impl.protocol(), TEST_PROTOCOL_VERSION);
+    var manager = client.MyManagerV1Object.init(obj);
+
+    std.debug.print("Bound!", .{});
+
+    const pipes = try posix.pipe();
+    defer {
+        posix.close(pipes[0]);
+        posix.close(pipes[1]);
+    }
+
+    _ = try posix.write(pipes[1], "pipe!");
+
+    std.debug.print("Will send fd {}\n", .{pipes[0]});
+
+    manager.sendSendMessage("Hello!");
+    manager.sendSendMessageFd(pipes[0]);
+    manager.sendSendMessageArray(&.{ "Hello", "via", "array!" });
+    manager.sendSendMessageArray(&.{});
+    manager.sendSendMessageArrayUint(&.{ 69, 420, 2137 });
+    manager.setSendMessage(&message);
+
+    try socket.roundtrip(alloc);
+
+    var object = client.MyObjectV1Object.init(manager.sendMakeObject().?);
+    object.setSendMessage(&messageOnObject);
+    object.sendSendMessage("Hello on object");
+    object.sendSendEnum(spec.TestProtocolV1MyEnum.world);
+
+    std.debug.print("Sent hello!\n", .{});
+
+    while (socket.dispatchEvents(alloc, true)) {} else |_| {}
+}
+
+fn message(self: *client.MyManagerV1Object, msg: [:0]const u8) void {
+    _ = self;
+    std.debug.print("Server says {s}\n", .{msg});
+}
+
+fn messageOnObject(self: *client.MyObjectV1Object, msg: [:0]const u8) void {
+    _ = self;
+    std.debug.print("Server says on object {s}\n", .{msg});
 }

@@ -70,41 +70,35 @@ pub fn getMessageType(self: *Self) MessageType {
     return self.message_type;
 }
 
-test "Hello" {
-    const ServerClient = @import("../../server/ServerClient.zig");
-    const posix = std.posix;
-
+test "Hello.init" {
+    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    {
-        var msg = Self.init();
+    var msg = Self.init();
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
-    {
-        const bytes = [_]u8{
-            @intFromEnum(MessageType.sup),
-            @intFromEnum(MessageMagic.type_varchar),
-            0x03,
-            'V',
-            'A',
-            'X',
-            @intFromEnum(MessageMagic.end),
-        };
-        var msg = try Self.fromBytes(&bytes, 0);
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
+    std.debug.print("Hello: {s}\n", .{data});
+}
+
+test "Hello.fromBytes" {
+    const messages = @import("./root.zig");
+    const alloc = std.testing.allocator;
+
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.sup),
+        @intFromEnum(MessageMagic.type_varchar),
+        0x03,
+        'V',
+        'A',
+        'X',
+        @intFromEnum(MessageMagic.end),
+    };
+    var msg = try Self.fromBytes(&bytes, 0);
+
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
+
+    std.debug.print("Hello: {s}\n", .{data});
 }

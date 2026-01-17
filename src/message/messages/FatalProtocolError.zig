@@ -119,49 +119,43 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.data);
 }
 
-test "FatalProtocolError" {
-    const ServerClient = @import("../../server/ServerClient.zig");
-    const posix = std.posix;
-
+test "FatalProtocolError.init" {
+    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    {
-        var msg = try Self.init(alloc, 3, 5, "test error");
-        defer msg.deinit(alloc);
+    var msg = try Self.init(alloc, 3, 5, "test error");
+    defer msg.deinit(alloc);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
-    {
-        // Message format: [type][UINT_magic][objectId:4][UINT_magic][errorId:4][VARCHAR_magic][varint_len][errorMsg][END]
-        // objectId = 3 (0x03 0x00 0x00 0x00)
-        // errorId = 5 (0x05 0x00 0x00 0x00)
-        // errorMsg = "test error" (10 bytes, varint = 0x0A)
-        const bytes = [_]u8{
-            @intFromEnum(MessageType.fatal_protocol_error),
-            @intFromEnum(MessageMagic.type_uint),
-            0x03,                                 0x00, 0x00, 0x00, // objectId = 3
-            @intFromEnum(MessageMagic.type_uint),
-            0x05,                                    0x00, 0x00, 0x00, // errorId = 5
-            @intFromEnum(MessageMagic.type_varchar),
-            0x0A, // errorMsg length = 10
-            't',                            'e', 's', 't', ' ', 'e', 'r', 'r', 'o', 'r', // "test error"
-            @intFromEnum(MessageMagic.end),
-        };
-        var msg = try Self.fromBytes(alloc, &bytes, 0);
-        defer msg.deinit(alloc);
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
+    std.debug.print("FatalProtocolError: {s}\n", .{data});
+}
+
+test "FatalProtocolError.fromBytes" {
+    const messages = @import("./root.zig");
+    const alloc = std.testing.allocator;
+
+    // Message format: [type][UINT_magic][objectId:4][UINT_magic][errorId:4][VARCHAR_magic][varint_len][errorMsg][END]
+    // objectId = 3 (0x03 0x00 0x00 0x00)
+    // errorId = 5 (0x05 0x00 0x00 0x00)
+    // errorMsg = "test error" (10 bytes, varint = 0x0A)
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.fatal_protocol_error),
+        @intFromEnum(MessageMagic.type_uint),
+        0x03,                                 0x00, 0x00, 0x00, // objectId = 3
+        @intFromEnum(MessageMagic.type_uint),
+        0x05,                                    0x00, 0x00, 0x00, // errorId = 5
+        @intFromEnum(MessageMagic.type_varchar),
+        0x0A, // errorMsg length = 10
+        't',                            'e', 's', 't', ' ', 'e', 'r', 'r', 'o', 'r', // "test error"
+        @intFromEnum(MessageMagic.end),
+    };
+    var msg = try Self.fromBytes(alloc, &bytes, 0);
+    defer msg.deinit(alloc);
+
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
+
+    std.debug.print("FatalProtocolError: {s}\n", .{data});
 }

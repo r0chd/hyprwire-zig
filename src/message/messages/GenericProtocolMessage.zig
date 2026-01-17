@@ -168,55 +168,49 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.fds_list);
 }
 
-test "GenericProtocolMessage" {
-    const ServerClient = @import("../../server/ServerClient.zig");
-    const posix = std.posix;
-
+test "GenericProtocolMessage.init" {
+    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    {
-        const data = [_]u8{
-            @intFromEnum(MessageType.generic_protocol_message),
-            @intFromEnum(MessageMagic.type_object),
-            0x01,                                 0x00, 0x00, 0x00, // object = 1
-            @intFromEnum(MessageMagic.type_uint),
-            0x02,                           0x00, 0x00, 0x00, // method = 2
-            @intFromEnum(MessageMagic.end),
-        };
-        var msg = try Self.init(alloc, &data, &.{});
-        defer msg.deinit(alloc);
+    const data = [_]u8{
+        @intFromEnum(MessageType.generic_protocol_message),
+        @intFromEnum(MessageMagic.type_object),
+        0x01,                                 0x00, 0x00, 0x00, // object = 1
+        @intFromEnum(MessageMagic.type_uint),
+        0x02,                           0x00, 0x00, 0x00, // method = 2
+        @intFromEnum(MessageMagic.end),
+    };
+    var msg = try Self.init(alloc, &data, &.{});
+    defer msg.deinit(alloc);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
-    {
-        // Message format: [type][OBJECT_magic][object:4][UINT_magic][method:4][...data...][END]
-        // object = 1 (0x01 0x00 0x00 0x00)
-        // method = 2 (0x02 0x00 0x00 0x00)
-        const bytes = [_]u8{
-            @intFromEnum(MessageType.generic_protocol_message),
-            @intFromEnum(MessageMagic.type_object),
-            0x01,                                 0x00, 0x00, 0x00, // object = 1
-            @intFromEnum(MessageMagic.type_uint),
-            0x02,                           0x00, 0x00, 0x00, // method = 2
-            @intFromEnum(MessageMagic.end),
-        };
-        var fds_list: std.ArrayList(i32) = .empty;
-        defer fds_list.deinit(alloc);
-        var msg = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
-        defer msg.deinit(alloc);
+    const parsed_data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(parsed_data);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
+    std.debug.print("GenericProtocolMessage: {s}\n", .{parsed_data});
+}
+
+test "GenericProtocolMessage.fromBytes" {
+    const messages = @import("./root.zig");
+    const alloc = std.testing.allocator;
+
+    // Message format: [type][OBJECT_magic][object:4][UINT_magic][method:4][...data...][END]
+    // object = 1 (0x01 0x00 0x00 0x00)
+    // method = 2 (0x02 0x00 0x00 0x00)
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.generic_protocol_message),
+        @intFromEnum(MessageMagic.type_object),
+        0x01,                                 0x00, 0x00, 0x00, // object = 1
+        @intFromEnum(MessageMagic.type_uint),
+        0x02,                           0x00, 0x00, 0x00, // method = 2
+        @intFromEnum(MessageMagic.end),
+    };
+    var fds_list: std.ArrayList(i32) = .empty;
+    defer fds_list.deinit(alloc);
+    var msg = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
+    defer msg.deinit(alloc);
+
+    const parsed_data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(parsed_data);
+
+    std.debug.print("GenericProtocolMessage: {s}\n", .{parsed_data});
 }

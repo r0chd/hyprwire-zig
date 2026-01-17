@@ -7,6 +7,7 @@ pub fn buildHyprwire(b: *std.Build, target: std.Build.ResolvedTarget, helpers: *
         .target = target,
         .link_libc = true,
     });
+    mod.linkSystemLibrary("ffi", .{});
     mod.addImport("helpers", helpers);
 
     return mod;
@@ -39,6 +40,7 @@ pub fn buildExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
         }),
     });
     simple_client.root_module.link_libc = true;
+    simple_client.root_module.linkSystemLibrary("ffi", .{});
     b.installArtifact(simple_client);
 
     // Build simple-server
@@ -54,6 +56,7 @@ pub fn buildExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: 
         }),
     });
     simple_server.root_module.link_libc = true;
+    simple_server.root_module.linkSystemLibrary("ffi", .{});
     b.installArtifact(simple_server);
 }
 
@@ -102,6 +105,7 @@ pub fn build(b: *std.Build) void {
 
     scanner.root_module.addImport("xml", xml.module("xml"));
     scanner.root_module.addImport("hyprwire", hyprwire);
+    scanner.root_module.linkSystemLibrary("ffi", .{});
 
     b.installArtifact(scanner);
 

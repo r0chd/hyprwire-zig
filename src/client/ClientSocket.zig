@@ -6,6 +6,8 @@ const c = @cImport(@cInclude("sys/socket.h"));
 
 const messages = @import("../message/messages/root.zig");
 const Message = messages.Message;
+const Object = types.Object;
+const WireObject = types.WireObject;
 const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
 const GenericProtocolMessage = messages.GenericProtocolMessage;
 
@@ -25,15 +27,18 @@ const steadyMillis = @import("../root.zig").steadyMillis;
 const HANDSHAKE_MAX_MS: i64 = 5000;
 
 fd: Fd,
-impls: std.ArrayList(*const ProtocolClientImplementation) = .empty,
-server_specs: std.ArrayList(*const ProtocolSpec) = .empty,
+impls: std.ArrayList(ProtocolClientImplementation) = .empty,
+server_specs: std.ArrayList(ProtocolSpec) = .empty,
 pollfds: std.ArrayList(posix.pollfd) = .empty,
 objects: std.ArrayList(ClientObject) = .empty,
 handshake_begin: std.time.Instant,
 @"error": bool = false,
 handshake_done: bool = false,
-pending_socket_data: std.ArrayList(SocketRawParsedMessage) = .empty,
 last_ackd_roundtrip_seq: u32 = 0,
+seq: u32 = 0,
+
+pending_socket_data: std.ArrayList(SocketRawParsedMessage) = .empty,
+waiting_on_object: ?*ClientObject = null,
 
 const Self = @This();
 
@@ -54,6 +59,7 @@ pub fn open(gpa: mem.Allocator, source: union(enum) { fd: i32, path: [:0]const u
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    self.impls.deinit(gpa);
     self.pollfds.deinit(gpa);
     self.fd.close();
     gpa.destroy(self);
@@ -105,6 +111,10 @@ pub fn attemptFromFd(self: *Self, gpa: mem.Allocator, raw_fd: i32) !void {
     try self.sendMessage(gpa, Message.from(&message));
 }
 
+pub fn addImplementation(self: *Self, gpa: mem.Allocator, x: ProtocolClientImplementation) !void {
+    try self.impls.append(gpa, x);
+}
+
 pub fn waitForHandshake(self: *Self, gpa: mem.Allocator) !void {
     self.handshake_begin = try std.time.Instant.now();
 
@@ -113,6 +123,86 @@ pub fn waitForHandshake(self: *Self, gpa: mem.Allocator) !void {
     }
 
     return error.TODO;
+}
+
+pub fn isHandshakeDone(self: *Self) bool {
+    return self.handshake_done;
+}
+
+pub fn getSpec(self: *Self, name: [:0]const u8) ?ProtocolSpec {
+    for (self.server_specs.items) |s| {
+        if (mem.eql(u8, s.vtable.specName(s.ptr), name)) return s;
+    }
+
+    return null;
+}
+
+pub fn onSeq(self: *Self, seq: u32, id: u32) void {
+    for (self.objects.items) |*object| {
+        if (object.seq == seq) {
+            object.id = id;
+            break;
+        }
+    }
+}
+
+pub fn bindProtocol(self: *Self, gpa: mem.Allocator, spec: ProtocolSpec, version: u32) !Object {
+    if (version > spec.vtable.specVer(spec.ptr)) {
+        log.debug("version {} is larger than current spec ver of {}", .{ version, spec.vtable.specVer(spec.ptr) });
+        self.disconnectOnError();
+        return error.VersionMismatch;
+    }
+
+    var object = ClientObject.init(self);
+    const objects = spec.vtable.objects(spec.ptr);
+    object.spec = objects[objects.len - 1];
+    self.seq += 1;
+    object.seq = self.seq;
+    object.version = version;
+    object.protocol_name = spec.vtable.specName(spec.ptr);
+    try self.objects.append(gpa, object);
+
+    const bind_message = try messages.BindProtocol.init(gpa, spec.vtable.specName(spec.ptr), object.seq, version);
+    try self.sendMessage(gpa, Message.from(&bind_message));
+
+    try self.waitForObject(gpa, &object);
+
+    return Object.from(&self.objects.getLast());
+}
+
+pub fn makeObject(self: *Self, gpa: mem.Allocator, protocol_name: [:0]const u8, object_name: [:0]const u8, seq: u32) ?*ClientObject {
+    var object = ClientObject.init(self);
+    object.protocol_name = protocol_name;
+
+    for (self.impls.items) |impl| {
+        var protocol = impl.vtable.protocol(impl.ptr);
+        if (!mem.eql(u8, protocol.vtable.specName(protocol.ptr), protocol_name)) continue;
+
+        for (protocol.vtable.objects(protocol.ptr)) |obj| {
+            if (!mem.eql(u8, obj.vtable.objectName(obj.ptr), object_name)) continue;
+
+            object.spec = obj;
+            break;
+        }
+        break;
+    }
+
+    if (object.spec == null) {
+        return null;
+    }
+
+    object.seq = seq;
+    object.version = 0; // TODO: client version doesn't matter that much, but for verification's sake we could fix this
+    self.objects.append(gpa, object);
+    return object;
+}
+
+pub fn waitForObject(self: *Self, gpa: mem.Allocator, x: *ClientObject) !void {
+    self.waiting_on_object = x;
+    while (x.id == 0 and !self.@"error") {
+        try self.dispatchEvents(gpa, true);
+    }
+    self.waiting_on_object = null;
 }
 
 pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
@@ -182,26 +272,21 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
     }
 }
 
-pub fn onSeq(self: *Self, seq: u32, id: u32) void {
-    for (self.objects.items) |object| {
-        _ = seq;
-        _ = id;
-        _ = object;
-        // if (object.seq == seq) {
-        //     object.id = id;
-        //     break;
-        // }
+pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
+    for (self.objects.items) |obj| {
+        if (obj.id == msg.object) {
+            try types.called(WireObject.from(&obj), gpa, msg.method, msg.data_span, msg.fds_list);
+            break;
+        }
     }
 }
 
-pub fn onGeneric(self: *Self, msg: *GenericProtocolMessage) void {
-    for (self.objects.items) |object| {
-        _ = msg;
-        _ = object;
-        // if (object.id == msg.object) {
-        //     object.called(msg.method, msg.data_span, msg.fds_list);
-        // }
+pub fn objectForId(self: *Self, id: u32) ?Object {
+    for (self.objects.items) |*object| {
+        if (object.id == id) return Object.from(object);
     }
+
+    return null;
 }
 
 pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) !void {
@@ -252,4 +337,16 @@ pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) !void {
 pub fn disconnectOnError(self: *Self) void {
     self.@"error" = true;
     self.fd.close();
+}
+
+pub fn roundtrip(self: *Self, gpa: mem.Allocator) !void {
+    if (self.@"error") return;
+
+    const next_seq = self.last_ackd_roundtrip_seq + 1;
+    var message = messages.RoundtripRequest.init(next_seq);
+    try self.sendMessage(gpa, Message.from(&message));
+
+    while (self.last_ackd_roundtrip_seq < next_seq) {
+        try self.dispatchEvents(gpa, true);
+    }
 }

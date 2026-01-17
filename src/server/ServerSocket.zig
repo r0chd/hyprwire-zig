@@ -61,6 +61,7 @@ pub fn open(gpa: mem.Allocator, path: ?[:0]const u8) !*Self {
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    self.impls.deinit(gpa);
     if (self.poll_thread) |*thread| {
         self.thread_can_poll = false;
         if (self.exit_write_fd) |fd| {

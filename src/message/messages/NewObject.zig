@@ -88,40 +88,34 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     };
 }
 
-test "NewObject" {
-    const ServerClient = @import("../../server/ServerClient.zig");
-    const posix = std.posix;
-
+test "NewObject.init" {
+    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    {
-        var msg = Self.init(3, 2);
+    var msg = Self.init(3, 2);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
-    {
-        const bytes = [_]u8{
-            @intFromEnum(MessageType.new_object),
-            @intFromEnum(MessageMagic.type_uint),
-            0x03,                                 0x00, 0x00, 0x00, // id = 3
-            @intFromEnum(MessageMagic.type_uint),
-            0x02,                           0x00, 0x00, 0x00, // seq = 2
-            @intFromEnum(MessageMagic.end),
-        };
-        var msg = try Self.fromBytes(&bytes, 0);
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
+    std.debug.print("NewObject: {s}\n", .{data});
+}
+
+test "NewObject.fromBytes" {
+    const messages = @import("./root.zig");
+    const alloc = std.testing.allocator;
+
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.new_object),
+        @intFromEnum(MessageMagic.type_uint),
+        0x03,                                 0x00, 0x00, 0x00, // id = 3
+        @intFromEnum(MessageMagic.type_uint),
+        0x02,                           0x00, 0x00, 0x00, // seq = 2
+        @intFromEnum(MessageMagic.end),
+    };
+    var msg = try Self.fromBytes(&bytes, 0);
+
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
+
+    std.debug.print("NewObject: {s}\n", .{data});
 }

@@ -156,50 +156,44 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.protocols);
 }
 
-test "HandshakeProtocols" {
-    const ServerClient = @import("../../server/ServerClient.zig");
-    const posix = std.posix;
-
+test "HandshakeProtocols.init" {
+    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    {
-        const protocols = [_][]const u8{ "test@1", "test2@2" };
-        var msg = try Self.init(alloc, &protocols);
-        defer msg.deinit(alloc);
+    const protocols = [_][]const u8{ "test@1", "test2@2" };
+    var msg = try Self.init(alloc, &protocols);
+    defer msg.deinit(alloc);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
-    {
-        // Message format: [type][ARRAY_magic][VARCHAR_magic][varint_arr_len][varint_str_len][str]...[END]
-        // Array length = 2 (0x02)
-        // First string: "test@1" (6 bytes, varint = 0x06)
-        // Second string: "test2@2" (7 bytes, varint = 0x07)
-        const bytes = [_]u8{
-            @intFromEnum(MessageType.handshake_protocols),
-            @intFromEnum(MessageMagic.type_array),
-            @intFromEnum(MessageMagic.type_varchar),
-            0x02, // array length = 2
-            0x06, // first string length = 6
-            't', 'e', 's', 't', '@', '1', // "test@1"
-            0x07, // second string length = 7
-            't',                            'e', 's', 't', '2', '@', '2', // "test2@2"
-            @intFromEnum(MessageMagic.end),
-        };
-        var msg = try Self.fromBytes(alloc, &bytes, 0);
-        defer msg.deinit(alloc);
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
+    std.debug.print("HandshakeProtocols: {s}\n", .{data});
+}
+
+test "HandshakeProtocols.fromBytes" {
+    const messages = @import("./root.zig");
+    const alloc = std.testing.allocator;
+
+    // Message format: [type][ARRAY_magic][VARCHAR_magic][varint_arr_len][varint_str_len][str]...[END]
+    // Array length = 2 (0x02)
+    // First string: "test@1" (6 bytes, varint = 0x06)
+    // Second string: "test2@2" (7 bytes, varint = 0x07)
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.handshake_protocols),
+        @intFromEnum(MessageMagic.type_array),
+        @intFromEnum(MessageMagic.type_varchar),
+        0x02, // array length = 2
+        0x06, // first string length = 6
+        't', 'e', 's', 't', '@', '1', // "test@1"
+        0x07, // second string length = 7
+        't',                            'e', 's', 't', '2', '@', '2', // "test2@2"
+        @intFromEnum(MessageMagic.end),
+    };
+    var msg = try Self.fromBytes(alloc, &bytes, 0);
+    defer msg.deinit(alloc);
+
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
+
+    std.debug.print("HandshakeProtocols: {s}\n", .{data});
 }

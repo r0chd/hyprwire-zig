@@ -4,6 +4,7 @@ const spec = @import("test_protocol_v1-spec.zig");
 
 const mem = std.mem;
 
+const ProtocolSpec = hyprwire.types.ProtocolSpec;
 const Object = hyprwire.types.Object;
 const ServerObjectImplementation = hyprwire.types.server_impl.ServerObjectImplementation;
 const TestProtocolV1ProtocolSpec = spec.TestProtocolV1ProtocolSpec;
@@ -213,8 +214,9 @@ pub const TestProtocolV1Impl = struct {
         };
     }
 
-    pub fn protocol(_: *Self) hyprwire.types.ProtocolSpec {
-        return hyprwire.types.ProtocolSpec.from(&test_protocol_v1_spec);
+    pub fn protocol(self: *Self) ProtocolSpec {
+        _ = self;
+        return ProtocolSpec.from(&test_protocol_v1_spec);
     }
 
     pub fn implementation(

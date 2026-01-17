@@ -82,3 +82,10 @@ pub const SocketRawParsedMessage = struct {
         self.fds.deinit(gpa);
     }
 };
+
+test "fromFd" {
+    const alloc = std.testing.allocator;
+
+    var msg = try SocketRawParsedMessage.fromFd(alloc, 1);
+    defer msg.deinit(alloc);
+}

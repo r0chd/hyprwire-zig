@@ -83,17 +83,29 @@ pub const MessageParser = struct {
         if (meta.intToEnum(MessageType, raw.data.items[off])) |message_type| {
             switch (message_type) {
                 .sup => {
-                    const versions = [_]u32{1};
-                    var msg = try messages.HandshakeBegin.init(gpa, &versions);
-                    const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
+                    var hello_msg = messages.Hello.fromBytes(raw.data.items, off) catch |err| {
+                        log.debug("server at fd {} core protocol error: malformed message recvd (sup): {s}", .{ client.fd.raw, @errorName(err) });
+                        client.@"error" = true;
+                        return 0;
+                    };
+                    if (hello_msg.getLen() == 0) {
+                        log.debug("server at fd {} core protocol error: malformed message recvd (sup)", .{client.fd.raw});
+                        client.@"error" = true;
+                        return 0;
+                    }
+
+                    const parsed = messages.parseData(Message.from(&hello_msg), gpa) catch |err| {
                         log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
-                        return msg.getLen();
+                        return hello_msg.getLen();
                     };
                     defer gpa.free(parsed);
-                    log.debug("[{} @ {}] -> {s}", .{ client.fd.raw, steadyMillis(), parsed });
+                    log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
+
+                    const versions = [_]u32{1};
+                    var msg = try messages.HandshakeBegin.init(gpa, &versions);
                     client.dispatchFirstPoll();
                     client.sendMessage(gpa, Message.from(&msg));
-                    return msg.getLen();
+                    return hello_msg.getLen();
                 },
                 .handshake_ack => {
                     var msg = try messages.HandshakeAck.fromBytes(raw.data.items, off);
@@ -123,7 +135,6 @@ pub const MessageParser = struct {
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
 
-                    // Handle binding to protocol
                     _ = try client.createObject(gpa, msg.protocol, "", msg.version, msg.seq);
 
                     return msg.getLen();
@@ -139,7 +150,6 @@ pub const MessageParser = struct {
                 },
                 .roundtrip_request => {
                     var msg = try messages.RoundtripRequest.fromBytes(raw.data.items, off);
-
                     if (msg.getLen() == 0) {
                         log.debug("client at fd {} core protocol error: malformed message recvd (roundtrip_request)", .{client.fd.raw});
                         return 0;
@@ -306,7 +316,7 @@ pub const MessageParser = struct {
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
 
-                    client.onGeneric(&msg);
+                    try client.onGeneric(gpa, msg);
 
                     return msg.getLen();
                 },

@@ -118,49 +118,43 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.data);
 }
 
-test "BindProtocol" {
-    const ServerClient = @import("../../server/ServerClient.zig");
-    const posix = std.posix;
-
+test "BindProtocol.init" {
+    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    {
-        var msg = try Self.init(alloc, "test@1", 5, 1);
-        defer msg.deinit(alloc);
+    var msg = try Self.init(alloc, "test@1", 5, 1);
+    defer msg.deinit(alloc);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
-    {
-        // Message format: [type][UINT_magic][seq:4][VARCHAR_magic][varint_len][protocol][UINT_magic][version:4][END]
-        // protocol = "test@1" (6 bytes), varint encoding of 6 = 0x06
-        // seq = 5 (0x05 0x00 0x00 0x00)
-        // version = 1 (0x01 0x00 0x00 0x00)
-        const bytes = [_]u8{
-            @intFromEnum(MessageType.bind_protocol),
-            @intFromEnum(MessageMagic.type_uint),
-            0x05,                                    0x00, 0x00, 0x00, // seq = 5
-            @intFromEnum(MessageMagic.type_varchar),
-            0x06, // varint length = 6
-            't',                                  'e', 's', 't', '@', '1', // protocol = "test@1"
-            @intFromEnum(MessageMagic.type_uint),
-            0x01,                           0x00, 0x00, 0x00, // version = 1
-            @intFromEnum(MessageMagic.end),
-        };
-        var msg = try Self.fromBytes(alloc, &bytes, 0);
-        defer msg.deinit(alloc);
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
+    std.debug.print("BindProtocol: {s}\n", .{data});
+}
+
+test "BindProtocol.fromBytes" {
+    const messages = @import("./root.zig");
+    const alloc = std.testing.allocator;
+
+    // Message format: [type][UINT_magic][seq:4][VARCHAR_magic][varint_len][protocol][UINT_magic][version:4][END]
+    // protocol = "test@1" (6 bytes), varint encoding of 6 = 0x06
+    // seq = 5 (0x05 0x00 0x00 0x00)
+    // version = 1 (0x01 0x00 0x00 0x00)
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.bind_protocol),
+        @intFromEnum(MessageMagic.type_uint),
+        0x05,                                    0x00, 0x00, 0x00, // seq = 5
+        @intFromEnum(MessageMagic.type_varchar),
+        0x06, // varint length = 6
+        't',                                  'e', 's', 't', '@', '1', // protocol = "test@1"
+        @intFromEnum(MessageMagic.type_uint),
+        0x01,                           0x00, 0x00, 0x00, // version = 1
+        @intFromEnum(MessageMagic.end),
+    };
+    var msg = try Self.fromBytes(alloc, &bytes, 0);
+    defer msg.deinit(alloc);
+
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
+
+    std.debug.print("BindProtocol: {s}\n", .{data});
 }

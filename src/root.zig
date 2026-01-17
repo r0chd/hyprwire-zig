@@ -27,23 +27,5 @@ pub fn steadyMillis() u64 {
 }
 
 test {
-    _ = ServerObject;
-    _ = ClientObject;
-    _ = messages.BindProtocol;
-    _ = messages.FatalProtocolError;
-    _ = messages.GenericProtocolMessage;
-    _ = messages.HandshakeAck;
-    _ = messages.HandshakeBegin;
-    _ = messages.HandshakeProtocols;
-    _ = messages.Hello;
-    _ = messages.RoundtripDone;
-    _ = messages.RoundtripRequest;
-}
-
-test "fromFd" {
-    const SocketRawParsedMessage = @import("./socket/socket_helpers.zig").SocketRawParsedMessage;
-    const alloc = std.testing.allocator;
-
-    var msg = try SocketRawParsedMessage.fromFd(alloc, 1);
-    defer msg.deinit(alloc);
+    std.testing.refAllDecls(@This());
 }

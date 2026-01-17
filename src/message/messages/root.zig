@@ -175,3 +175,7 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
     try result.append(gpa, ')');
     return result.toOwnedSlice(gpa);
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

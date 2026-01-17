@@ -108,48 +108,42 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.versions);
 }
 
-test "HandshakeBegin" {
-    const ServerClient = @import("../../server/ServerClient.zig");
-    const posix = std.posix;
-
+test "HandshakeBegin.init" {
+    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    {
-        const versions = [_]u32{ 1, 2 };
-        var msg = try Self.init(alloc, &versions);
-        defer msg.deinit(alloc);
+    const versions = [_]u32{ 1, 2 };
+    var msg = try Self.init(alloc, &versions);
+    defer msg.deinit(alloc);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
-    {
-        // Message format: [type][ARRAY_magic][UINT_magic][varint_arr_len][version1:4][version2:4]...[END]
-        // Array length = 2 (0x02)
-        // version1 = 1 (0x01 0x00 0x00 0x00)
-        // version2 = 2 (0x02 0x00 0x00 0x00)
-        const bytes = [_]u8{
-            @intFromEnum(MessageType.handshake_begin),
-            @intFromEnum(MessageMagic.type_array),
-            @intFromEnum(MessageMagic.type_uint),
-            0x02, // array length = 2
-            0x01, 0x00, 0x00, 0x00, // version = 1
-            0x02,                           0x00, 0x00, 0x00, // version = 2
-            @intFromEnum(MessageMagic.end),
-        };
-        var msg = try Self.fromBytes(alloc, &bytes, 0);
-        defer msg.deinit(alloc);
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
+    std.debug.print("HandshakeBegin: {s}\n", .{data});
+}
+
+test "HandshakeBegin.fromBytes" {
+    const messages = @import("./root.zig");
+    const alloc = std.testing.allocator;
+
+    // Message format: [type][ARRAY_magic][UINT_magic][varint_arr_len][version1:4][version2:4]...[END]
+    // Array length = 2 (0x02)
+    // version1 = 1 (0x01 0x00 0x00 0x00)
+    // version2 = 2 (0x02 0x00 0x00 0x00)
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.handshake_begin),
+        @intFromEnum(MessageMagic.type_array),
+        @intFromEnum(MessageMagic.type_uint),
+        0x02, // array length = 2
+        0x01, 0x00, 0x00, 0x00, // version = 1
+        0x02,                           0x00, 0x00, 0x00, // version = 2
+        @intFromEnum(MessageMagic.end),
+    };
+    var msg = try Self.fromBytes(alloc, &bytes, 0);
+    defer msg.deinit(alloc);
+
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
+
+    std.debug.print("HandshakeBegin: {s}\n", .{data});
 }

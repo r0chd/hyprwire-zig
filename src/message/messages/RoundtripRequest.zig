@@ -69,40 +69,34 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     };
 }
 
-test "RoundtripRequest" {
-    const ServerClient = @import("../../server/ServerClient.zig");
-    const posix = std.posix;
-
+test "RoundtripRequest.init" {
+    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    {
-        var msg = Self.init(42);
+    var msg = Self.init(42);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
-    {
-        // Message format: [type][UINT_magic][seq:4][END]
-        // seq = 42 (0x2A 0x00 0x00 0x00)
-        const bytes = [_]u8{
-            @intFromEnum(MessageType.roundtrip_request),
-            @intFromEnum(MessageMagic.type_uint),
-            0x2A,                           0x00, 0x00, 0x00, // seq = 42
-            @intFromEnum(MessageMagic.end),
-        };
-        var msg = try Self.fromBytes(&bytes, 0);
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
 
-        const pipes = try posix.pipe();
-        defer {
-            posix.close(pipes[0]);
-            posix.close(pipes[1]);
-        }
-        const server_client = try ServerClient.init(pipes[0]);
-        server_client.sendMessage(alloc, Message.from(&msg));
-    }
+    std.debug.print("RoundtripRequest: {s}\n", .{data});
+}
+
+test "RoundtripRequest.fromBytes" {
+    const messages = @import("./root.zig");
+    const alloc = std.testing.allocator;
+
+    // Message format: [type][UINT_magic][seq:4][END]
+    // seq = 42 (0x2A 0x00 0x00 0x00)
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.roundtrip_request),
+        @intFromEnum(MessageMagic.type_uint),
+        0x2A,                           0x00, 0x00, 0x00, // seq = 42
+        @intFromEnum(MessageMagic.end),
+    };
+    var msg = try Self.fromBytes(&bytes, 0);
+
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
+
+    std.debug.print("RoundtripRequest: {s}\n", .{data});
 }

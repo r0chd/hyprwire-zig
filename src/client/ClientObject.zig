@@ -12,9 +12,9 @@ const Method = types.Method;
 const Message = messages.Message;
 
 client: ?*ClientSocket,
-spec: ?*types.ProtocolObjectSpec = null,
+spec: ?types.ProtocolObjectSpec = null,
 data: ?*anyopaque = null,
-listeners: std.ArrayList(*const fn (*anyopaque) void) = .empty,
+listeners: std.ArrayList(?*anyopaque) = .empty,
 on_deinit: ?*const fn () void = null,
 id: u32 = 0,
 version: u32 = 0,
@@ -27,17 +27,6 @@ pub fn init(client: *ClientSocket) Self {
     return .{
         .client = client,
     };
-}
-
-pub fn clientSockFn(ptr: *const WireObject) ?*ClientSocket {
-    const self: *const Self = @fieldParentPtr("interface", ptr);
-    if (self.client) |client| {
-        if (client.server) |srv| {
-            return srv;
-        }
-    }
-
-    return null;
 }
 
 pub fn clientSock(self: *Self) ?*ClientSocket {
@@ -104,10 +93,6 @@ pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) !void {
     }
 }
 
-pub fn getListeners(self: *Self) std.ArrayList(*const fn (*anyopaque) void) {
-    return self.listeners;
-}
-
 pub fn server(self: *Self) bool {
     _ = self;
     return false;
@@ -119,16 +104,31 @@ pub fn deinit(self: *Self) void {
     }
 }
 
-pub fn call(self: *Self, id: u32, ...) callconv(.c) void {
+pub fn call(self: *Self, id: u32, args: *anyopaque) u32 {
     _ = self;
     _ = id;
+    _ = args;
+
+    return 0;
 }
 
 pub fn listen(self: *Self, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) !void {
     if (self.listeners.items.len <= id) {
         try self.listeners.resize(gpa, id + 1);
     }
-    self.listeners.appendAssumeCapacity(callback);
+    self.listeners.appendAssumeCapacity(@constCast(callback));
+}
+
+pub fn getId(self: *Self) u32 {
+    return self.id;
+}
+
+pub fn getListeners(self: *Self) []?*anyopaque {
+    return self.listeners.items;
+}
+
+pub fn getVersion(self: *Self) u32 {
+    return self.version;
 }
 
 test {
@@ -143,8 +143,6 @@ test {
         try obj.vtable.err(obj.ptr, alloc, 1, "test");
 
         self.errd();
-        var listeners = self.getListeners();
-        listeners.deinit(alloc);
 
         const methods_in = self.methodsIn();
         _ = methods_in;
