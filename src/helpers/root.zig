@@ -5,6 +5,11 @@ pub const trait = @import("trait.zig");
 const posix = std.posix;
 const mem = std.mem;
 
+pub fn isTrace() bool {
+    const trace = posix.getenv("HW_TRACE") orelse return false;
+    return mem.eql(u8, "1", trace) or mem.eql(u8, "true", trace);
+}
+
 pub fn sunLen(addr: *const posix.sockaddr.un) usize {
     const path_ptr: [*:0]const u8 = @ptrCast(&addr.path);
     const path_len = mem.span(path_ptr).len;

@@ -1,6 +1,7 @@
 const std = @import("std");
-const build_options = @import("build_options");
+const helpers = @import("helpers");
 
+const isTrace = helpers.isTrace;
 const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
@@ -64,7 +65,7 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
 
     return .{
         .seq = seq,
-        .data = if (build_options.trace) data[offset..][0..6] else &[_]u8{},
+        .data = if (isTrace()) data[offset..][0..6] else &[_]u8{},
         .len = 7,
         .message_type = .roundtrip_done,
     };
@@ -79,7 +80,7 @@ test "RoundtripDone.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("RoundtripDone: {s}\n", .{data});
+    std.debug.assert(mem.eql(u8, data, "roundtrip_done ( 42 )"));
 }
 
 test "RoundtripDone.fromBytes" {
@@ -99,5 +100,9 @@ test "RoundtripDone.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("RoundtripDone: {s}\n", .{data});
+    if (isTrace()) {
+        std.debug.assert(mem.eql(u8, data, "roundtrip_done ( 42 )"));
+    } else {
+        std.debug.assert(mem.eql(u8, data, "roundtrip_done (  )"));
+    }
 }

@@ -1,8 +1,11 @@
 const std = @import("std");
 const types = @import("../implementation/types.zig");
 const messages = @import("../message/messages/root.zig");
+const helpers = @import("helpers");
 
+const log = std.log;
 const mem = std.mem;
+const isTrace = helpers.isTrace;
 
 const FatalErrorMessage = @import("../message/messages/FatalProtocolError.zig");
 const ServerSocket = @import("ServerSocket.zig");
@@ -101,6 +104,10 @@ pub fn err(self: *Self, gpa: mem.Allocator, id: u32, message: [:0]const u8) !voi
 }
 
 pub fn deinit(self: *Self) void {
+    if (isTrace()) {
+        const fd = if (self.client) |client| client.fd.raw else -1;
+        log.debug("[{}] destroying object {}", .{ fd, self.id });
+    }
     if (self.on_deinit) |onDeinit| {
         onDeinit();
     }

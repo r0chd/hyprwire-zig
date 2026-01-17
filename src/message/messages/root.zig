@@ -1,8 +1,11 @@
 const std = @import("std");
 const helpers = @import("helpers");
+const message_parser = @import("../MessageParser.zig");
 
 const mem = std.mem;
 const trait = helpers.trait;
+const fmt = std.fmt;
+const meta = std.meta;
 
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../MessageType.zig").MessageType;
@@ -25,154 +28,145 @@ pub const Message = trait.Trait(.{
     .getMessageType = fn () MessageType,
 }, null);
 
+fn formatPrimitiveType(gpa: mem.Allocator, s: []const u8, @"type": MessageMagic) !std.meta.Tuple(&.{ [:0]const u8, usize }) {
+    switch (@"type") {
+        .type_uint => {
+            const value = std.mem.readVarInt(u32, s[0..4], .little);
+            return .{ try fmt.allocPrintSentinel(gpa, "{}", .{value}, 0), 4 };
+        },
+        .type_int => {
+            const value = std.mem.readVarInt(i32, s[0..4], .little);
+            return .{ try fmt.allocPrintSentinel(gpa, "{}", .{value}, 0), 4 };
+        },
+        .type_f32 => {
+            const int_bits = std.mem.readVarInt(u32, s[0..4], .little);
+            const value = @as(f32, @bitCast(int_bits));
+            return .{ try fmt.allocPrintSentinel(gpa, "{}", .{value}, 0), 4 };
+        },
+        .type_fd => {
+            return .{ try gpa.dupeZ(u8, "<fd>"), 0 };
+        },
+        .type_object => {
+            const id = std.mem.readVarInt(u32, s[0..4], .little);
+            const obj_str = if (id == 0) "null" else try fmt.allocPrintSentinel(gpa, "{}", .{id}, 0);
+            return .{ try fmt.allocPrintSentinel(gpa, "object: {s}", .{obj_str}, 0), 4 };
+        },
+        .type_varchar => {
+            const res = message_parser.message_parser.parseVarInt(s, 0);
+            const len = res.@"0";
+            const int_len = res.@"1";
+            const ptr = s[int_len .. int_len + len];
+            const formatted = try fmt.allocPrintSentinel(gpa, "\"{s}\"", .{ptr}, 0);
+            return .{ formatted, len + int_len };
+        },
+        else => return .{ try gpa.dupeZ(u8, ""), 0 },
+    }
+}
+
 pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
-    var result = std.ArrayList(u8).initCapacity(gpa, 64) catch return error.OutOfMemory;
+    var result: std.ArrayList(u8) = .empty;
     defer result.deinit(gpa);
-    try result.writer(gpa).print("{s} ( ", .{@tagName(message.vtable.getMessageType(message.ptr))});
+
+    var writer = result.writer(gpa);
+    try writer.print("{s} ( ", .{@tagName(message.vtable.getMessageType(message.ptr))});
 
     var needle: usize = 1;
     const message_data = message.vtable.getData(message.ptr);
     while (needle < message_data.len) {
         const magic_byte = message_data[needle];
+        needle += 1;
 
-        switch (try std.meta.intToEnum(MessageMagic, magic_byte)) {
-            .end => {
-                break;
-            },
-            .type_seq => {
-                if (needle + 5 > message.vtable.getLen(message.ptr)) break;
-                const value = std.mem.readInt(u32, message_data[needle + 1 .. needle + 5][0..4], .little);
-                try result.writer(gpa).print("seq: {}", .{value});
-                needle += 5;
-                continue;
-            },
-            .type_uint => {
-                if (needle + 5 > message.vtable.getLen(message.ptr)) break;
-                const value = std.mem.readInt(u32, message_data[needle + 1 .. needle + 5][0..4], .little);
-                try result.writer(gpa).print("{}", .{value});
-                needle += 5;
-                continue;
-            },
-            .type_int => {
-                if (needle + 5 > message.vtable.getLen(message.ptr)) break;
-                const value = std.mem.readInt(i32, message_data[needle + 1 .. needle + 5][0..4], .little);
-                try result.writer(gpa).print("{}", .{value});
-                needle += 5;
-                continue;
-            },
-            .type_f32 => {
-                if (needle + 5 > message.vtable.getLen(message.ptr)) break;
-                const int_value = std.mem.readInt(u32, message_data[needle + 1 .. needle + 5][0..4], .little);
-                const value: f32 = @bitCast(int_value);
-                try result.writer(gpa).print("{}", .{value});
-                needle += 5;
-                continue;
-            },
-            .type_object_id => {
-                if (needle + 5 > message.vtable.getLen(message.ptr)) break;
-                const value = std.mem.readInt(u32, message_data[needle + 1 .. needle + 5][0..4], .little);
-                try result.writer(gpa).print("object_id({})", .{value});
-                needle += 5;
-                continue;
-            },
-            .type_varchar => {
-                needle += 1;
-                var str_len: usize = 0;
-                var shift: u6 = 0;
-                while (needle < message.vtable.getLen(message.ptr)) {
-                    const byte = message_data[needle];
-                    str_len |= @as(usize, byte & 0x7F) << shift;
-                    needle += 1;
-                    if ((byte & 0x80) == 0) break;
-                    shift += 7;
-                    if (shift >= 64) break;
-                }
-                if (needle + str_len > message.vtable.getLen(message.ptr)) break;
-                needle += str_len;
-                continue;
-            },
-            .type_array => {
-                needle += 1;
-                if (needle >= message.vtable.getLen(message.ptr)) break;
-                const arr_type_byte = message_data[needle];
-                const arr_type: ?MessageMagic = blk: {
-                    if (arr_type_byte == @intFromEnum(MessageMagic.type_uint)) break :blk MessageMagic.type_uint;
-                    if (arr_type_byte == @intFromEnum(MessageMagic.type_int)) break :blk MessageMagic.type_int;
-                    if (arr_type_byte == @intFromEnum(MessageMagic.type_f32)) break :blk MessageMagic.type_f32;
-                    if (arr_type_byte == @intFromEnum(MessageMagic.type_object_id)) break :blk MessageMagic.type_object_id;
-                    if (arr_type_byte == @intFromEnum(MessageMagic.type_seq)) break :blk MessageMagic.type_seq;
-                    if (arr_type_byte == @intFromEnum(MessageMagic.type_varchar)) break :blk MessageMagic.type_varchar;
-                    if (arr_type_byte == @intFromEnum(MessageMagic.type_fd)) break :blk MessageMagic.type_fd;
-                    break :blk null;
-                };
-                needle += 1;
-
-                var arr_len: usize = 0;
-                var arr_shift: u6 = 0;
-                while (needle < message.vtable.getLen(message.ptr)) {
-                    const byte = message_data[needle];
-                    arr_len |= @as(usize, byte & 0x7F) << arr_shift;
-                    needle += 1;
-                    if ((byte & 0x80) == 0) break;
-                    arr_shift += 7;
-                    if (arr_shift >= 64) break;
-                }
-
-                if (arr_type) |at| {
-                    switch (at) {
-                        .type_uint, .type_int, .type_f32, .type_object_id, .type_seq => {
-                            if (needle + (arr_len * 4) > message.vtable.getLen(message.ptr)) break;
-                            needle += arr_len * 4;
-                        },
-                        .type_varchar => {
-                            for (0..arr_len) |_| {
-                                var str_len2: usize = 0;
-                                var str_shift: u6 = 0;
-                                while (needle < message.vtable.getLen(message.ptr)) {
-                                    const byte = message_data[needle];
-                                    str_len2 |= @as(usize, byte & 0x7F) << str_shift;
-                                    needle += 1;
-                                    if ((byte & 0x80) == 0) break;
-                                    str_shift += 7;
-                                    if (str_shift >= 64) break;
-                                }
-                                if (needle + str_len2 > message.vtable.getLen(message.ptr)) break;
-                                needle += str_len2;
-                            }
-                        },
-                        .type_fd => {},
-                        else => break,
+        if (meta.intToEnum(MessageMagic, magic_byte)) |magic| {
+            switch (magic) {
+                .end => {
+                    break;
+                },
+                .type_seq => {
+                    const value = std.mem.readVarInt(u32, message.vtable.getData(message.ptr)[needle .. needle + 4], .little);
+                    try writer.print("seq: {}", .{value});
+                    needle += 4;
+                    break;
+                },
+                .type_uint => {
+                    const value = std.mem.readVarInt(u32, message.vtable.getData(message.ptr)[needle .. needle + 4], .little);
+                    try writer.print("{}", .{value});
+                    needle += 4;
+                    break;
+                },
+                .type_int => {
+                    const value = std.mem.readVarInt(i32, message.vtable.getData(message.ptr)[needle .. needle + 4], .little);
+                    try writer.print("{}", .{value});
+                    needle += 4;
+                    break;
+                },
+                .type_f32 => {
+                    const int_bits = std.mem.readVarInt(u32, message.vtable.getData(message.ptr)[needle .. needle + 4], .little);
+                    const value = @as(f32, @bitCast(int_bits));
+                    try writer.print("{}", .{value});
+                    needle += 4;
+                    break;
+                },
+                .type_varchar => {
+                    const res = message_parser.message_parser.parseVarInt(message.vtable.getData(message.ptr), needle);
+                    if (res.@"0" > 0) {
+                        const ptr = message.vtable.getData(message.ptr)[needle + res.@"1" .. needle + res.@"1" + res.@"0"];
+                        try writer.print("\"{s}\"", .{ptr[0..res.@"0"]});
+                    } else {
+                        _ = try writer.write("\"\"");
                     }
-                }
-                continue;
-            },
-            .type_object => {
-                needle += 1;
-                if (needle + 4 > message.vtable.getLen(message.ptr)) break;
-                _ = std.mem.readInt(u32, message_data[needle..][0..4], .little);
-                needle += 4;
 
-                var name_len: usize = 0;
-                var name_shift: u6 = 0;
-                while (needle < message.vtable.getLen(message.ptr)) {
-                    const byte = message_data[needle];
-                    name_len |= @as(usize, byte & 0x7F) << name_shift;
+                    needle += res.@"1" + res.@"0";
+                    break;
+                },
+                .type_array => {
+                    const this_type: MessageMagic = @enumFromInt(message.vtable.getData(message.ptr)[needle]);
                     needle += 1;
-                    if ((byte & 0x80) == 0) break;
-                    name_shift += 7;
-                    if (name_shift >= 64) break;
-                }
-                if (needle + name_len > message.vtable.getLen(message.ptr)) break;
-                needle += name_len;
-                continue;
-            },
-            .type_fd => {
-                needle += 1;
-                continue;
-            },
-        }
+                    const res = message_parser.message_parser.parseVarInt(message.vtable.getData(message.ptr), needle);
+                    _ = try writer.write("{ ");
+                    needle += res.@"1";
+
+                    for (0..res.@"0") |i| {
+                        const r = try formatPrimitiveType(gpa, message.vtable.getData(message.ptr)[needle..], this_type);
+                        defer gpa.free(r.@"0");
+
+                        needle += r.@"1";
+
+                        try writer.print("{s}", .{r.@"0"});
+                        if (i < res.@"0" - 1) {
+                            try writer.print(", ", .{});
+                        }
+                    }
+
+                    _ = try writer.write(" }");
+                    break;
+                },
+                .type_object => {
+                    const id = message.vtable.getData(message.ptr)[needle];
+                    needle += 4;
+                    try writer.print("object({})", .{id});
+                    break;
+                },
+                .type_fd => {
+                    _ = try writer.write("<fd>");
+                    break;
+                },
+                else => {},
+            }
+        } else |_| {}
+
+        _ = try writer.write(", ");
     }
-    try result.append(gpa, ')');
+
+    if (result.items[result.items.len - 2] == ',') {
+        _ = result.pop();
+        _ = result.pop();
+    }
+    if (result.items[result.items.len - 2] == ',') {
+        _ = result.pop();
+        _ = result.pop();
+    }
+
+    try result.appendSlice(gpa, " )");
     return result.toOwnedSlice(gpa);
 }
 

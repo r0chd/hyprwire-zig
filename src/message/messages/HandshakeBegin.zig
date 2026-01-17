@@ -6,6 +6,8 @@ const mem = std.mem;
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const Message = @import("root.zig").Message;
+const helpers = @import("helpers");
+const isTrace = helpers.isTrace;
 
 pub fn getFds(self: *const Self) []const i32 {
     _ = self;
@@ -97,7 +99,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     return .{
         .versions = versions,
-        .data = try gpa.dupe(u8, data[offset..]),
+        .data = if (isTrace()) try gpa.dupe(u8, data[offset .. offset + message_len]) else &[_]u8{},
         .len = message_len,
         .message_type = .handshake_begin,
     };
@@ -119,7 +121,7 @@ test "HandshakeBegin.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("HandshakeBegin: {s}\n", .{data});
+    std.debug.assert(mem.eql(u8, data, "handshake_begin ( { 1, 2 } )"));
 }
 
 test "HandshakeBegin.fromBytes" {
@@ -145,5 +147,9 @@ test "HandshakeBegin.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("HandshakeBegin: {s}\n", .{data});
+    if (isTrace()) {
+        std.debug.assert(mem.eql(u8, data, "handshake_begin ( { 1, 2 } )"));
+    } else {
+        std.debug.assert(mem.eql(u8, data, "handshake_begin (  )"));
+    }
 }

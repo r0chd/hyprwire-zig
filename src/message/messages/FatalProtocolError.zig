@@ -1,4 +1,7 @@
 const std = @import("std");
+const helpers = @import("helpers");
+
+const isTrace = helpers.isTrace;
 const mem = std.mem;
 
 const MessageType = @import("../MessageType.zig").MessageType;
@@ -102,11 +105,9 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
     needle += 1;
 
-    const message_len = needle - offset;
-
     return Self{
-        .data = try gpa.dupe(u8, data[offset..]),
-        .len = message_len,
+        .data = if (isTrace()) try gpa.dupe(u8, data[offset..]) else &.{},
+        .len = needle - offset,
         .message_type = .fatal_protocol_error,
         .object_id = object_id,
         .error_id = error_id,
@@ -129,7 +130,7 @@ test "FatalProtocolError.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("FatalProtocolError: {s}\n", .{data});
+    std.debug.assert(mem.eql(u8, data, "fatal_protocol_error ( 3 )"));
 }
 
 test "FatalProtocolError.fromBytes" {
@@ -157,5 +158,9 @@ test "FatalProtocolError.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("FatalProtocolError: {s}\n", .{data});
+    if (isTrace()) {
+        std.debug.assert(mem.eql(u8, data, "fatal_protocol_error ( 3 )"));
+    } else {
+        std.debug.assert(mem.eql(u8, data, "fatal_protocol_error (  )"));
+    }
 }

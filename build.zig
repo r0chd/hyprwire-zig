@@ -67,7 +67,6 @@ pub fn build(b: *std.Build) void {
     const exe_options = b.addOptions();
     exe_options.addOption([:0]const u8, "version", zon.version);
     exe_options.addOption(u32, "protocol_version", 1);
-    exe_options.addOption(bool, "trace", true);
 
     const xml = b.dependency("xml", .{
         .target = target,

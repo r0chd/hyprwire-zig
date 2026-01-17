@@ -1,8 +1,11 @@
 const std = @import("std");
 const types = @import("../implementation/types.zig");
 const messages = @import("../message/messages/root.zig");
+const helpers = @import("helpers");
 
+const log = std.log;
 const mem = std.mem;
+const isTrace = helpers.isTrace;
 
 const ServerSocket = @import("../server/ServerSocket.zig");
 const ClientSocket = @import("ClientSocket.zig");
@@ -99,6 +102,10 @@ pub fn server(self: *Self) bool {
 }
 
 pub fn deinit(self: *Self) void {
+    if (isTrace()) {
+        log.debug("destroying object {}", .{self.id});
+    }
+
     if (self.on_deinit) |onDeinit| {
         onDeinit();
     }

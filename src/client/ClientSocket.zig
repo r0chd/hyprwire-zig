@@ -11,6 +11,7 @@ const WireObject = types.WireObject;
 const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
 const GenericProtocolMessage = messages.GenericProtocolMessage;
 
+const isTrace = helpers.isTrace;
 const mem = std.mem;
 const posix = std.posix;
 const log = std.log;
@@ -205,6 +206,14 @@ pub fn waitForObject(self: *Self, gpa: mem.Allocator, x: *ClientObject) !void {
     self.waiting_on_object = null;
 }
 
+pub fn shouldEndReading(self: *Self) bool {
+    if (self.waiting_on_object) |waiting| {
+        return waiting.id != 0;
+    }
+
+    return false;
+}
+
 pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
     if (self.@"error") return error.TODO;
 
@@ -224,8 +233,8 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
 
     if (self.pending_socket_data.items.len > 0) {
         const datas = try self.pending_socket_data.toOwnedSlice(gpa);
-        for (datas) |data| {
-            const ret = message_parser.message_parser.handleMessage(data, .{ .client = self });
+        for (datas) |*data| {
+            const ret = message_parser.message_parser.handleMessage(gpa, data, .{ .client = self });
             if (ret != .ok) {
                 log.debug("fatal: failed to handle message on wire", .{});
                 self.disconnectOnError();
@@ -247,7 +256,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
 
     // dispatch
 
-    const data = try SocketRawParsedMessage.fromFd(gpa, self.fd.raw);
+    var data = try SocketRawParsedMessage.fromFd(gpa, self.fd.raw);
     if (data.bad) {
         log.debug("fatal: received malformed message from server", .{});
         self.disconnectOnError();
@@ -256,7 +265,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
 
     if (data.data.items.len == 0) return error.NoData;
 
-    const ret = message_parser.message_parser.handleMessage(data, .{
+    const ret = message_parser.message_parser.handleMessage(gpa, &data, .{
         .client = self,
     });
 
@@ -290,12 +299,14 @@ pub fn objectForId(self: *Self, id: u32) ?Object {
 }
 
 pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) !void {
-    const parsed = messages.parseData(message, gpa) catch |err| {
-        log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
-        return;
-    };
-    defer gpa.free(parsed);
-    log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
+    if (isTrace()) {
+        const parsed = messages.parseData(message, gpa) catch |err| {
+            log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
+            return;
+        };
+        defer gpa.free(parsed);
+        log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
+    }
 
     var io: posix.iovec = .{
         .base = @constCast(message.vtable.getData(message.ptr).ptr),

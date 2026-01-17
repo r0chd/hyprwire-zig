@@ -5,6 +5,8 @@ const mem = std.mem;
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const Message = @import("root.zig").Message;
+const helpers = @import("helpers");
+const isTrace = helpers.isTrace;
 
 data: []const u8,
 len: usize,
@@ -46,7 +48,7 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     if (!mem.eql(u8, &expected, data[offset .. offset + 7])) return error.InvalidMessage;
 
     return .{
-        .data = data,
+        .data = if (isTrace()) data[offset .. offset + 7] else &[_]u8{},
         .len = expected.len,
         .message_type = .sup,
     };
@@ -79,7 +81,7 @@ test "Hello.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("Hello: {s}\n", .{data});
+    std.debug.assert(mem.eql(u8, data, "sup ( \"VAX\" )"));
 }
 
 test "Hello.fromBytes" {
@@ -100,5 +102,9 @@ test "Hello.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("Hello: {s}\n", .{data});
+    if (isTrace()) {
+        std.debug.assert(mem.eql(u8, data, "sup ( \"VAX\" )"));
+    } else {
+        std.debug.assert(mem.eql(u8, data, "sup (  )"));
+    }
 }

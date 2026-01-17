@@ -1,6 +1,8 @@
 const std = @import("std");
+const helpers = @import("helpers");
 
 const mem = std.mem;
+const isTrace = helpers.isTrace;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
@@ -32,7 +34,7 @@ message_type: MessageType = .new_object,
 const Self = @This();
 
 pub fn init(seq: u32, id: u32) Self {
-    var data_array = [_]u8{
+    var data_slice = [_]u8{
         @intFromEnum(MessageType.new_object),
         @intFromEnum(MessageMagic.type_uint),
         0,
@@ -47,14 +49,14 @@ pub fn init(seq: u32, id: u32) Self {
         @intFromEnum(MessageMagic.end),
     };
 
-    mem.writeInt(u32, data_array[2..6], id, .little);
-    mem.writeInt(u32, data_array[7..11], seq, .little);
+    @memcpy(data_slice[2..][0..@sizeOf(@TypeOf(seq))], std.mem.asBytes(&seq));
+    @memcpy(data_slice[7..][0..@sizeOf(@TypeOf(seq))], std.mem.asBytes(&seq));
 
     return .{
         .id = id,
         .seq = seq,
-        .data = &data_array,
-        .len = data_array.len,
+        .data = &data_slice,
+        .len = data_slice.len,
         .message_type = .new_object,
     };
 }
@@ -69,12 +71,12 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     if (data[offset + 1] != @intFromEnum(MessageMagic.type_uint))
         return error.InvalidMessage;
 
-    const id = mem.readInt(u32, data[offset + 2 .. offset + 6][0..4], .little);
+    const id = mem.readInt(u32, data[offset + 2 .. offset + 2 + @sizeOf(u32)][0..@sizeOf(u32)], .little);
 
     if (data[offset + 6] != @intFromEnum(MessageMagic.type_uint))
         return error.InvalidMessage;
 
-    const seq = mem.readInt(u32, data[offset + 7 .. offset + 11][0..4], .little);
+    const seq = mem.readInt(u32, data[offset + 7 .. offset + 7 + @sizeOf(u32)][0..@sizeOf(u32)], .little);
 
     if (data[offset + 11] != @intFromEnum(MessageMagic.end))
         return error.InvalidMessage;
@@ -82,7 +84,7 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     return .{
         .id = id,
         .seq = seq,
-        .data = data[offset..][0..12],
+        .data = if (isTrace()) data[offset..][0..] else &.{},
         .len = 12,
         .message_type = .new_object,
     };
@@ -97,7 +99,7 @@ test "NewObject.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("NewObject: {s}\n", .{data});
+    std.debug.assert(mem.eql(u8, data, "new_object ( 3 )"));
 }
 
 test "NewObject.fromBytes" {
@@ -117,5 +119,9 @@ test "NewObject.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("NewObject: {s}\n", .{data});
+    if (isTrace()) {
+        std.debug.assert(mem.eql(u8, data, "new_object ( 3 )"));
+    } else {
+        std.debug.assert(mem.eql(u8, data, "new_object (  )"));
+    }
 }

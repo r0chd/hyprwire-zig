@@ -147,7 +147,7 @@ pub const MyObjectV1Object = struct {
 
     const Self = @This();
 
-    pub fn init(gpa: mem.Allocator, object: Object) Self {
+    pub fn init(gpa: mem.Allocator, object: Object) !Self {
         const self = try gpa.create(Self);
         self.* = .{
             .object = object,

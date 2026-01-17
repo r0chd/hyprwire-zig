@@ -1,5 +1,8 @@
 const std = @import("std");
+const helpers = @import("helpers");
+
 const mem = std.mem;
+const isTrace = helpers.isTrace;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
@@ -63,7 +66,7 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
 
     return .{
         .seq = seq,
-        .data = data[offset..][0..7],
+        .data = if (isTrace()) data[offset..][0..] else &.{},
         .len = 7,
         .message_type = .roundtrip_request,
     };
@@ -78,7 +81,7 @@ test "RoundtripRequest.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("RoundtripRequest: {s}\n", .{data});
+    std.debug.assert(mem.eql(u8, data, "roundtrip_request ( 42 )"));
 }
 
 test "RoundtripRequest.fromBytes" {
@@ -98,5 +101,9 @@ test "RoundtripRequest.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("RoundtripRequest: {s}\n", .{data});
+    if (isTrace()) {
+        std.debug.assert(mem.eql(u8, data, "roundtrip_request ( 42 )"));
+    } else {
+        std.debug.assert(mem.eql(u8, data, "roundtrip_request (  )"));
+    }
 }

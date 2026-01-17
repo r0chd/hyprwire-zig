@@ -4,6 +4,8 @@ const mem = std.mem;
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const Message = @import("root.zig").Message;
+const helpers = @import("helpers");
+const isTrace = helpers.isTrace;
 
 pub fn getFds(self: *const Self) []const i32 {
     _ = self;
@@ -57,14 +59,18 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
 
     if (data[offset + 1] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
 
+    var needle: usize = 2;
+
+    if (data[offset + needle + 4] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
+
     const version = mem.readInt(u32, data[offset + 2 .. offset + 6][0..4], .little);
 
-    if (data[offset + 6] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
+    needle += 4;
 
     return .{
         .version = version,
-        .data = data[offset..][0..7],
-        .len = 7,
+        .data = if (isTrace()) data[offset .. offset + needle + 1] else &[_]u8{},
+        .len = needle + 1,
         .message_type = .handshake_ack,
     };
 }
@@ -78,7 +84,7 @@ test "HandshakeAck.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("HandshakeAck: {s}\n", .{data});
+    std.debug.assert(mem.eql(u8, data, "handshake_ack ( 1 )"));
 }
 
 test "HandshakeAck.fromBytes" {
@@ -98,5 +104,9 @@ test "HandshakeAck.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("HandshakeAck: {s}\n", .{data});
+    if (isTrace()) {
+        std.debug.assert(mem.eql(u8, data, "handshake_ack ( 1 )"));
+    } else {
+        std.debug.assert(mem.eql(u8, data, "handshake_ack (  )"));
+    }
 }

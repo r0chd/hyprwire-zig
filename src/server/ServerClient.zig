@@ -7,6 +7,7 @@ const types = @import("../implementation/types.zig");
 const helpers = @import("helpers");
 const messages = @import("../message/messages/root.zig");
 
+const isTrace = helpers.isTrace;
 const posix = std.posix;
 const log = std.log;
 const mem = std.mem;
@@ -42,6 +43,12 @@ pub fn init(raw_fd: i32) !Self {
     };
 }
 
+pub fn deinit(self: *Self) void {
+    if (isTrace()) {
+        log.debug("[{}] destroying client", .{self.fd.raw});
+    }
+}
+
 pub fn dispatchFirstPoll(self: *Self) void {
     if (self.first_poll_done) return;
 
@@ -68,6 +75,9 @@ pub fn dispatchFirstPoll(self: *Self) void {
         posix.SO.PEERCRED,
         std.mem.asBytes(&cred),
     ) catch {
+        if (isTrace()) {
+            log.debug("dispatchFirstPoll: failed to get pid", .{});
+        }
         return;
     };
 
@@ -75,12 +85,14 @@ pub fn dispatchFirstPoll(self: *Self) void {
 }
 
 pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void {
-    const parsed = messages.parseData(message, gpa) catch |err| {
-        log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
-        return;
-    };
-    defer gpa.free(parsed);
-    log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
+    if (isTrace()) {
+        const parsed = messages.parseData(message, gpa) catch |err| {
+            log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
+            return;
+        };
+        defer gpa.free(parsed);
+        log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
+    }
 
     var io: posix.iovec = .{
         .base = @constCast(message.vtable.getData(message.ptr).ptr),

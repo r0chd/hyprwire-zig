@@ -1,7 +1,9 @@
 const std = @import("std");
-const build_options = @import("build_options");
+const message_parser = @import("../MessageParser.zig");
+const helpers = @import("helpers");
 
 const mem = std.mem;
+const isTrace = helpers.isTrace;
 
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
@@ -43,12 +45,7 @@ pub fn init(gpa: mem.Allocator, protocol: []const u8, seq: u32, version: u32) !S
     try data.writer(gpa).writeInt(u32, seq, .little);
 
     try data.append(gpa, @intFromEnum(MessageMagic.type_varchar));
-    var protocol_len = protocol.len;
-    while (protocol_len > 0x7F) {
-        try data.append(gpa, @as(u8, @truncate(protocol_len & 0x7F)) | 0x80);
-        protocol_len >>= 7;
-    }
-    try data.append(gpa, @as(u8, @truncate(protocol_len)));
+    try data.appendSlice(gpa, message_parser.message_parser.encodeVarInt(protocol.len));
     try data.appendSlice(gpa, protocol);
 
     try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
@@ -60,7 +57,7 @@ pub fn init(gpa: mem.Allocator, protocol: []const u8, seq: u32, version: u32) !S
         .len = data.items.len,
         .data = try data.toOwnedSlice(gpa),
         .message_type = .bind_protocol,
-        .protocol = protocol,
+        .protocol = try gpa.dupe(u8, protocol),
     };
 }
 
@@ -91,7 +88,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     needle += var_int_len;
 
     if (needle + protocol_len > data.len) return error.OutOfRange;
-    const protocol = data[needle .. needle + protocol_len];
+    const protocol_slice = data[needle .. needle + protocol_len];
     needle += protocol_len;
 
     if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
@@ -105,17 +102,18 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     needle += 1;
 
     return .{
-        .data = if (build_options.trace) try gpa.dupe(u8, data[offset .. offset + needle - offset]) else &[_]u8{},
+        .data = if (isTrace()) try gpa.dupe(u8, data[offset .. offset + needle - offset]) else &[_]u8{},
         .len = needle - offset,
         .message_type = .bind_protocol,
         .seq = seq,
-        .protocol = protocol,
+        .protocol = try gpa.dupe(u8, protocol_slice),
         .version = version,
     };
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.data);
+    gpa.free(self.protocol);
 }
 
 test "BindProtocol.init" {
@@ -128,7 +126,7 @@ test "BindProtocol.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("BindProtocol: {s}\n", .{data});
+    std.debug.assert(mem.eql(u8, data, "bind_protocol ( 5 )"));
 }
 
 test "BindProtocol.fromBytes" {
@@ -156,5 +154,9 @@ test "BindProtocol.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.print("BindProtocol: {s}\n", .{data});
+    if (isTrace()) {
+        std.debug.assert(mem.eql(u8, data, "bind_protocol ( 5 )"));
+    } else {
+        std.debug.assert(mem.eql(u8, data, "bind_protocol (  )"));
+    }
 }

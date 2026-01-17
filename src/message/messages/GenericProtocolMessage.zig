@@ -1,9 +1,12 @@
 const std = @import("std");
-const mem = std.mem;
-
+const helpers = @import("helpers");
 const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const Message = @import("root.zig").Message;
+
+const mem = std.mem;
+const log = std.log;
+const isTrace = helpers.isTrace;
 
 pub fn getFds(self: *const Self) []const i32 {
     return self.fds_list;
@@ -36,8 +39,6 @@ pub fn init(gpa: mem.Allocator, data: []const u8, fds_list: []const i32) !Self {
     const fds_copy = try gpa.dupe(i32, fds_list);
 
     return .{
-        .object = 0,
-        .method = 0,
         .data_span = data_copy,
         .fds_list = fds_copy,
         .data = data_copy,
@@ -141,7 +142,9 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
                 try fds_consumed.append(gpa, fds_list.items[0]);
                 _ = fds_list.orderedRemove(0);
             },
-            else => return error.InvalidMessage,
+            else => {
+                return error.InvalidMessage;
+            },
         }
     }
 
@@ -150,12 +153,15 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
 
     const message_len = data_needle - offset;
 
-    const data_copy = try gpa.dupe(u8, data[offset .. offset + message_len]);
+    var data_copy: []const u8 = &.{};
+    if (isTrace()) {
+        data_copy = try gpa.dupe(u8, data[offset .. offset + message_len]);
+    }
 
     return .{
         .object = object_id,
         .method = method_id,
-        .data_span = data_copy[11..],
+        .data_span = if (isTrace()) data_copy[11..] else &.{},
         .fds_list = try fds_consumed.toOwnedSlice(gpa),
         .data = data_copy,
         .len = message_len,
@@ -172,7 +178,7 @@ test "GenericProtocolMessage.init" {
     const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    const data = [_]u8{
+    const bytes_data = [_]u8{
         @intFromEnum(MessageType.generic_protocol_message),
         @intFromEnum(MessageMagic.type_object),
         0x01,                                 0x00, 0x00, 0x00, // object = 1
@@ -180,13 +186,13 @@ test "GenericProtocolMessage.init" {
         0x02,                           0x00, 0x00, 0x00, // method = 2
         @intFromEnum(MessageMagic.end),
     };
-    var msg = try Self.init(alloc, &data, &.{});
+    var msg = try Self.init(alloc, &bytes_data, &.{});
     defer msg.deinit(alloc);
 
-    const parsed_data = try messages.parseData(Message.from(&msg), alloc);
-    defer alloc.free(parsed_data);
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
 
-    std.debug.print("GenericProtocolMessage: {s}\n", .{parsed_data});
+    std.debug.assert(mem.eql(u8, data, "generic_protocol_message ( object(1) )"));
 }
 
 test "GenericProtocolMessage.fromBytes" {
@@ -209,8 +215,12 @@ test "GenericProtocolMessage.fromBytes" {
     var msg = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
     defer msg.deinit(alloc);
 
-    const parsed_data = try messages.parseData(Message.from(&msg), alloc);
-    defer alloc.free(parsed_data);
+    const data = try messages.parseData(Message.from(&msg), alloc);
+    defer alloc.free(data);
 
-    std.debug.print("GenericProtocolMessage: {s}\n", .{parsed_data});
+    if (isTrace()) {
+        std.debug.assert(mem.eql(u8, data, "generic_protocol_message ( object(1) )"));
+    } else {
+        std.debug.assert(mem.eql(u8, data, "generic_protocol_message (  )"));
+    }
 }

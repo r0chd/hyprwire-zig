@@ -15,6 +15,7 @@ const ProtocolServerImplementation = types.server_impl.ProtocolServerImplementat
 const MessageParsingResult = message_parser.MessageParsingResult;
 const Fd = helpers.Fd;
 
+const isTrace = helpers.isTrace;
 const mem = std.mem;
 const posix = std.posix;
 const fs = std.fs;
@@ -339,11 +340,13 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !void {
         if (self.pollfds.items[i].revents & posix.POLL.HUP == 0) {
             self.clients.items[i - self.internalFds()].@"error" = true;
             needs_poll_recheck = true;
-            log.debug("[{} @ {}] Dropping client (hangup)", .{ self.clients.items[i - self.internalFds()].fd, steadyMillis() });
+            if (isTrace()) {
+                log.debug("[{} @ {}] Dropping client (hangup)", .{ self.clients.items[i - self.internalFds()].fd, steadyMillis() });
+            }
             continue;
         }
 
-        if (self.clients.items[i - self.internalFds()].@"error") {
+        if (isTrace() and self.clients.items[i - self.internalFds()].@"error") {
             log.debug("[{} @ {}] Dropping client (protocol error)", .{ self.clients.items[i - self.internalFds()].fd, steadyMillis() });
         }
     }
@@ -362,7 +365,7 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !void {
 
 pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !void {
     _ = self;
-    const data = try SocketRawParsedMessage.fromFd(gpa, client.fd.raw);
+    var data = try SocketRawParsedMessage.fromFd(gpa, client.fd.raw);
     if (data.bad) {
         var fatal_msg = FatalError.init(gpa, 0, 0, "fatal: invalid message on wire") catch |err| {
             log.err("Failed to create fatal error message: {}", .{err});
@@ -376,7 +379,7 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
 
     if (data.data.items.len == 0) return;
 
-    const ret = message_parser.message_parser.handleMessage(data, .{ .server = client });
+    const ret = message_parser.message_parser.handleMessage(gpa, &data, .{ .server = client });
     if (ret != MessageParsingResult.ok) {
         var fatal_msg = try FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire");
         client.sendMessage(gpa, Message.from(&fatal_msg));
