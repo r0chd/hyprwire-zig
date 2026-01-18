@@ -1,27 +1,27 @@
+const c = @cImport(@cInclude("sys/socket.h"));
 const std = @import("std");
 const types = @import("../implementation/types.zig");
 const helpers = @import("helpers");
 const message_parser = @import("../message/MessageParser.zig");
-const c = @cImport(@cInclude("sys/socket.h"));
-
 const messages = @import("../message/messages/root.zig");
+
+const ClientObject = @import("ClientObject.zig");
 const Message = messages.Message;
 const Object = types.Object;
 const WireObject = types.WireObject;
 const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
 const GenericProtocolMessage = messages.GenericProtocolMessage;
+const ProtocolClientImplementation = types.client_impl.ProtocolClientImplementation;
+const ProtocolSpec = types.ProtocolSpec;
+const Fd = helpers.Fd;
+const ServerSpec = @import("ServerSpec.zig");
 
 const isTrace = helpers.isTrace;
 const mem = std.mem;
 const posix = std.posix;
 const log = std.log;
 const fs = std.fs;
-
-const ClientObject = @import("ClientObject.zig");
-
-const ProtocolClientImplementation = types.client_impl.ProtocolClientImplementation;
-const ProtocolSpec = types.ProtocolSpec;
-const Fd = helpers.Fd;
+const fmt = std.fmt;
 
 const steadyMillis = @import("../root.zig").steadyMillis;
 
@@ -123,14 +123,16 @@ pub fn waitForHandshake(self: *Self, gpa: mem.Allocator) !void {
         try self.dispatchEvents(gpa, true);
     }
 
-    return error.TODO;
+    if (self.@"error") {
+        return error.TODO;
+    }
 }
 
 pub fn isHandshakeDone(self: *Self) bool {
     return self.handshake_done;
 }
 
-pub fn getSpec(self: *Self, name: [:0]const u8) ?ProtocolSpec {
+pub fn getSpec(self: *Self, name: []const u8) ?ProtocolSpec {
     for (self.server_specs.items) |s| {
         if (mem.eql(u8, s.vtable.specName(s.ptr), name)) return s;
     }
@@ -234,7 +236,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
     if (self.pending_socket_data.items.len > 0) {
         const datas = try self.pending_socket_data.toOwnedSlice(gpa);
         for (datas) |*data| {
-            const ret = message_parser.message_parser.handleMessage(gpa, data, .{ .client = self });
+            const ret = message_parser.handleMessage(gpa, data, .{ .client = self });
             if (ret != .ok) {
                 log.debug("fatal: failed to handle message on wire", .{});
                 self.disconnectOnError();
@@ -265,14 +267,12 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
 
     if (data.data.items.len == 0) return error.NoData;
 
-    const ret = message_parser.message_parser.handleMessage(gpa, &data, .{
-        .client = self,
-    });
+    const ret = message_parser.handleMessage(gpa, &data, .{ .client = self });
 
     if (ret != .ok) {
         log.debug("fatal: failed to handle message on wire", .{});
         self.disconnectOnError();
-        // make handleMessage return an error instead of enum
+        // TODO: make handleMessage return an error instead of enum
         return error.TODO;
     }
 
@@ -343,6 +343,28 @@ pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) !void {
     }
 
     _ = c.sendmsg(self.fd.raw, &msg, 0);
+}
+
+pub fn extractLoopFD(self: *Self) i32 {
+    return self.fd.raw;
+}
+
+pub fn serverSpecs(self: *Self, gpa: mem.Allocator, specs: []const [:0]const u8) void {
+    self.serverSpecsInner(gpa, specs) catch |err| {
+        log.debug("fatal: failed to parse server specs: {}", .{err});
+        self.disconnectOnError();
+    };
+
+    self.handshake_done = true;
+}
+
+fn serverSpecsInner(self: *Self, gpa: mem.Allocator, specs: []const [:0]const u8) !void {
+    for (specs) |spec| {
+        const at_pos = mem.lastIndexOfScalar(u8, spec, '@') orelse return error.ParseError;
+
+        var s = ServerSpec.init(spec[0..at_pos], try fmt.parseInt(u32, spec[at_pos + 1 ..], 10));
+        try self.server_specs.append(gpa, ProtocolSpec.from(&s));
+    }
 }
 
 pub fn disconnectOnError(self: *Self) void {

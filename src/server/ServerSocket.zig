@@ -379,7 +379,7 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
 
     if (data.data.items.len == 0) return;
 
-    const ret = message_parser.message_parser.handleMessage(gpa, &data, .{ .server = client });
+    const ret = message_parser.handleMessage(gpa, &data, .{ .server = client });
     if (ret != MessageParsingResult.ok) {
         var fatal_msg = try FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire");
         client.sendMessage(gpa, Message.from(&fatal_msg));
@@ -392,33 +392,6 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
         client.sendMessage(gpa, Message.from(&roundtrip_done));
         client.scheduled_roundtrip_seq = 0;
     }
-}
-
-pub fn extractLoopFD(self: *Self, gpa: mem.Allocator) !i32 {
-    const export_fd_valid = if (self.export_fd) |fd|
-        posix.fcntl(fd.raw, posix.F.GETFL, 0) catch |err| switch (err) {
-            else => false,
-        }
-    else
-        false;
-
-    if (!export_fd_valid or self.export_fd == null) {
-        const export_pipes = try posix.pipe2(.{ .CLOEXEC = true });
-        self.export_fd = Fd{ .raw = export_pipes[0] };
-        self.export_write_fd = Fd{ .raw = export_pipes[1] };
-
-        const exit_pipes = try posix.pipe2(.{ .CLOEXEC = true });
-        self.exit_fd = Fd{ .raw = exit_pipes[0] };
-        self.exit_write_fd = Fd{ .raw = exit_pipes[1] };
-
-        self.thread_can_poll = true;
-
-        try self.recheckPollFds(gpa);
-
-        self.poll_thread = try std.Thread.spawn(.{}, pollThread, .{ self, gpa });
-    }
-
-    return self.export_fd.?.raw;
 }
 
 pub fn createObject(gpa: mem.Allocator, client: ?*ServerClient, reference: ?*ServerObject, object: []const u8, seq: u32) ?*ServerObject {

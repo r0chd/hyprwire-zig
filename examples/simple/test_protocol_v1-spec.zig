@@ -147,7 +147,7 @@ pub const TestProtocolV1ProtocolSpec = struct {
         return .{};
     }
 
-    pub fn specName(self: *Self) [:0]const u8 {
+    pub fn specName(self: *Self) []const u8 {
         _ = self;
         return "test_protocol_v1";
     }

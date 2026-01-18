@@ -130,7 +130,7 @@ test "FatalProtocolError.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.assert(mem.eql(u8, data, "fatal_protocol_error ( 3 )"));
+    try std.testing.expectEqualStrings("fatal_protocol_error ( 3 )", data);
 }
 
 test "FatalProtocolError.fromBytes" {
@@ -159,8 +159,8 @@ test "FatalProtocolError.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        std.debug.assert(mem.eql(u8, data, "fatal_protocol_error ( 3 )"));
+        try std.testing.expectEqualStrings("fatal_protocol_error ( 3 )", data);
     } else {
-        std.debug.assert(mem.eql(u8, data, "fatal_protocol_error (  )"));
+        try std.testing.expectEqualStrings("fatal_protocol_error (  )", data);
     }
 }

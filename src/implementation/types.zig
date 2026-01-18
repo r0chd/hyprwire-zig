@@ -21,7 +21,7 @@ pub const ProtocolObjectSpec = Trait(.{
 }, null);
 
 pub const ProtocolSpec = Trait(.{
-    .specName = fn () [:0]const u8,
+    .specName = fn () []const u8,
     .specVer = fn () u32,
     .objects = fn () []const ProtocolObjectSpec,
 }, null);

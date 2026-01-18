@@ -45,7 +45,7 @@ pub fn init(gpa: mem.Allocator, protocol: []const u8, seq: u32, version: u32) !S
     try data.writer(gpa).writeInt(u32, seq, .little);
 
     try data.append(gpa, @intFromEnum(MessageMagic.type_varchar));
-    try data.appendSlice(gpa, message_parser.message_parser.encodeVarInt(protocol.len));
+    try data.appendSlice(gpa, message_parser.encodeVarInt(protocol.len));
     try data.appendSlice(gpa, protocol);
 
     try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
@@ -126,7 +126,7 @@ test "BindProtocol.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.assert(mem.eql(u8, data, "bind_protocol ( 5 )"));
+    try std.testing.expectEqualStrings("bind_protocol ( 5 )", data);
 }
 
 test "BindProtocol.fromBytes" {
@@ -155,8 +155,8 @@ test "BindProtocol.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        std.debug.assert(mem.eql(u8, data, "bind_protocol ( 5 )"));
+        try std.testing.expectEqualStrings("bind_protocol ( 5 )", data);
     } else {
-        std.debug.assert(mem.eql(u8, data, "bind_protocol (  )"));
+        try std.testing.expectEqualStrings("bind_protocol (  )", data);
     }
 }

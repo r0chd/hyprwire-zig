@@ -46,32 +46,33 @@ pub const SocketRawParsedMessage = struct {
             size_written = c.recvmsg(fd, &msg, 0);
             if (size_written < 0) return .{};
 
-            try self.data.appendSlice(gpa, &buffer);
+            try self.data.appendSlice(gpa, buffer[0..@intCast(size_written)]);
 
             // TODO: wait for zig api
             // https://codeberg.org/ziglang/zig/issues/30629
             const recvd_cmsg = c.CMSG_FIRSTHDR(&msg);
-            if (recvd_cmsg == null) continue;
+            if (recvd_cmsg) |cmsg| {
+                if (cmsg.*.cmsg_level != c.SOL_SOCKET or cmsg.*.cmsg_type != c.SCM_RIGHTS) {
+                    log.debug("protocol error on fd {}: invalid control message on wire of type {}\n", .{ fd, cmsg.*.cmsg_type });
+                    return .{ .bad = true };
+                }
 
-            if (recvd_cmsg.*.cmsg_level != c.SOL_SOCKET or recvd_cmsg != c.SCM_RIGHTS) {
-                log.debug("protocol error on fd {}: invalid control message on wire of type {}\n", .{ fd, recvd_cmsg.*.cmsg_type });
-                return .{ .bad = true };
+                const data_ptr = CMSG_DATA(cmsg);
+                const data: [*]i32 = @ptrCast(@alignCast(data_ptr));
+                const payload_size = cmsg.*.cmsg_len - c.CMSG_LEN(0);
+                const num_fds = payload_size / @sizeOf(i32);
+
+                try self.fds.ensureTotalCapacity(gpa, self.fds.capacity + num_fds);
+
+                for (0..num_fds) |i| {
+                    const ptr = try self.fds.addOne(gpa);
+                    ptr.* = data[i];
+                }
+
+                log.debug("SocketRawParsedMessage.fromFd: got {} fds on the control wire", .{num_fds});
             }
 
             if (size_written != BUFFER_SIZE) break;
-            const data_ptr = CMSG_DATA(recvd_cmsg);
-            const data: [*]i32 = @ptrCast(@alignCast(data_ptr));
-            const payload_size = recvd_cmsg.*.cmsg_len - c.CMSG_LEN(0);
-            const num_fds = payload_size / @sizeOf(i32);
-
-            try self.fds.ensureTotalCapacity(gpa, self.fds.capacity + num_fds);
-
-            for (0..num_fds) |i| {
-                const ptr = try self.fds.addOne(gpa);
-                ptr.* = data[i];
-            }
-
-            log.debug("SocketRawParsedMessage.fromFd: got {} fds on the control wire", .{num_fds});
         }
 
         return self;
@@ -83,9 +84,63 @@ pub const SocketRawParsedMessage = struct {
     }
 };
 
-test "fromFd" {
+test "SocketRawParsedMessage.deinit empty" {
     const alloc = std.testing.allocator;
 
-    var msg = try SocketRawParsedMessage.fromFd(alloc, 1);
-    defer msg.deinit(alloc);
+    var msg = SocketRawParsedMessage{};
+    msg.deinit(alloc); // Should not crash
+}
+
+test "SocketRawParsedMessage.fromFd with Unix domain socket - data only" {
+    const alloc = std.testing.allocator;
+
+    // Create a pair of connected Unix domain sockets
+    var socks: [2]c_int = undefined;
+    const result = c.socketpair(c.AF_UNIX, c.SOCK_STREAM, 0, &socks);
+    try std.testing.expect(result == 0);
+    defer {
+        _ = c.close(socks[0]);
+        _ = c.close(socks[1]);
+    }
+
+    // Send some test data
+    const test_data = [_]u8{ 1, 2, 3, 4, 5 };
+    try posix.write(socks[1], &test_data);
+
+    // Close the write end to signal EOF
+    posix.close(socks[1]);
+
+    // Read from the other end
+    var parsed = try SocketRawParsedMessage.fromFd(alloc, socks[0]);
+    defer parsed.deinit(alloc);
+
+    try std.testing.expectEqualSlices(u8, &test_data, parsed.data.items);
+    try std.testing.expect(parsed.fds.items.len == 0);
+    try std.testing.expect(!parsed.bad);
+}
+
+test "SocketRawParsedMessage.fromFd invalid fd" {
+    const alloc = std.testing.allocator;
+
+    // Try to read from an invalid file descriptor
+    const result = try SocketRawParsedMessage.fromFd(alloc, -1);
+    try std.testing.expect(result.data.items.len == 0);
+    try std.testing.expect(result.fds.items.len == 0);
+    try std.testing.expect(!result.bad);
+}
+
+test "CMSG_DATA function" {
+    // Test the CMSG_DATA helper function
+    var cmsg_buf: [c.CMSG_LEN(4)]u8 align(@alignOf(c.struct_cmsghdr)) = undefined;
+    const cmsg: *c.struct_cmsghdr = @ptrCast(&cmsg_buf);
+
+    // Set up a minimal cmsghdr
+    cmsg.*.cmsg_len = c.CMSG_LEN(4);
+
+    const data_ptr = CMSG_DATA(cmsg);
+    const data_start: [*]u8 = @ptrCast(cmsg);
+    const expected_offset = c.CMSG_LEN(0);
+
+    // The data should start after the cmsghdr
+    try std.testing.expectEqual(data_start + expected_offset, data_ptr);
 }

@@ -192,7 +192,7 @@ test "GenericProtocolMessage.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.assert(mem.eql(u8, data, "generic_protocol_message ( object(1) )"));
+    try std.testing.expectEqualStrings("generic_protocol_message ( object(1) )", data);
 }
 
 test "GenericProtocolMessage.fromBytes" {
@@ -219,8 +219,8 @@ test "GenericProtocolMessage.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        std.debug.assert(mem.eql(u8, data, "generic_protocol_message ( object(1) )"));
+        try std.testing.expectEqualStrings("generic_protocol_message ( object(1) )", data);
     } else {
-        std.debug.assert(mem.eql(u8, data, "generic_protocol_message (  )"));
+        try std.testing.expectEqualStrings("generic_protocol_message (  )", data);
     }
 }

@@ -41,7 +41,7 @@ pub fn init(gpa: mem.Allocator, versions: []const u32) !Self {
     try data.append(gpa, @intFromEnum(MessageMagic.type_array));
     try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
 
-    const var_int = message_parser.message_parser.encodeVarInt(versions.len);
+    const var_int = message_parser.encodeVarInt(versions.len);
     for (var_int) |int| {
         try data.append(gpa, int);
     }
@@ -76,7 +76,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
     needle += 1;
 
-    const parse_result = message_parser.message_parser.parseVarInt(data, needle);
+    const parse_result = message_parser.parseVarInt(data, needle);
     const arr_len = parse_result[0];
     const var_int_len = parse_result[1];
     needle += var_int_len;
@@ -121,7 +121,7 @@ test "HandshakeBegin.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.assert(mem.eql(u8, data, "handshake_begin ( { 1, 2 } )"));
+    try std.testing.expectEqualStrings("handshake_begin ( { 1, 2 } )", data);
 }
 
 test "HandshakeBegin.fromBytes" {
@@ -148,8 +148,8 @@ test "HandshakeBegin.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        std.debug.assert(mem.eql(u8, data, "handshake_begin ( { 1, 2 } )"));
+        try std.testing.expectEqualStrings("handshake_begin ( { 1, 2 } )", data);
     } else {
-        std.debug.assert(mem.eql(u8, data, "handshake_begin (  )"));
+        try std.testing.expectEqualStrings("handshake_begin (  )", data);
     }
 }

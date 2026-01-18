@@ -81,7 +81,7 @@ test "Hello.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.assert(mem.eql(u8, data, "sup ( \"VAX\" )"));
+    try std.testing.expectEqualStrings("sup ( \"VAX\" )", data);
 }
 
 test "Hello.fromBytes" {
@@ -103,8 +103,8 @@ test "Hello.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        std.debug.assert(mem.eql(u8, data, "sup ( \"VAX\" )"));
+        try std.testing.expectEqualStrings("sup ( \"VAX\" )", data);
     } else {
-        std.debug.assert(mem.eql(u8, data, "sup (  )"));
+        try std.testing.expectEqualStrings("sup (  )", data);
     }
 }

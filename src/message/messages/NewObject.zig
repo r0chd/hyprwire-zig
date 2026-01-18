@@ -99,7 +99,7 @@ test "NewObject.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.assert(mem.eql(u8, data, "new_object ( 3 )"));
+    try std.testing.expectEqualStrings("new_object ( 3 )", data);
 }
 
 test "NewObject.fromBytes" {
@@ -120,8 +120,8 @@ test "NewObject.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        std.debug.assert(mem.eql(u8, data, "new_object ( 3 )"));
+        try std.testing.expectEqualStrings("new_object ( 3 )", data);
     } else {
-        std.debug.assert(mem.eql(u8, data, "new_object (  )"));
+        try std.testing.expectEqualStrings("new_object (  )", data);
     }
 }

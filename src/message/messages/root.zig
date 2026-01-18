@@ -52,7 +52,7 @@ fn formatPrimitiveType(gpa: mem.Allocator, s: []const u8, @"type": MessageMagic)
             return .{ try fmt.allocPrintSentinel(gpa, "object: {s}", .{obj_str}, 0), 4 };
         },
         .type_varchar => {
-            const res = message_parser.message_parser.parseVarInt(s, 0);
+            const res = message_parser.parseVarInt(s, 0);
             const len = res.@"0";
             const int_len = res.@"1";
             const ptr = s[int_len .. int_len + len];
@@ -107,7 +107,7 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
                     break;
                 },
                 .type_varchar => {
-                    const res = message_parser.message_parser.parseVarInt(message.vtable.getData(message.ptr), needle);
+                    const res = message_parser.parseVarInt(message.vtable.getData(message.ptr), needle);
                     if (res.@"0" > 0) {
                         const ptr = message.vtable.getData(message.ptr)[needle + res.@"1" .. needle + res.@"1" + res.@"0"];
                         try writer.print("\"{s}\"", .{ptr[0..res.@"0"]});
@@ -121,18 +121,18 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
                 .type_array => {
                     const this_type: MessageMagic = @enumFromInt(message.vtable.getData(message.ptr)[needle]);
                     needle += 1;
-                    const res = message_parser.message_parser.parseVarInt(message.vtable.getData(message.ptr), needle);
+                    const els, const int_len = message_parser.parseVarInt(message.vtable.getData(message.ptr), needle);
                     _ = try writer.write("{ ");
-                    needle += res.@"1";
+                    needle += int_len;
 
-                    for (0..res.@"0") |i| {
-                        const r = try formatPrimitiveType(gpa, message.vtable.getData(message.ptr)[needle..], this_type);
-                        defer gpa.free(r.@"0");
+                    for (0..els) |i| {
+                        const str, const len = try formatPrimitiveType(gpa, message.vtable.getData(message.ptr)[needle..], this_type);
+                        defer gpa.free(str);
 
-                        needle += r.@"1";
+                        needle += len;
 
-                        try writer.print("{s}", .{r.@"0"});
-                        if (i < res.@"0" - 1) {
+                        try writer.print("{s}", .{str});
+                        if (i < els - 1) {
                             try writer.print(", ", .{});
                         }
                     }

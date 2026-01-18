@@ -80,7 +80,7 @@ test "RoundtripDone.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.assert(mem.eql(u8, data, "roundtrip_done ( 42 )"));
+    try std.testing.expectEqualStrings("roundtrip_done ( 42 )", data);
 }
 
 test "RoundtripDone.fromBytes" {
@@ -101,8 +101,8 @@ test "RoundtripDone.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        std.debug.assert(mem.eql(u8, data, "roundtrip_done ( 42 )"));
+        try std.testing.expectEqualStrings("roundtrip_done ( 42 )", data);
     } else {
-        std.debug.assert(mem.eql(u8, data, "roundtrip_done (  )"));
+        try std.testing.expectEqualStrings("roundtrip_done (  )", data);
     }
 }

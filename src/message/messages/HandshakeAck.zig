@@ -84,7 +84,7 @@ test "HandshakeAck.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    std.debug.assert(mem.eql(u8, data, "handshake_ack ( 1 )"));
+    try std.testing.expectEqualStrings("handshake_ack ( 1 )", data);
 }
 
 test "HandshakeAck.fromBytes" {
@@ -105,8 +105,8 @@ test "HandshakeAck.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        std.debug.assert(mem.eql(u8, data, "handshake_ack ( 1 )"));
+        try std.testing.expectEqualStrings("handshake_ack ( 1 )", data);
     } else {
-        std.debug.assert(mem.eql(u8, data, "handshake_ack (  )"));
+        try std.testing.expectEqualStrings("handshake_ack (  )", data);
     }
 }
