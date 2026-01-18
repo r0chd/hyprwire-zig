@@ -26,14 +26,14 @@ pub fn getMessageType(self: *const Self) MessageType {
     return self.message_type;
 }
 
-protocols: []const [:0]const u8,
+protocols: []const []const u8,
 data: []const u8,
 len: usize,
 message_type: MessageType = .handshake_protocols,
 
 const Self = @This();
 
-pub fn init(gpa: mem.Allocator, protocols: []const [:0]const u8) !Self {
+pub fn init(gpa: mem.Allocator, protocols: []const []const u8) !Self {
     var data: std.ArrayList(u8) = .empty;
 
     try data.appendSlice(gpa, &.{
@@ -54,7 +54,7 @@ pub fn init(gpa: mem.Allocator, protocols: []const [:0]const u8) !Self {
     const data_slice = try data.toOwnedSlice(gpa);
 
     return .{
-        .protocols = try gpa.dupe([:0]const u8, protocols),
+        .protocols = try gpa.dupe([]const u8, protocols),
         .data = data_slice,
         .len = data_slice.len,
         .message_type = .handshake_protocols,
@@ -73,7 +73,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     const res = message_parser.parseVarInt(data, offset + needle);
     needle += res.@"1";
 
-    var protocols: std.ArrayList([:0]const u8) = try .initCapacity(gpa, res.@"0");
+    var protocols: std.ArrayList([]const u8) = try .initCapacity(gpa, res.@"0");
     errdefer protocols.deinit(gpa);
 
     for (0..res.@"0") |_| {
@@ -83,7 +83,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
         if (offset + needle + r.@"1" + r.@"0" > data.len) return error.OutOfRange;
 
-        const protocol_slice = data[offset + needle + r.@"1" .. offset + needle + r.@"1" + r.@"0" :0];
+        const protocol_slice = data[offset + needle + r.@"1" .. offset + needle + r.@"1" + r.@"0"];
         protocols.appendAssumeCapacity(protocol_slice);
         needle += r.@"0" + r.@"1";
     }
@@ -109,14 +109,13 @@ test "HandshakeProtocols.init" {
     const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    const protocols = [_][]const u8{ "test@1", "test@2" };
-    var msg = try Self.init(alloc, &protocols);
+    var msg = try Self.init(alloc, &.{ "test@1", "test@2" });
     defer msg.deinit(alloc);
 
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    try std.testing.expectEqualStrings("handshake_protocols ( { \"test@1\", \"test@2\" } )", data);
+    try std.testing.expectEqualStrings("handshake_protocols ( { \"test@1\", \"test@2\" } ) ", data);
 }
 
 test "HandshakeProtocols.fromBytes" {
@@ -145,8 +144,8 @@ test "HandshakeProtocols.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        try std.testing.expectEqualStrings("handshake_protocols ( { \"test@1\", \"test@2\" } )", data);
+        try std.testing.expectEqualStrings("handshake_protocols ( { \"test@1\", \"test@2\" } ) ", data);
     } else {
-        try std.testing.expectEqualStrings("handshake_protocols (  )", data);
+        try std.testing.expectEqualStrings("handshake_protocols (  ) ", data);
     }
 }

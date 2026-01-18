@@ -80,7 +80,7 @@ test "RoundtripDone.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    try std.testing.expectEqualStrings("roundtrip_done ( 42 )", data);
+    try std.testing.expectEqualStrings("roundtrip_done ( 42 ) ", data);
 }
 
 test "RoundtripDone.fromBytes" {
@@ -101,8 +101,8 @@ test "RoundtripDone.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        try std.testing.expectEqualStrings("roundtrip_done ( 42 )", data);
+        try std.testing.expectEqualStrings("roundtrip_done ( 42 ) ", data);
     } else {
-        try std.testing.expectEqualStrings("roundtrip_done (  )", data);
+        try std.testing.expectEqualStrings("roundtrip_done (  ) ", data);
     }
 }

@@ -3,10 +3,14 @@ const types = @import("../implementation/types.zig");
 const messages = @import("../message/messages/root.zig");
 const helpers = @import("helpers");
 
+const fmt = std.fmt;
 const log = std.log;
 const mem = std.mem;
 const isTrace = helpers.isTrace;
+const meta = std.meta;
 
+const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
+const MessageType = @import("../message/MessageType.zig").MessageType;
 const ServerSocket = @import("../server/ServerSocket.zig");
 const ClientSocket = @import("ClientSocket.zig");
 const WireObject = @import("../implementation/WireObject.zig").WireObject;
@@ -111,10 +115,68 @@ pub fn deinit(self: *Self) void {
     }
 }
 
-pub fn call(self: *Self, id: u32, args: *anyopaque) u32 {
+pub fn call(self: *Self, gpa: mem.Allocator, id: u32) !u32 {
     _ = self;
+    // const methods = self.methodsOut();
+    _ = gpa;
     _ = id;
-    _ = args;
+    // if (methods.len <= id) {
+    //     const msg = try fmt.allocPrintSentinel(gpa, "core protocol error: invalid method {} for object {}", .{ id, self.id }, 0);
+    //     defer gpa.free(msg);
+    //     log.debug("core protocol error: {s}", .{msg});
+    //     try self.err(gpa, id, msg);
+    //     return error.TODO;
+    // }
+
+    // const method = methods[id];
+    // const params = method.params;
+
+    // if (method.since > self.version) {
+    //     const msg = try fmt.allocPrintSentinel(gpa, "invalid method spec {} for object {} -> server cannot call returnsType methods", .{ id, self.id }, 0);
+    //     defer gpa.free(msg);
+    //     log.debug("core protocol error: {s}", .{msg});
+    //     try self.err(gpa, id, msg);
+    //     return error.TODO;
+    // }
+
+    // var data: std.ArrayList(u8) = .empty;
+    // // var fds: std.ArrayList(i32) = .empty;
+
+    // try data.append(gpa, @intFromEnum(MessageType.generic_protocol_message));
+    // try data.append(gpa, @intFromEnum(MessageMagic.type_object));
+
+    // try data.appendSlice(gpa, &mem.toBytes(id));
+
+    // var wait_on_seq: usize = 0;
+
+    // if (method.returns_type.len > 0) {
+    //     try data.append(gpa, @intFromEnum(MessageMagic.type_seq));
+
+    //     const self_client = self;
+    //     if (self_client.client) |client| {
+    //         client.seq += 1;
+    //         wait_on_seq = client.seq;
+    //     }
+
+    //     try data.appendSlice(gpa, &mem.toBytes(wait_on_seq));
+    // }
+
+    // for (0..params.len) |i| {
+    //     const param = meta.intToEnum(MessageMagic, params[i]) catch unreachable;
+    //     switch (param) {
+    //         .type_uint => {
+    //             try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
+    //             try data.resize(gpa, data.items.len + 4);
+    //         },
+    //         .type_int => {},
+    //         .type_object => {},
+    //         .type_f32 => {},
+    //         .type_varchar => {},
+    //         .type_array => {},
+    //         .type_fd => {},
+    //         else => {},
+    //     }
+    // }
 
     return 0;
 }

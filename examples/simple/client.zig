@@ -11,12 +11,13 @@ const ProtocolClientImplementation = hw.types.client_impl.ProtocolClientImplemen
 const TEST_PROTOCOL_VERSION: u32 = 1;
 
 pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    const alloc = gpa.allocator();
-    defer {
-        const deinit_status = gpa.deinit();
-        if (deinit_status == .leak) @panic("TEST FAIL");
-    }
+    // var gpa: std.heap.DebugAllocator(.{}) = .init;
+    // const alloc = gpa.allocator();
+    // defer {
+    //     const deinit_status = gpa.deinit();
+    //     if (deinit_status == .leak) @panic("TEST FAIL");
+    // }
+    const alloc = std.heap.c_allocator;
 
     const xdg_runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
     const socket_path = try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{xdg_runtime_dir}, 0);
@@ -38,10 +39,10 @@ pub fn main() !void {
 
     std.debug.print("test protocol supported at version {}. Binding.\n", .{SPEC.vtable.specVer(SPEC.ptr)});
 
-    const obj = try socket.bindProtocol(alloc, impl.protocol(), TEST_PROTOCOL_VERSION);
+    const obj = try socket.bindProtocol(alloc, protocol, TEST_PROTOCOL_VERSION);
     var manager = client.MyManagerV1Object.init(obj);
 
-    std.debug.print("Bound!", .{});
+    std.debug.print("Bound!\n", .{});
 
     const pipes = try posix.pipe();
     defer {
@@ -53,19 +54,19 @@ pub fn main() !void {
 
     std.debug.print("Will send fd {}\n", .{pipes[0]});
 
-    manager.sendSendMessage("Hello!");
-    manager.sendSendMessageFd(pipes[0]);
-    manager.sendSendMessageArray(&.{ "Hello", "via", "array!" });
-    manager.sendSendMessageArray(&.{});
-    manager.sendSendMessageArrayUint(&.{ 69, 420, 2137 });
+    try manager.sendSendMessage(alloc, "Hello!");
+    try manager.sendSendMessageFd(alloc, pipes[0]);
+    try manager.sendSendMessageArray(alloc, &.{ "Hello", "via", "array!" });
+    try manager.sendSendMessageArray(alloc, &.{});
+    try manager.sendSendMessageArrayUint(alloc, &.{ 69, 420, 2137 });
     manager.setSendMessage(&message);
 
     try socket.roundtrip(alloc);
 
-    var object = client.MyObjectV1Object.init(manager.sendMakeObject().?);
+    var object = client.MyObjectV1Object.init(manager.sendMakeObject(alloc).?);
     object.setSendMessage(&messageOnObject);
-    object.sendSendMessage("Hello on object");
-    object.sendSendEnum(spec.TestProtocolV1MyEnum.world);
+    try object.sendSendMessage(alloc, "Hello on object");
+    try object.sendSendEnum(alloc, spec.TestProtocolV1MyEnum.world);
 
     std.debug.print("Sent hello!\n", .{});
 

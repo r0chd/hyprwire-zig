@@ -158,17 +158,20 @@ pub fn bindProtocol(self: *Self, gpa: mem.Allocator, spec: ProtocolSpec, version
 
     var object = ClientObject.init(self);
     const objects = spec.vtable.objects(spec.ptr);
-    object.spec = objects[objects.len - 1];
+    object.spec = objects[0];
     self.seq += 1;
     object.seq = self.seq;
     object.version = version;
     object.protocol_name = spec.vtable.specName(spec.ptr);
     try self.objects.append(gpa, object);
 
-    const bind_message = try messages.BindProtocol.init(gpa, spec.vtable.specName(spec.ptr), object.seq, version);
+    const obj = &self.objects.items[self.objects.items.len - 1];
+
+    const spec_name = spec.vtable.specName(spec.ptr);
+    const bind_message = try messages.BindProtocol.init(gpa, spec_name, obj.seq, version);
     try self.sendMessage(gpa, Message.from(&bind_message));
 
-    try self.waitForObject(gpa, &object);
+    try self.waitForObject(gpa, obj);
 
     return Object.from(&self.objects.getLast());
 }
@@ -217,7 +220,7 @@ pub fn shouldEndReading(self: *Self) bool {
 }
 
 pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
-    if (self.@"error") return error.TODO;
+    if (self.@"error") return error.ConnectionClosed;
 
     if (!self.handshake_done) {
         const now = try std.time.Instant.now();
@@ -265,7 +268,10 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
         return error.MessageMalformed;
     }
 
-    if (data.data.items.len == 0) return error.NoData;
+    if (data.data.items.len == 0) {
+        self.disconnectOnError();
+        return error.ConnectionClosed;
+    }
 
     const ret = message_parser.handleMessage(gpa, &data, .{ .client = self });
 
@@ -273,18 +279,18 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
         log.debug("fatal: failed to handle message on wire", .{});
         self.disconnectOnError();
         // TODO: make handleMessage return an error instead of enum
-        return error.TODO;
+        return error.FailedToHandleMessage;
     }
 
     if (self.@"error") {
-        return error.TODO;
+        return error.ConnectionClosed;
     }
 }
 
 pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
-    for (self.objects.items) |obj| {
+    for (self.objects.items) |*obj| {
         if (obj.id == msg.object) {
-            try types.called(WireObject.from(&obj), gpa, msg.method, msg.data_span, msg.fds_list);
+            try types.called(WireObject.from(obj), gpa, msg.method, msg.data_span, msg.fds_list);
             break;
         }
     }
@@ -308,24 +314,20 @@ pub fn sendMessage(self: *Self, gpa: mem.Allocator, message: Message) !void {
         log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
     }
 
-    var io: posix.iovec = .{
-        .base = @constCast(message.vtable.getData(message.ptr).ptr),
-        .len = message.vtable.getLen(message.ptr),
-    };
-    var msg: c.msghdr = .{
-        .msg_iov = @ptrCast(&io),
-        .msg_iovlen = 1,
-        .msg_control = null,
-        .msg_controllen = 0,
-        .msg_flags = 0,
-        .msg_name = null,
-        .msg_namelen = 0,
-    };
+    var io: posix.iovec = std.mem.zeroes(posix.iovec);
+    io.base = @constCast(message.vtable.getData(message.ptr).ptr);
+    io.len = message.vtable.getLen(message.ptr);
+
+    var msg: c.msghdr = std.mem.zeroes(c.msghdr);
+    msg.msg_iov = @ptrCast(&io);
+    msg.msg_iovlen = 1;
 
     var control_buf: std.ArrayList(u8) = .empty;
+    defer control_buf.deinit(gpa);
     const fds = message.vtable.getFds(message.ptr);
     if (fds.len > 0) {
-        try control_buf.resize(gpa, c.CMSG_LEN(@sizeOf(i32) * fds.len));
+        try control_buf.resize(gpa, c.CMSG_SPACE(@sizeOf(i32) * fds.len));
+        @memset(control_buf.items, 0);
 
         msg.msg_control = control_buf.items.ptr;
         msg.msg_controllen = control_buf.items.len;
@@ -349,7 +351,7 @@ pub fn extractLoopFD(self: *Self) i32 {
     return self.fd.raw;
 }
 
-pub fn serverSpecs(self: *Self, gpa: mem.Allocator, specs: []const [:0]const u8) void {
+pub fn serverSpecs(self: *Self, gpa: mem.Allocator, specs: []const []const u8) void {
     self.serverSpecsInner(gpa, specs) catch |err| {
         log.debug("fatal: failed to parse server specs: {}", .{err});
         self.disconnectOnError();
@@ -358,12 +360,13 @@ pub fn serverSpecs(self: *Self, gpa: mem.Allocator, specs: []const [:0]const u8)
     self.handshake_done = true;
 }
 
-fn serverSpecsInner(self: *Self, gpa: mem.Allocator, specs: []const [:0]const u8) !void {
+fn serverSpecsInner(self: *Self, gpa: mem.Allocator, specs: []const []const u8) !void {
     for (specs) |spec| {
         const at_pos = mem.lastIndexOfScalar(u8, spec, '@') orelse return error.ParseError;
 
-        var s = ServerSpec.init(spec[0..at_pos], try fmt.parseInt(u32, spec[at_pos + 1 ..], 10));
-        try self.server_specs.append(gpa, ProtocolSpec.from(&s));
+        const s = try gpa.create(ServerSpec);
+        s.* = ServerSpec.init(spec[0..at_pos], try fmt.parseInt(u32, spec[at_pos + 1 ..], 10));
+        try self.server_specs.append(gpa, ProtocolSpec.from(s));
     }
 }
 
@@ -376,7 +379,8 @@ pub fn roundtrip(self: *Self, gpa: mem.Allocator) !void {
     if (self.@"error") return;
 
     const next_seq = self.last_ackd_roundtrip_seq + 1;
-    var message = messages.RoundtripRequest.init(next_seq);
+    var message = try messages.RoundtripRequest.init(gpa, next_seq);
+    defer message.deinit(gpa);
     try self.sendMessage(gpa, Message.from(&message));
 
     while (self.last_ackd_roundtrip_seq < next_seq) {

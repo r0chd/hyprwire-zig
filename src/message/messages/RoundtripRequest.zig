@@ -32,28 +32,28 @@ message_type: MessageType = .roundtrip_request,
 
 const Self = @This();
 
-pub fn init(seq: u32) Self {
-    var data_array = [_]u8{
-        @intFromEnum(MessageType.roundtrip_request),
-        @intFromEnum(MessageMagic.type_uint),
-        0,
-        0,
-        0,
-        0,
-        @intFromEnum(MessageMagic.end),
-    };
+pub fn init(gpa: mem.Allocator, seq: u32) !Self {
+    var msg: Self = undefined;
+    msg.seq = seq;
 
-    mem.writeInt(u32, data_array[2..6], seq, .little);
+    var buf = try gpa.alloc(u8, 7);
+    buf[0] = @intFromEnum(MessageType.roundtrip_request);
+    buf[1] = @intFromEnum(MessageMagic.type_uint);
+    @memset(buf[2..6], 0);
+    mem.writeInt(u32, buf[2..6], seq, .little);
+    buf[6] = @intFromEnum(MessageMagic.end);
 
-    return .{
-        .seq = seq,
-        .data = &data_array,
-        .len = data_array.len,
-        .message_type = .roundtrip_request,
-    };
+    msg.data = buf;
+    msg.len = buf.len;
+    msg.message_type = .roundtrip_request;
+    return msg;
 }
 
-pub fn fromBytes(data: []const u8, offset: usize) !Self {
+pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    gpa.free(self.data);
+}
+
+pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     if (offset + 7 > data.len) return error.OutOfRange;
 
     if (data[offset] != @intFromEnum(MessageType.roundtrip_request)) return error.InvalidMessage;
@@ -64,9 +64,10 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
 
     if (data[offset + 6] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
 
+    const owned = if (isTrace()) try gpa.dupe(u8, data[offset .. offset + 7]) else try gpa.alloc(u8, 0);
     return .{
         .seq = seq,
-        .data = if (isTrace()) data[offset..][0..] else &.{},
+        .data = owned,
         .len = 7,
         .message_type = .roundtrip_request,
     };
@@ -76,12 +77,13 @@ test "RoundtripRequest.init" {
     const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    var msg = Self.init(42);
+    var msg = try Self.init(alloc, 42);
+    defer msg.deinit(alloc);
 
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    try std.testing.expectEqualStrings("roundtrip_request ( 42 )", data);
+    try std.testing.expectEqualStrings("roundtrip_request ( 42 ) ", data);
 }
 
 test "RoundtripRequest.fromBytes" {
@@ -96,14 +98,15 @@ test "RoundtripRequest.fromBytes" {
         0x2A,                           0x00, 0x00, 0x00, // seq = 42
         @intFromEnum(MessageMagic.end),
     };
-    var msg = try Self.fromBytes(&bytes, 0);
+    var msg = try Self.fromBytes(alloc, &bytes, 0);
+    defer msg.deinit(alloc);
 
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
     if (isTrace()) {
-        try std.testing.expectEqualStrings("roundtrip_request ( 42 )", data);
+        try std.testing.expectEqualStrings("roundtrip_request ( 42 ) ", data);
     } else {
-        try std.testing.expectEqualStrings("roundtrip_request (  )", data);
+        try std.testing.expectEqualStrings("roundtrip_request (  ) ", data);
     }
 }

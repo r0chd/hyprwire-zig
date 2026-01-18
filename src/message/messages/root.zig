@@ -52,9 +52,7 @@ fn formatPrimitiveType(gpa: mem.Allocator, s: []const u8, @"type": MessageMagic)
             return .{ try fmt.allocPrintSentinel(gpa, "object: {s}", .{obj_str}, 0), 4 };
         },
         .type_varchar => {
-            const res = message_parser.parseVarInt(s, 0);
-            const len = res.@"0";
-            const int_len = res.@"1";
+            const len, const int_len = message_parser.parseVarInt(s, 0);
             const ptr = s[int_len .. int_len + len];
             const formatted = try fmt.allocPrintSentinel(gpa, "\"{s}\"", .{ptr}, 0);
             return .{ formatted, len + int_len };
@@ -68,7 +66,7 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
     defer result.deinit(gpa);
 
     var writer = result.writer(gpa);
-    try writer.print("{s} ( ", .{@tagName(message.vtable.getMessageType(message.ptr))});
+    try writer.print("{s} ( ", .{messageTypeToStr(message.vtable.getMessageType(message.ptr))});
 
     var needle: usize = 1;
     const message_data = message.vtable.getData(message.ptr);
@@ -76,98 +74,103 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
         const magic_byte = message_data[needle];
         needle += 1;
 
-        if (meta.intToEnum(MessageMagic, magic_byte)) |magic| {
-            switch (magic) {
-                .end => {
-                    break;
-                },
-                .type_seq => {
-                    const value = std.mem.readVarInt(u32, message.vtable.getData(message.ptr)[needle .. needle + 4], .little);
-                    try writer.print("seq: {}", .{value});
-                    needle += 4;
-                    break;
-                },
-                .type_uint => {
-                    const value = std.mem.readVarInt(u32, message.vtable.getData(message.ptr)[needle .. needle + 4], .little);
-                    try writer.print("{}", .{value});
-                    needle += 4;
-                    break;
-                },
-                .type_int => {
-                    const value = std.mem.readVarInt(i32, message.vtable.getData(message.ptr)[needle .. needle + 4], .little);
-                    try writer.print("{}", .{value});
-                    needle += 4;
-                    break;
-                },
-                .type_f32 => {
-                    const int_bits = std.mem.readVarInt(u32, message.vtable.getData(message.ptr)[needle .. needle + 4], .little);
-                    const value = @as(f32, @bitCast(int_bits));
-                    try writer.print("{}", .{value});
-                    needle += 4;
-                    break;
-                },
-                .type_varchar => {
-                    const res = message_parser.parseVarInt(message.vtable.getData(message.ptr), needle);
-                    if (res.@"0" > 0) {
-                        const ptr = message.vtable.getData(message.ptr)[needle + res.@"1" .. needle + res.@"1" + res.@"0"];
-                        try writer.print("\"{s}\"", .{ptr[0..res.@"0"]});
-                    } else {
-                        _ = try writer.write("\"\"");
+        const magic = meta.intToEnum(MessageMagic, magic_byte) catch return error.InvalidMessage;
+        switch (magic) {
+            .end => {
+                break;
+            },
+            .type_seq => {
+                const value = std.mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
+                try writer.print("seq: {}", .{value});
+                needle += 4;
+            },
+            .type_uint => {
+                const value = std.mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
+                try writer.print("{}", .{value});
+                needle += 4;
+            },
+            .type_int => {
+                const value = std.mem.readVarInt(i32, message_data[needle .. needle + 4], .little);
+                try writer.print("{}", .{value});
+                needle += 4;
+            },
+            .type_f32 => {
+                const int_bits = std.mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
+                const value = @as(f32, @bitCast(int_bits));
+                try writer.print("{}", .{value});
+                needle += 4;
+            },
+            .type_varchar => {
+                const len, const int_len = message_parser.parseVarInt(message_data, needle);
+                if (len > 0) {
+                    const ptr = message_data[needle + int_len .. needle + int_len + len];
+                    try writer.print("\"{s}\"", .{ptr[0..len]});
+                } else {
+                    _ = try writer.write("\"\"");
+                }
+                needle += int_len + len;
+            },
+            .type_array => {
+                const this_type = meta.intToEnum(MessageMagic, message_data[needle]) catch return error.InvalidMessage;
+                needle += 1;
+                const els, const int_len = message_parser.parseVarInt(message_data, needle);
+                _ = try writer.write("{ ");
+                needle += int_len;
+
+                for (0..els) |i| {
+                    const str, const len = try formatPrimitiveType(gpa, message_data[needle..], this_type);
+                    defer gpa.free(str);
+
+                    needle += len;
+                    try writer.print("{s}", .{str});
+                    if (i < els - 1) {
+                        try writer.print(", ", .{});
                     }
+                }
 
-                    needle += res.@"1" + res.@"0";
-                    break;
-                },
-                .type_array => {
-                    const this_type: MessageMagic = @enumFromInt(message.vtable.getData(message.ptr)[needle]);
-                    needle += 1;
-                    const els, const int_len = message_parser.parseVarInt(message.vtable.getData(message.ptr), needle);
-                    _ = try writer.write("{ ");
-                    needle += int_len;
-
-                    for (0..els) |i| {
-                        const str, const len = try formatPrimitiveType(gpa, message.vtable.getData(message.ptr)[needle..], this_type);
-                        defer gpa.free(str);
-
-                        needle += len;
-
-                        try writer.print("{s}", .{str});
-                        if (i < els - 1) {
-                            try writer.print(", ", .{});
-                        }
-                    }
-
-                    _ = try writer.write(" }");
-                    break;
-                },
-                .type_object => {
-                    const id = message.vtable.getData(message.ptr)[needle];
-                    needle += 4;
-                    try writer.print("object({})", .{id});
-                    break;
-                },
-                .type_fd => {
-                    _ = try writer.write("<fd>");
-                    break;
-                },
-                else => {},
-            }
-        } else |_| {}
+                _ = try writer.write(" }");
+            },
+            .type_object => {
+                const id = std.mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
+                needle += 4;
+                try writer.print("object({})", .{id});
+            },
+            .type_fd => {
+                _ = try writer.write("<fd>");
+            },
+            else => return error.InvalidMessage,
+        }
 
         _ = try writer.write(", ");
     }
 
-    if (result.items[result.items.len - 2] == ',') {
+    if (result.items.len >= 2 and result.items[result.items.len - 2] == ',') {
         _ = result.pop();
         _ = result.pop();
     }
-    if (result.items[result.items.len - 2] == ',') {
+    if (result.items.len >= 2 and result.items[result.items.len - 2] == ',') {
         _ = result.pop();
         _ = result.pop();
     }
 
-    try result.appendSlice(gpa, " )");
+    try result.appendSlice(gpa, " ) ");
     return result.toOwnedSlice(gpa);
+}
+
+fn messageTypeToStr(t: MessageType) []const u8 {
+    return switch (t) {
+        .invalid => "invalid",
+        .sup => "sup",
+        .handshake_begin => "handshake_begin",
+        .handshake_ack => "handshake_ack",
+        .handshake_protocols => "handshake_protocols",
+        .bind_protocol => "bind_protocol",
+        .new_object => "new_object",
+        .fatal_protocol_error => "fatal_protocol_error",
+        .generic_protocol_message => "generic_protocol_message",
+        .roundtrip_request => "roundtrip_request",
+        .roundtrip_done => "roundtrip_done",
+    };
 }
 
 test {

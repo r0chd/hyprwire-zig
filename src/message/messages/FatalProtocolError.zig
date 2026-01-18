@@ -130,7 +130,7 @@ test "FatalProtocolError.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    try std.testing.expectEqualStrings("fatal_protocol_error ( 3 )", data);
+    try std.testing.expectEqualStrings("fatal_protocol_error ( 3, 5, \"test error\" ) ", data);
 }
 
 test "FatalProtocolError.fromBytes" {
@@ -159,8 +159,8 @@ test "FatalProtocolError.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        try std.testing.expectEqualStrings("fatal_protocol_error ( 3 )", data);
+        try std.testing.expectEqualStrings("fatal_protocol_error ( 3, 5, \"test error\" ) ", data);
     } else {
-        try std.testing.expectEqualStrings("fatal_protocol_error (  )", data);
+        try std.testing.expectEqualStrings("fatal_protocol_error (  ) ", data);
     }
 }

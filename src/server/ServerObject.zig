@@ -17,7 +17,7 @@ const Message = messages.Message;
 const Method = types.Method;
 
 client: ?*ServerClient,
-spec: ?*const types.ProtocolObjectSpec = null,
+spec: ?types.ProtocolObjectSpec = null,
 data: ?*anyopaque = null,
 listeners: std.ArrayList(?*anyopaque) = .empty,
 on_deinit: ?*const fn () void = null,
@@ -113,10 +113,10 @@ pub fn deinit(self: *Self) void {
     }
 }
 
-pub fn call(self: *Self, id: u32, args: *anyopaque) u32 {
+pub fn call(self: *Self, gpa: mem.Allocator, id: u32) !u32 {
+    _ = gpa;
     _ = self;
     _ = id;
-    _ = args;
 
     return 0;
 }

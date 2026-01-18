@@ -132,15 +132,10 @@ pub const MyObjectV1Spec = struct {
     }
 };
 
-pub const MyManagerV1 = struct {
-    pub const interface = ProtocolObjectSpec.from(&MyManagerV1Spec.init());
-};
-
-pub const MyObjectV1 = struct {
-    pub const interface = ProtocolObjectSpec.from(&MyObjectV1Spec.init());
-};
-
 pub const TestProtocolV1ProtocolSpec = struct {
+    manager: MyManagerV1Spec = .{},
+    object: MyObjectV1Spec = .{},
+
     const Self = @This();
 
     pub fn init() Self {
@@ -158,10 +153,9 @@ pub const TestProtocolV1ProtocolSpec = struct {
     }
 
     pub fn objects(self: *Self) []const ProtocolObjectSpec {
-        _ = self;
         return &.{
-            MyManagerV1.interface,
-            MyObjectV1.interface,
+            ProtocolObjectSpec.from(&self.manager),
+            ProtocolObjectSpec.from(&self.object),
         };
     }
 };

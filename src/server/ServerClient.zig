@@ -144,7 +144,7 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
     obj.version = version;
     try self.objects.append(gpa, obj);
 
-    var found_spec: ?*const types.ProtocolObjectSpec = null;
+    var found_spec: ?types.ProtocolObjectSpec = null;
     var protocol_name: []const u8 = "";
 
     for (self.server.?.impls.items) |impl| {
@@ -153,7 +153,7 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
 
         for (protocol_spec.vtable.objects(protocol_spec.ptr)) |spec| {
             if (object.len > 0 and !mem.eql(u8, spec.vtable.objectName(spec.ptr), object)) continue;
-            found_spec = &spec;
+            found_spec = spec;
             break;
         }
 
@@ -184,7 +184,8 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
     obj.protocol_name = try gpa.dupe(u8, protocol_name);
     errdefer gpa.free(obj.protocol_name);
 
-    var ret = messages.NewObject.init(seq, obj.id);
+    var ret = try messages.NewObject.init(gpa, seq, obj.id);
+    defer ret.deinit(gpa);
     self.sendMessage(gpa, Message.from(&ret));
 
     try self.onBind(gpa, obj);

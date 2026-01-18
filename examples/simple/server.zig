@@ -31,5 +31,5 @@ pub fn main() !void {
     const pro = hw.types.server_impl.ProtocolServerImplementation.from(&spec);
     try socket.addImplementation(alloc, pro);
 
-    while (socket.dispatchEvents(alloc, true)) {} else |_| {}
+    while (socket.dispatchEvents(alloc, true) catch false) {}
 }

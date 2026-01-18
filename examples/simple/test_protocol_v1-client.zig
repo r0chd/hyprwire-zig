@@ -29,24 +29,47 @@ pub const MyManagerV1Object = struct {
         _ = self;
     }
 
-    pub fn sendSendMessage(self: *Self, message: [:0]const u8) void {
-        _ = self.object.vtable.call(self.object.ptr, 0, @constCast(&.{message}));
+    pub fn sendSendMessage(self: *Self, gpa: mem.Allocator, message: [:0]const u8) !void {
+        const args = struct {
+            message: [:0]const u8,
+        }{ .message = message };
+        _ = args;
+
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 0);
     }
 
-    pub fn sendSendMessageFd(self: *Self, message: i32) void {
-        _ = self.object.vtable.call(self.object.ptr, 1, @constCast(&.{message}));
+    pub fn sendSendMessageFd(self: *Self, gpa: mem.Allocator, message: i32) !void {
+        const args = struct {
+            message: i32,
+        }{ .message = message };
+        _ = args;
+
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 1);
     }
 
-    pub fn sendSendMessageArray(self: *Self, message: []const [:0]const u8) void {
-        _ = self.object.vtable.call(self.object.ptr, 2, @constCast(&.{message}));
+    pub fn sendSendMessageArray(self: *Self, gpa: mem.Allocator, message: []const [:0]const u8) !void {
+        const args = struct {
+            message: []const [:0]const u8,
+        }{ .message = message };
+        _ = args;
+
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 2);
     }
 
-    pub fn sendSendMessageArrayUint(self: *Self, message: []const i32) void {
-        _ = self.object.vtable.call(self.object.ptr, 3, @constCast(&.{message}));
+    pub fn sendSendMessageArrayUint(self: *Self, gpa: mem.Allocator, message: []const i32) !void {
+        const args = struct {
+            message: []const i32,
+        }{ .message = message };
+        _ = args;
+
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 3);
     }
 
-    pub fn sendMakeObject(self: *Self) ?Object {
-        const id = self.object.vtable.call(self.object.ptr, 4, @constCast(&.{}));
+    pub fn sendMakeObject(self: *Self, gpa: mem.Allocator) ?Object {
+        const args = struct {}{};
+        _ = args;
+
+        const id = self.object.vtable.call(self.object.ptr, gpa, 4) catch return null;
         if (self.object.vtable.clientSock(self.object.ptr)) |sock| {
             return sock.objectForId(id);
         }
@@ -98,23 +121,33 @@ pub const MyObjectV1Object = struct {
         _ = self;
     }
 
-    pub fn sendSendMessage(self: *Self, message: [:0]const u8) void {
-        _ = self.object.vtable.call(self.object.ptr, 0, @constCast(&.{message}));
+    pub fn sendSendMessage(self: *Self, gpa: mem.Allocator, message: [:0]const u8) !void {
+        const args = struct {
+            message: [:0]const u8,
+        }{ .message = message };
+        _ = args;
+
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 0);
     }
 
-    pub fn sendSendEnum(self: *Self, message: spec.TestProtocolV1MyEnum) void {
-        _ = self.object.vtable.call(self.object.ptr, 1, @constCast(&.{@intFromEnum(message)}));
+    pub fn sendSendEnum(self: *Self, gpa: mem.Allocator, message: spec.TestProtocolV1MyEnum) !void {
+        const args = struct {
+            message: spec.TestProtocolV1MyEnum,
+        }{ .message = message };
+        _ = args;
+
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 1);
     }
 
-    pub fn sendDestroy(self: *Self) void {
-        _ = self.object.vtable.call(self.object.ptr, 2, @constCast(&.{}));
+    pub fn sendDestroy(self: *Self, gpa: mem.Allocator) !void {
+        const args = struct {}{};
+        _ = args;
+
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 2);
         self.object.destroy();
     }
 
-    pub fn setSendMessage(
-        self: *Self,
-        callback: *const fn (*Self, [:0]const u8) void,
-    ) void {
+    pub fn setSendMessage(self: *Self, callback: *const fn (*Self, [:0]const u8) void) void {
         self.listeners.send_message = callback;
     }
 

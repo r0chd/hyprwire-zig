@@ -121,7 +121,7 @@ test "HandshakeBegin.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    try std.testing.expectEqualStrings("handshake_begin ( { 1, 2 } )", data);
+    try std.testing.expectEqualStrings("handshake_begin ( { 1, 2 } ) ", data);
 }
 
 test "HandshakeBegin.fromBytes" {
@@ -148,8 +148,8 @@ test "HandshakeBegin.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        try std.testing.expectEqualStrings("handshake_begin ( { 1, 2 } )", data);
+        try std.testing.expectEqualStrings("handshake_begin ( { 1, 2 } ) ", data);
     } else {
-        try std.testing.expectEqualStrings("handshake_begin (  )", data);
+        try std.testing.expectEqualStrings("handshake_begin (  ) ", data);
     }
 }

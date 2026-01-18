@@ -33,8 +33,9 @@ message_type: MessageType = .new_object,
 
 const Self = @This();
 
-pub fn init(seq: u32, id: u32) Self {
-    var data_slice = [_]u8{
+pub fn init(gpa: mem.Allocator, seq: u32, id: u32) !Self {
+    const data_slice = try gpa.create([12]u8);
+    data_slice.* = .{
         @intFromEnum(MessageType.new_object),
         @intFromEnum(MessageMagic.type_uint),
         0,
@@ -49,19 +50,19 @@ pub fn init(seq: u32, id: u32) Self {
         @intFromEnum(MessageMagic.end),
     };
 
-    @memcpy(data_slice[2..][0..@sizeOf(@TypeOf(seq))], std.mem.asBytes(&seq));
-    @memcpy(data_slice[7..][0..@sizeOf(@TypeOf(seq))], std.mem.asBytes(&seq));
+    @memcpy(data_slice[2..6], std.mem.asBytes(&id));
+    @memcpy(data_slice[7..11], std.mem.asBytes(&seq));
 
     return .{
         .id = id,
         .seq = seq,
-        .data = &data_slice,
+        .data = data_slice,
         .len = data_slice.len,
         .message_type = .new_object,
     };
 }
 
-pub fn fromBytes(data: []const u8, offset: usize) !Self {
+pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     if (offset + 12 > data.len)
         return error.OutOfRange;
 
@@ -84,22 +85,29 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     return .{
         .id = id,
         .seq = seq,
-        .data = if (isTrace()) data[offset..][0..] else &.{},
+        .data = if (isTrace()) try gpa.dupe(u8, data[offset..][0..]) else &.{},
         .len = 12,
         .message_type = .new_object,
     };
+}
+
+pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    if (self.data.len > 0) {
+        gpa.free(self.data);
+    }
 }
 
 test "NewObject.init" {
     const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    var msg = Self.init(3, 2);
+    var msg = try Self.init(alloc, 3, 2);
+    defer msg.deinit(alloc);
 
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    try std.testing.expectEqualStrings("new_object ( 3 )", data);
+    try std.testing.expectEqualStrings("new_object ( 2, 3 ) ", data);
 }
 
 test "NewObject.fromBytes" {
@@ -114,14 +122,15 @@ test "NewObject.fromBytes" {
         0x02,                           0x00, 0x00, 0x00, // seq = 2
         @intFromEnum(MessageMagic.end),
     };
-    var msg = try Self.fromBytes(&bytes, 0);
+    var msg = try Self.fromBytes(alloc, &bytes, 0);
+    defer msg.deinit(alloc);
 
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
     if (isTrace()) {
-        try std.testing.expectEqualStrings("new_object ( 3 )", data);
+        try std.testing.expectEqualStrings("new_object ( 3, 2 ) ", data);
     } else {
-        try std.testing.expectEqualStrings("new_object (  )", data);
+        try std.testing.expectEqualStrings("new_object (  ) ", data);
     }
 }

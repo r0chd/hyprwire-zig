@@ -150,31 +150,36 @@ pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: ProtocolServerIm
     try self.impls.append(gpa, impl);
 }
 
-pub fn dispatchPending(self: *Self, gpa: mem.Allocator) !void {
+pub fn dispatchPending(self: *Self, gpa: mem.Allocator) !bool {
+    if (self.pollfds.items.len == 0) return false;
     _ = try posix.poll(self.pollfds.items, 0);
-    if (self.dispatchNewConnections(gpa)) return self.dispatchPending(gpa);
+    if (self.dispatchNewConnections(gpa))
+        return try self.dispatchPending(gpa);
 
-    return self.dispatchExistingConnections(gpa);
+    return try self.dispatchExistingConnections(gpa);
 }
 
-pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
+pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !bool {
     self.poll_mtx.lock();
     defer self.poll_mtx.unlock();
 
-    while (self.dispatchPending(gpa)) {} else |_| {}
+    while (try self.dispatchPending(gpa)) {}
 
     self.clearEventFd();
     self.clearWakeupFd();
 
     if (block) {
+        if (self.pollfds.items.len == 0) return true;
         _ = try posix.poll(self.pollfds.items, -1);
-        while (self.dispatchPending(gpa)) {} else |_| {}
+        while (try self.dispatchPending(gpa)) {}
     }
 
     if (self.export_poll_mtx_locked) {
         self.export_poll_mtx.unlock();
         self.export_poll_mtx_locked = false;
     }
+
+    return true;
 }
 
 pub fn clearFd(fd: Fd) void {
@@ -258,8 +263,8 @@ pub fn internalFds(self: *Self) usize {
 pub fn recheckPollFds(self: *Self, gpa: mem.Allocator) !void {
     self.pollfds.clearAndFree(gpa);
 
-    const fd = self.fd orelse return error.NoFileDescriptor;
     if (!self.is_empty_listener) {
+        const fd = self.fd orelse return error.NoFileDescriptor;
         try self.pollfds.append(gpa, .{
             .fd = fd.raw,
             .events = posix.POLL.IN,
@@ -295,7 +300,7 @@ pub fn dispatchNewConnections(self: *Self, gpa: mem.Allocator) bool {
 
     if (self.is_empty_listener) return false;
 
-    if (self.pollfds.items[0].revents & posix.POLL.IN != 0) return false;
+    if ((self.pollfds.items[0].revents & posix.POLL.IN) == 0) return false;
 
     var client_address: posix.sockaddr.in = .{
         .port = 0,
@@ -326,18 +331,18 @@ pub fn dispatchNewConnections(self: *Self, gpa: mem.Allocator) bool {
     return true;
 }
 
-pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !void {
+pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !bool {
     var had_any = false;
     var needs_poll_recheck = false;
 
     for (self.internalFds()..self.pollfds.items.len) |i| {
-        if (self.pollfds.items[i].revents & posix.POLL.IN != 0) continue;
+        if ((self.pollfds.items[i].revents & posix.POLL.IN) == 0) continue;
 
         try self.dispatchClient(gpa, self.clients.items[i - self.internalFds()]);
 
         had_any = true;
 
-        if (self.pollfds.items[i].revents & posix.POLL.HUP == 0) {
+        if ((self.pollfds.items[i].revents & posix.POLL.HUP) != 0) {
             self.clients.items[i - self.internalFds()].@"error" = true;
             needs_poll_recheck = true;
             if (isTrace()) {
@@ -354,13 +359,15 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !void {
     if (needs_poll_recheck) {
         var i: usize = self.clients.items.len;
         while (i > 0) : (i -= 1) {
-            const client = self.clients.items[i];
+            const client = self.clients.items[i - 1];
             if (client.@"error") {
-                _ = self.clients.swapRemove(i);
+                _ = self.clients.swapRemove(i - 1);
             }
         }
         try self.recheckPollFds(gpa);
     }
+
+    return had_any;
 }
 
 pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !void {

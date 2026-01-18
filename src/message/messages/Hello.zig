@@ -81,7 +81,7 @@ test "Hello.init" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    try std.testing.expectEqualStrings("sup ( \"VAX\" )", data);
+    try std.testing.expectEqualStrings("sup ( \"VAX\" ) ", data);
 }
 
 test "Hello.fromBytes" {
@@ -103,8 +103,8 @@ test "Hello.fromBytes" {
     defer alloc.free(data);
 
     if (isTrace()) {
-        try std.testing.expectEqualStrings("sup ( \"VAX\" )", data);
+        try std.testing.expectEqualStrings("sup ( \"VAX\" ) ", data);
     } else {
-        try std.testing.expectEqualStrings("sup (  )", data);
+        try std.testing.expectEqualStrings("sup (  ) ", data);
     }
 }
