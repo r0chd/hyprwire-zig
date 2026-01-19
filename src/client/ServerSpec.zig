@@ -1,15 +1,20 @@
 const ProtocolObjectSpec = @import("../implementation/types.zig").ProtocolObjectSpec;
+const std = @import("std");
 
 name: []const u8,
 version: u32,
 
 const Self = @This();
 
-pub fn init(name: []const u8, version: u32) Self {
+pub fn init(gpa: std.mem.Allocator, name: []const u8, version: u32) !Self {
     return .{
-        .name = name,
+        .name = try gpa.dupe(u8, name),
         .version = version,
     };
+}
+
+pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+    gpa.free(self.name);
 }
 
 pub fn specName(self: *const Self) []const u8 {

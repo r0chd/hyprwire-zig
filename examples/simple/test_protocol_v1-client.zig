@@ -6,6 +6,8 @@ const mem = std.mem;
 
 const Object = hyprwire.types.Object;
 const ProtocolSpec = hyprwire.types.ProtocolSpec;
+const Arg = hyprwire.types.Arg;
+const Args = hyprwire.types.Args;
 
 const ClientObjectImplementation = hyprwire.types.client_impl.ClientObjectImplementation;
 
@@ -30,46 +32,28 @@ pub const MyManagerV1Object = struct {
     }
 
     pub fn sendSendMessage(self: *Self, gpa: mem.Allocator, message: [:0]const u8) !void {
-        const args = struct {
-            message: [:0]const u8,
-        }{ .message = message };
-        _ = args;
-
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 0);
+        var args = Args.init(.{message});
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
     pub fn sendSendMessageFd(self: *Self, gpa: mem.Allocator, message: i32) !void {
-        const args = struct {
-            message: i32,
-        }{ .message = message };
-        _ = args;
-
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 1);
+        var args = Args.init(.{message});
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
 
     pub fn sendSendMessageArray(self: *Self, gpa: mem.Allocator, message: []const [:0]const u8) !void {
-        const args = struct {
-            message: []const [:0]const u8,
-        }{ .message = message };
-        _ = args;
-
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 2);
+        var args = Args.init(.{message});
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 2, &args);
     }
 
-    pub fn sendSendMessageArrayUint(self: *Self, gpa: mem.Allocator, message: []const i32) !void {
-        const args = struct {
-            message: []const i32,
-        }{ .message = message };
-        _ = args;
-
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 3);
+    pub fn sendSendMessageArrayUint(self: *Self, gpa: mem.Allocator, message: []const u32) !void {
+        var args = Args.init(.{message});
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 3, &args);
     }
 
     pub fn sendMakeObject(self: *Self, gpa: mem.Allocator) ?Object {
-        const args = struct {}{};
-        _ = args;
-
-        const id = self.object.vtable.call(self.object.ptr, gpa, 4) catch return null;
+        var args = Args.init(.{});
+        const id = self.object.vtable.call(self.object.ptr, gpa, 4, &args) catch return null;
         if (self.object.vtable.clientSock(self.object.ptr)) |sock| {
             return sock.objectForId(id);
         }
@@ -122,28 +106,18 @@ pub const MyObjectV1Object = struct {
     }
 
     pub fn sendSendMessage(self: *Self, gpa: mem.Allocator, message: [:0]const u8) !void {
-        const args = struct {
-            message: [:0]const u8,
-        }{ .message = message };
-        _ = args;
-
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 0);
+        var args = Args.init(.{message});
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
     pub fn sendSendEnum(self: *Self, gpa: mem.Allocator, message: spec.TestProtocolV1MyEnum) !void {
-        const args = struct {
-            message: spec.TestProtocolV1MyEnum,
-        }{ .message = message };
-        _ = args;
-
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 1);
+        var args = Args.init(.{message});
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
 
     pub fn sendDestroy(self: *Self, gpa: mem.Allocator) !void {
-        const args = struct {}{};
-        _ = args;
-
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 2);
+        var args = Args.init(.{});
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 2, &args);
         self.object.destroy();
     }
 
@@ -182,20 +156,23 @@ pub const TestProtocolV1Impl = struct {
         self: *Self,
         gpa: mem.Allocator,
     ) ![]*ClientObjectImplementation {
-        var impls = [_]*ClientObjectImplementation{
-            try gpa.create(ClientObjectImplementation),
-            try gpa.create(ClientObjectImplementation),
-        };
+        const impls = try gpa.alloc(*ClientObjectImplementation, 2);
+        errdefer gpa.free(impls);
 
+        impls[0] = try gpa.create(ClientObjectImplementation);
+        errdefer gpa.destroy(impls[0]);
         impls[0].* = .{
             .object_name = "my_manager_v1",
             .version = self.version,
         };
+
+        impls[1] = try gpa.create(ClientObjectImplementation);
+        errdefer gpa.destroy(impls[1]);
         impls[1].* = .{
             .object_name = "my_object_v1",
             .version = self.version,
         };
 
-        return &impls;
+        return impls;
     }
 };

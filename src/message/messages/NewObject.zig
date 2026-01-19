@@ -34,30 +34,26 @@ message_type: MessageType = .new_object,
 const Self = @This();
 
 pub fn init(gpa: mem.Allocator, seq: u32, id: u32) !Self {
-    const data_slice = try gpa.create([12]u8);
-    data_slice.* = .{
-        @intFromEnum(MessageType.new_object),
-        @intFromEnum(MessageMagic.type_uint),
-        0,
-        0,
-        0,
-        0,
-        @intFromEnum(MessageMagic.type_uint),
-        0,
-        0,
-        0,
-        0,
-        @intFromEnum(MessageMagic.end),
-    };
+    var data: std.ArrayList(u8) = .empty;
+    errdefer data.deinit(gpa);
 
-    @memcpy(data_slice[2..6], std.mem.asBytes(&id));
-    @memcpy(data_slice[7..11], std.mem.asBytes(&seq));
+    try data.append(gpa, @intFromEnum(MessageType.new_object));
+    try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
+    var id_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &id_buf, id, .little);
+    try data.appendSlice(gpa, &id_buf);
+    try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
+    var seq_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &seq_buf, seq, .little);
+    try data.appendSlice(gpa, &seq_buf);
+    try data.append(gpa, @intFromEnum(MessageMagic.end));
 
+    const owned = try data.toOwnedSlice(gpa);
     return .{
         .id = id,
         .seq = seq,
-        .data = data_slice,
-        .len = data_slice.len,
+        .data = owned,
+        .len = owned.len,
         .message_type = .new_object,
     };
 }
@@ -82,19 +78,19 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     if (data[offset + 11] != @intFromEnum(MessageMagic.end))
         return error.InvalidMessage;
 
+    const owned = if (isTrace()) try gpa.dupe(u8, data[offset..][0..12]) else try gpa.alloc(u8, 0);
+
     return .{
         .id = id,
         .seq = seq,
-        .data = if (isTrace()) try gpa.dupe(u8, data[offset..][0..]) else &.{},
+        .data = owned,
         .len = 12,
         .message_type = .new_object,
     };
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    if (self.data.len > 0) {
-        gpa.free(self.data);
-    }
+    gpa.free(self.data);
 }
 
 test "NewObject.init" {

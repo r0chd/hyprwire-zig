@@ -5,7 +5,6 @@ const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const Message = @import("root.zig").Message;
 
 const mem = std.mem;
-const log = std.log;
 const isTrace = helpers.isTrace;
 
 pub fn getFds(self: *const Self) []const i32 {

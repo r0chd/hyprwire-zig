@@ -273,6 +273,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                     log.err("server at fd {} core protocol error: malformed message recvd (handshake_protocols)", .{client.fd.raw});
                     return err;
                 };
+                defer msg.deinit(gpa);
 
                 if (isTrace()) {
                     const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
@@ -336,7 +337,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                 return msg.getLen();
             },
             .roundtrip_done => {
-                var msg = messages.RoundtripDone.fromBytes(raw.data.items, off) catch |err| {
+                var msg = messages.RoundtripDone.fromBytes(gpa, raw.data.items, off) catch |err| {
                     log.err("server at fd {} core protocol error: malformed message recvd (roundtrip_done)", .{client.fd.raw});
                     return err;
                 };
@@ -391,20 +392,17 @@ fn parseVarIntSpan(data: []const u8) meta.Tuple(&.{ usize, usize }) {
 
     return .{ rolling, i };
 }
+pub fn encodeVarInt(num: usize, buffer: []u8) []const u8 {
+    var n = num;
+    var i: usize = 0;
 
-pub fn encodeVarInt(num: usize) []const u8 {
-    var buffer: [4]u8 = undefined;
-    var data: std.ArrayList(u8) = .initBuffer(&buffer);
-    data.appendAssumeCapacity(@as(u8, @truncate(num >> 0)) | 0x80);
-    data.appendAssumeCapacity(@as(u8, @truncate(num >> 7)) | 0x80);
-    data.appendAssumeCapacity(@as(u8, @truncate(num >> 14)) | 0x80);
-    data.appendAssumeCapacity(@as(u8, @truncate(num >> 21)) | 0x80);
-
-    while (data.getLast() == 0x80 and data.items.len > 1) {
-        _ = data.pop();
+    while (true) {
+        const chunk: u8 = @truncate(n & 0x7F);
+        n >>= 7;
+        buffer[i] = if (n == 0) chunk else (chunk | 0x80);
+        i += 1;
+        if (n == 0) break;
     }
 
-    buffer[data.items.len - 1] &= ~@as(u8, 0x80);
-
-    return data.items;
+    return buffer[0..i];
 }

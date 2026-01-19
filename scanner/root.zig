@@ -203,9 +203,9 @@ pub fn generateSpecCode(gpa: mem.Allocator, doc: *const Document) ![]const u8 {
     const protocol_version_str = protocol_elem.attributes.get("version") orelse "1";
     const protocol_version = try fmt.parseInt(u32, protocol_version_str, 10);
 
-    var output: std.ArrayList(u8) = .empty;
-    errdefer output.deinit(gpa);
-    const writer = output.writer(gpa);
+    var output: std.Io.Writer.Allocating = .init(gpa);
+    defer output.deinit();
+    var writer = output.writer;
 
     try writer.print(
         \\const types = @import("hyprwire").types;
@@ -332,5 +332,5 @@ pub fn generateSpecCode(gpa: mem.Allocator, doc: *const Document) ![]const u8 {
         \\};
     );
 
-    return try output.toOwnedSlice(gpa);
+    return try output.toOwnedSlice();
 }

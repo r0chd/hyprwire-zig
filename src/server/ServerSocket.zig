@@ -395,7 +395,8 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
     }
 
     if (client.scheduled_roundtrip_seq > 0) {
-        var roundtrip_done = RoundtripDone.init(client.scheduled_roundtrip_seq);
+        var roundtrip_done = try RoundtripDone.init(gpa, client.scheduled_roundtrip_seq);
+        defer roundtrip_done.deinit(gpa);
         client.sendMessage(gpa, Message.from(&roundtrip_done));
         client.scheduled_roundtrip_seq = 0;
     }

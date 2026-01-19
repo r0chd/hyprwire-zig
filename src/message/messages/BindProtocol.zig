@@ -42,14 +42,20 @@ pub fn init(gpa: mem.Allocator, protocol: []const u8, seq: u32, version: u32) !S
     try data.append(gpa, @intFromEnum(MessageType.bind_protocol));
 
     try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
-    try data.writer(gpa).writeInt(u32, seq, .little);
+    var seq_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &seq_buf, seq, .little);
+    try data.appendSlice(gpa, &seq_buf);
 
     try data.append(gpa, @intFromEnum(MessageMagic.type_varchar));
-    try data.appendSlice(gpa, message_parser.encodeVarInt(protocol.len));
+    var proto_len_buf: [10]u8 = undefined;
+    const proto_len_int = message_parser.encodeVarInt(protocol.len, &proto_len_buf);
+    try data.appendSlice(gpa, proto_len_int);
     try data.appendSlice(gpa, protocol);
 
     try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
-    try data.writer(gpa).writeInt(u32, version, .little);
+    var ver_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &ver_buf, version, .little);
+    try data.appendSlice(gpa, &ver_buf);
 
     try data.append(gpa, @intFromEnum(MessageMagic.end));
 
@@ -101,8 +107,10 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
     needle += 1;
 
+    const owned = if (isTrace()) try gpa.dupe(u8, data[offset .. offset + needle - offset]) else try gpa.alloc(u8, 0);
+
     return .{
-        .data = if (isTrace()) try gpa.dupe(u8, data[offset .. offset + needle - offset]) else &[_]u8{},
+        .data = owned,
         .len = needle - offset,
         .message_type = .bind_protocol,
         .seq = seq,

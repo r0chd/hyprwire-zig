@@ -1,13 +1,15 @@
 const std = @import("std");
 const helpers = @import("helpers");
+const types = @import("types.zig");
 
 const mem = std.mem;
 
 const ClientSocket = @import("../client/ClientSocket.zig");
 const ServerSocket = @import("../server/ServerSocket.zig");
+const Trait = @import("trait").Trait;
 
-pub const Object = helpers.trait.Trait(.{
-    .call = fn (mem.Allocator, u32) anyerror!u32,
+pub const Object = Trait(.{
+    .call = fn (mem.Allocator, u32, *types.Args) anyerror!u32,
     .listen = fn (mem.Allocator, u32, *const fn (*anyopaque) void) anyerror!void,
     .clientSock = fn () ?*ClientSocket,
     .serverSock = fn () ?*ServerSocket,

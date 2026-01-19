@@ -40,10 +40,14 @@ pub fn init(gpa: mem.Allocator, object_id: u32, error_id: u32, error_msg: []cons
 
     try data.append(gpa, @intFromEnum(MessageType.fatal_protocol_error));
     try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
-    try data.writer(gpa).writeInt(u32, object_id, .little);
+    var object_id_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &object_id_buf, object_id, .little);
+    try data.appendSlice(gpa, &object_id_buf);
 
     try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
-    try data.writer(gpa).writeInt(u32, error_id, .little);
+    var error_id_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &error_id_buf, error_id, .little);
+    try data.appendSlice(gpa, &error_id_buf);
 
     try data.append(gpa, @intFromEnum(MessageMagic.type_varchar));
     var msg_len = error_msg.len;

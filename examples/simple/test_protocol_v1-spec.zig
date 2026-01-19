@@ -2,7 +2,6 @@ const types = @import("hyprwire").types;
 const MessageMagic = @import("hyprwire").MessageMagic;
 
 const Method = types.Method;
-const ProtocolSpec = types.ProtocolSpec;
 const ProtocolObjectSpec = types.ProtocolObjectSpec;
 
 pub const TestProtocolV1MyEnum = enum(u32) {
@@ -25,7 +24,7 @@ pub const MyManagerV1Spec = struct {
         },
         .{
             .idx = 1,
-            .params = &[_]u8{},
+            .params = &[_]u8{@intFromEnum(MessageMagic.type_fd)},
             .returns_type = "",
             .since = 0,
         },
@@ -43,7 +42,7 @@ pub const MyManagerV1Spec = struct {
         },
         .{
             .idx = 4,
-            .params = &[_]u8{@intFromEnum(MessageMagic.type_varchar)},
+            .params = &[_]u8{},
             .returns_type = "my_object_v1",
             .since = 0,
         },
@@ -57,7 +56,7 @@ pub const MyManagerV1Spec = struct {
         },
         .{
             .idx = 1,
-            .params = &[_]u8{@intFromEnum(MessageMagic.type_array)},
+            .params = &[_]u8{ @intFromEnum(MessageMagic.type_array), @intFromEnum(MessageMagic.type_uint) },
             .since = 0,
         },
     },
@@ -153,11 +152,14 @@ pub const TestProtocolV1ProtocolSpec = struct {
     }
 
     pub fn objects(self: *Self) []const ProtocolObjectSpec {
-        return &.{
-            ProtocolObjectSpec.from(&self.manager),
-            ProtocolObjectSpec.from(&self.object),
-        };
+        _ = self;
+        return protocol_objects[0..];
     }
 };
 
 pub const protocol = TestProtocolV1ProtocolSpec{};
+
+pub const protocol_objects: [2]ProtocolObjectSpec = .{
+    ProtocolObjectSpec.from(&protocol.manager),
+    ProtocolObjectSpec.from(&protocol.object),
+};

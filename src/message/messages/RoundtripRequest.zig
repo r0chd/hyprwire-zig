@@ -33,20 +33,23 @@ message_type: MessageType = .roundtrip_request,
 const Self = @This();
 
 pub fn init(gpa: mem.Allocator, seq: u32) !Self {
-    var msg: Self = undefined;
-    msg.seq = seq;
+    var data: std.ArrayList(u8) = .empty;
+    errdefer data.deinit(gpa);
 
-    var buf = try gpa.alloc(u8, 7);
-    buf[0] = @intFromEnum(MessageType.roundtrip_request);
-    buf[1] = @intFromEnum(MessageMagic.type_uint);
-    @memset(buf[2..6], 0);
-    mem.writeInt(u32, buf[2..6], seq, .little);
-    buf[6] = @intFromEnum(MessageMagic.end);
+    try data.append(gpa, @intFromEnum(MessageType.roundtrip_request));
+    try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
+    var seq_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &seq_buf, seq, .little);
+    try data.appendSlice(gpa, &seq_buf);
+    try data.append(gpa, @intFromEnum(MessageMagic.end));
 
-    msg.data = buf;
-    msg.len = buf.len;
-    msg.message_type = .roundtrip_request;
-    return msg;
+    const owned = try data.toOwnedSlice(gpa);
+    return .{
+        .seq = seq,
+        .data = owned,
+        .len = owned.len,
+        .message_type = .roundtrip_request,
+    };
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {

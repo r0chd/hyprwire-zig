@@ -6,6 +6,7 @@ const mem = std.mem;
 
 const ProtocolSpec = hyprwire.types.ProtocolSpec;
 const Object = hyprwire.types.Object;
+const Arg = hyprwire.types.Arg;
 const ServerObjectImplementation = hyprwire.types.server_impl.ServerObjectImplementation;
 const TestProtocolV1ProtocolSpec = spec.TestProtocolV1ProtocolSpec;
 
@@ -87,12 +88,12 @@ pub const MyManagerV1Object = struct {
         self.object.vtable.err(self.object.ptr, code, message);
     }
 
-    pub fn sendSendMessage(self: *Self, message: []const u8) void {
-        self.object.vtable.call(self, 0, message);
+    pub fn sendSendMessage(self: *Self, gpa: mem.Allocator, message: [:0]const u8) !void {
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &.{.{ .varchar = message }});
     }
 
-    pub fn sendRecvMessageArrayUint(self: *Self, message: []i32) void {
-        self.object.vtable.call(self, 1, message);
+    pub fn sendRecvMessageArrayUint(self: *Self, gpa: mem.Allocator, message: []const u32) !void {
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &.{.{ .array_uint = message }});
     }
 
     pub fn setSendMessage(self: *Self, @"fn": *const fn (*Self, []const u8) void) void {
@@ -223,21 +224,24 @@ pub const TestProtocolV1Impl = struct {
         self: *Self,
         gpa: mem.Allocator,
     ) ![]*ServerObjectImplementation {
-        var impls = [_]*ServerObjectImplementation{
-            try gpa.create(ServerObjectImplementation),
-            try gpa.create(ServerObjectImplementation),
-        };
+        const impls = try gpa.alloc(*ServerObjectImplementation, 2);
+        errdefer gpa.free(impls);
 
+        impls[0] = try gpa.create(ServerObjectImplementation);
+        errdefer gpa.destroy(impls[0]);
         impls[0].* = .{
             .object_name = "my_manager_v1",
             .version = self.version,
             .onBind = self.bind_fn,
         };
+
+        impls[1] = try gpa.create(ServerObjectImplementation);
+        errdefer gpa.destroy(impls[1]);
         impls[1].* = .{
             .object_name = "my_object_v1",
             .version = self.version,
         };
 
-        return &impls;
+        return impls;
     }
 };

@@ -200,7 +200,12 @@ pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
         if (!mem.eql(u8, protocol.vtable.specName(protocol.ptr), obj.protocol_name)) continue;
 
         const implementations = try impl.vtable.implementation(impl.ptr, gpa);
-        defer gpa.free(implementations);
+        defer {
+            for (implementations) |implementation| {
+                gpa.destroy(implementation);
+            }
+            gpa.free(implementations);
+        }
 
         for (implementations) |implementation| {
             const spec = obj.spec orelse continue;

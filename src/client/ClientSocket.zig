@@ -10,16 +10,15 @@ const Message = messages.Message;
 const Object = types.Object;
 const WireObject = types.WireObject;
 const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
-const GenericProtocolMessage = messages.GenericProtocolMessage;
 const ProtocolClientImplementation = types.client_impl.ProtocolClientImplementation;
 const ProtocolSpec = types.ProtocolSpec;
 const Fd = helpers.Fd;
 const ServerSpec = @import("ServerSpec.zig");
 
+const log = std.log;
 const isTrace = helpers.isTrace;
 const mem = std.mem;
 const posix = std.posix;
-const log = std.log;
 const fs = std.fs;
 const fmt = std.fmt;
 
@@ -31,7 +30,7 @@ fd: Fd,
 impls: std.ArrayList(ProtocolClientImplementation) = .empty,
 server_specs: std.ArrayList(ProtocolSpec) = .empty,
 pollfds: std.ArrayList(posix.pollfd) = .empty,
-objects: std.ArrayList(ClientObject) = .empty,
+objects: std.ArrayList(*ClientObject) = .empty,
 handshake_begin: std.time.Instant,
 @"error": bool = false,
 handshake_done: bool = false,
@@ -141,7 +140,7 @@ pub fn getSpec(self: *Self, name: []const u8) ?ProtocolSpec {
 }
 
 pub fn onSeq(self: *Self, seq: u32, id: u32) void {
-    for (self.objects.items) |*object| {
+    for (self.objects.items) |object| {
         if (object.seq == seq) {
             object.id = id;
             break;
@@ -156,7 +155,8 @@ pub fn bindProtocol(self: *Self, gpa: mem.Allocator, spec: ProtocolSpec, version
         return error.VersionMismatch;
     }
 
-    var object = ClientObject.init(self);
+    const object = try gpa.create(ClientObject);
+    object.* = ClientObject.init(self);
     const objects = spec.vtable.objects(spec.ptr);
     object.spec = objects[0];
     self.seq += 1;
@@ -165,19 +165,18 @@ pub fn bindProtocol(self: *Self, gpa: mem.Allocator, spec: ProtocolSpec, version
     object.protocol_name = spec.vtable.specName(spec.ptr);
     try self.objects.append(gpa, object);
 
-    const obj = &self.objects.items[self.objects.items.len - 1];
-
     const spec_name = spec.vtable.specName(spec.ptr);
-    const bind_message = try messages.BindProtocol.init(gpa, spec_name, obj.seq, version);
+    const bind_message = try messages.BindProtocol.init(gpa, spec_name, object.seq, version);
     try self.sendMessage(gpa, Message.from(&bind_message));
 
-    try self.waitForObject(gpa, obj);
+    try self.waitForObject(gpa, object);
 
-    return Object.from(&self.objects.getLast());
+    return Object.from(object);
 }
 
-pub fn makeObject(self: *Self, gpa: mem.Allocator, protocol_name: [:0]const u8, object_name: [:0]const u8, seq: u32) ?*ClientObject {
-    var object = ClientObject.init(self);
+pub fn makeObject(self: *Self, gpa: mem.Allocator, protocol_name: []const u8, object_name: []const u8, seq: u32) ?*ClientObject {
+    const object = gpa.create(ClientObject) catch return null;
+    object.* = .init(self);
     object.protocol_name = protocol_name;
 
     for (self.impls.items) |impl| {
@@ -194,12 +193,16 @@ pub fn makeObject(self: *Self, gpa: mem.Allocator, protocol_name: [:0]const u8, 
     }
 
     if (object.spec == null) {
+        gpa.destroy(object);
         return null;
     }
 
     object.seq = seq;
     object.version = 0; // TODO: client version doesn't matter that much, but for verification's sake we could fix this
-    self.objects.append(gpa, object);
+    self.objects.append(gpa, object) catch {
+        gpa.destroy(object);
+        return null;
+    };
     return object;
 }
 
@@ -288,7 +291,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
 }
 
 pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
-    for (self.objects.items) |*obj| {
+    for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
             try types.called(WireObject.from(obj), gpa, msg.method, msg.data_span, msg.fds_list);
             break;
@@ -297,7 +300,7 @@ pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: messages.GenericProtocolM
 }
 
 pub fn objectForId(self: *Self, id: u32) ?Object {
-    for (self.objects.items) |*object| {
+    for (self.objects.items) |object| {
         if (object.id == id) return Object.from(object);
     }
 
@@ -365,7 +368,7 @@ fn serverSpecsInner(self: *Self, gpa: mem.Allocator, specs: []const []const u8) 
         const at_pos = mem.lastIndexOfScalar(u8, spec, '@') orelse return error.ParseError;
 
         const s = try gpa.create(ServerSpec);
-        s.* = ServerSpec.init(spec[0..at_pos], try fmt.parseInt(u32, spec[at_pos + 1 ..], 10));
+        s.* = try ServerSpec.init(gpa, spec[0..at_pos], try fmt.parseInt(u32, spec[at_pos + 1 ..], 10));
         try self.server_specs.append(gpa, ProtocolSpec.from(s));
     }
 }

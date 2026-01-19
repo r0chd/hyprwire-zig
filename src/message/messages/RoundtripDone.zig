@@ -32,28 +32,27 @@ message_type: MessageType = .roundtrip_done,
 
 const Self = @This();
 
-pub fn init(seq: u32) Self {
-    var data = [_]u8{
-        @intFromEnum(MessageType.roundtrip_done),
-        @intFromEnum(MessageMagic.type_uint),
-        0,
-        0,
-        0,
-        0,
-        @intFromEnum(MessageMagic.end),
-    };
+pub fn init(gpa: mem.Allocator, seq: u32) !Self {
+    var data: std.ArrayList(u8) = try .initCapacity(gpa, 7);
+    errdefer data.deinit(gpa);
 
-    mem.writeInt(u32, data[2..6], seq, .little);
+    try data.append(gpa, @intFromEnum(MessageType.roundtrip_done));
+    try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
+    var seq_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &seq_buf, seq, .little);
+    try data.appendSlice(gpa, &seq_buf);
+    try data.append(gpa, @intFromEnum(MessageMagic.end));
 
+    const owned = try data.toOwnedSlice(gpa);
     return .{
         .seq = seq,
-        .data = &data,
-        .len = data.len,
+        .data = owned,
+        .len = owned.len,
         .message_type = .roundtrip_done,
     };
 }
 
-pub fn fromBytes(data: []const u8, offset: usize) !Self {
+pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     if (offset + 7 > data.len) return error.OutOfRange;
 
     if (data[offset] != @intFromEnum(MessageType.roundtrip_done)) return error.InvalidMessage;
@@ -63,19 +62,26 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
 
     if (data[offset + 6] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
 
+    const owned = if (isTrace()) try gpa.dupe(u8, data[offset..][0..7]) else try gpa.alloc(u8, 0);
+
     return .{
         .seq = seq,
-        .data = if (isTrace()) data[offset..][0..6] else &[_]u8{},
+        .data = owned,
         .len = 7,
         .message_type = .roundtrip_done,
     };
+}
+
+pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    gpa.free(self.data);
 }
 
 test "RoundtripDone.init" {
     const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
-    var msg = Self.init(42);
+    var msg = try Self.init(alloc, 42);
+    defer msg.deinit(alloc);
 
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
@@ -95,7 +101,8 @@ test "RoundtripDone.fromBytes" {
         0x2A,                           0x00, 0x00, 0x00, // seq = 42
         @intFromEnum(MessageMagic.end),
     };
-    var msg = try Self.fromBytes(&bytes, 0);
+    var msg = try Self.fromBytes(alloc, &bytes, 0);
+    defer msg.deinit(alloc);
 
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);

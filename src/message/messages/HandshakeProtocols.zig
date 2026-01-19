@@ -35,17 +35,18 @@ const Self = @This();
 
 pub fn init(gpa: mem.Allocator, protocols: []const []const u8) !Self {
     var data: std.ArrayList(u8) = .empty;
+    errdefer data.deinit(gpa);
 
-    try data.appendSlice(gpa, &.{
-        @intFromEnum(MessageType.handshake_protocols),
-        @intFromEnum(MessageMagic.type_array),
-        @intFromEnum(MessageMagic.type_varchar),
-    });
+    try data.append(gpa, @intFromEnum(MessageType.handshake_protocols));
+    try data.append(gpa, @intFromEnum(MessageMagic.type_array));
+    try data.append(gpa, @intFromEnum(MessageMagic.type_varchar));
 
-    try data.appendSlice(gpa, message_parser.encodeVarInt(protocols.len));
+    var arr_len_buf: [10]u8 = undefined;
+    try data.appendSlice(gpa, message_parser.encodeVarInt(protocols.len, &arr_len_buf));
 
     for (protocols) |protocol| {
-        try data.appendSlice(gpa, message_parser.encodeVarInt(protocol.len));
+        var str_len_buf: [10]u8 = undefined;
+        try data.appendSlice(gpa, message_parser.encodeVarInt(protocol.len, &str_len_buf));
         try data.appendSlice(gpa, protocol);
     }
 
@@ -53,8 +54,21 @@ pub fn init(gpa: mem.Allocator, protocols: []const []const u8) !Self {
 
     const data_slice = try data.toOwnedSlice(gpa);
 
+    var protocols_owned = try gpa.alloc([]const u8, protocols.len);
+    errdefer gpa.free(protocols_owned);
+
+    errdefer {
+        for (protocols_owned) |p| {
+            if (p.len > 0) gpa.free(p);
+        }
+    }
+
+    for (protocols, 0..) |p, i| {
+        protocols_owned[i] = try gpa.dupe(u8, p);
+    }
+
     return .{
-        .protocols = try gpa.dupe([]const u8, protocols),
+        .protocols = protocols_owned,
         .data = data_slice,
         .len = data_slice.len,
         .message_type = .handshake_protocols,
@@ -73,10 +87,17 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     const res = message_parser.parseVarInt(data, offset + needle);
     needle += res.@"1";
 
-    var protocols: std.ArrayList([]const u8) = try .initCapacity(gpa, res.@"0");
-    errdefer protocols.deinit(gpa);
+    const count = res.@"0";
 
-    for (0..res.@"0") |_| {
+    var protocols_list: std.ArrayList([]const u8) = try .initCapacity(gpa, count);
+    errdefer {
+        for (protocols_list.items) |p| {
+            gpa.free(p);
+        }
+        protocols_list.deinit(gpa);
+    }
+
+    for (0..count) |_| {
         if (offset + needle >= data.len) return error.OutOfRange;
 
         const r = message_parser.parseVarInt(data, offset + needle);
@@ -84,7 +105,9 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
         if (offset + needle + r.@"1" + r.@"0" > data.len) return error.OutOfRange;
 
         const protocol_slice = data[offset + needle + r.@"1" .. offset + needle + r.@"1" + r.@"0"];
-        protocols.appendAssumeCapacity(protocol_slice);
+        const owned_protocol = try gpa.dupe(u8, protocol_slice);
+        protocols_list.appendAssumeCapacity(owned_protocol);
+
         needle += r.@"0" + r.@"1";
     }
 
@@ -92,9 +115,14 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     const len = needle + 1;
 
+    const owned_data = if (isTrace()) try gpa.dupe(u8, data[offset .. offset + len]) else try gpa.alloc(u8, 0);
+    errdefer gpa.free(owned_data);
+
+    const protocols_owned = try protocols_list.toOwnedSlice(gpa);
+
     return .{
-        .protocols = try protocols.toOwnedSlice(gpa),
-        .data = if (isTrace()) try gpa.dupe(u8, data[offset .. offset + len]) else &[_]u8{},
+        .protocols = protocols_owned,
+        .data = owned_data,
         .len = len,
         .message_type = .handshake_protocols,
     };
@@ -102,6 +130,9 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.free(self.data);
+    for (self.protocols) |p| {
+        gpa.free(p);
+    }
     gpa.free(self.protocols);
 }
 

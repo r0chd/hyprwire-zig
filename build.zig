@@ -1,7 +1,7 @@
 const std = @import("std");
 const zon = @import("./build.zig.zon");
 
-pub fn buildHyprwire(b: *std.Build, target: std.Build.ResolvedTarget, helpers: *std.Build.Module) *std.Build.Module {
+pub fn buildHyprwire(b: *std.Build, target: std.Build.ResolvedTarget, helpers: *std.Build.Module, trait: *std.Build.Module) *std.Build.Module {
     const mod = b.addModule("hyprwire", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
@@ -9,6 +9,7 @@ pub fn buildHyprwire(b: *std.Build, target: std.Build.ResolvedTarget, helpers: *
     });
     mod.linkSystemLibrary("ffi", .{});
     mod.addImport("helpers", helpers);
+    mod.addImport("trait", trait);
 
     return mod;
 }
@@ -73,8 +74,13 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
+    const trait = b.dependency("trait", .{
+        .target = target,
+        .optimize = optimize,
+    });
+
     const helpers = buildHelpers(b, target);
-    const hyprwire = buildHyprwire(b, target, helpers);
+    const hyprwire = buildHyprwire(b, target, helpers, trait.module("trait"));
     hyprwire.addOptions("build_options", exe_options);
     hyprwire.addImport("xml", xml.module("xml"));
 

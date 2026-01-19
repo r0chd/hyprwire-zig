@@ -1,6 +1,5 @@
 const std = @import("std");
 const c = @cImport(@cInclude("sys/socket.h"));
-pub const trait = @import("trait.zig");
 
 const posix = std.posix;
 const mem = std.mem;

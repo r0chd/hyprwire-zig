@@ -41,13 +41,16 @@ pub fn init(gpa: mem.Allocator, versions: []const u32) !Self {
     try data.append(gpa, @intFromEnum(MessageMagic.type_array));
     try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
 
-    const var_int = message_parser.encodeVarInt(versions.len);
+    var var_int_buf: [10]u8 = undefined;
+    const var_int = message_parser.encodeVarInt(versions.len, &var_int_buf);
     for (var_int) |int| {
         try data.append(gpa, int);
     }
 
     for (versions) |version| {
-        try data.writer(gpa).writeInt(u32, version, .little);
+        var ver_buf: [4]u8 = undefined;
+        mem.writeInt(u32, &ver_buf, version, .little);
+        try data.appendSlice(gpa, &ver_buf);
     }
 
     try data.append(gpa, @intFromEnum(MessageMagic.end));

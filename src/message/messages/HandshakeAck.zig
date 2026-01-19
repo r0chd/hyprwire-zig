@@ -32,20 +32,23 @@ message_type: MessageType = .handshake_ack,
 const Self = @This();
 
 pub fn init(gpa: mem.Allocator, version: u32) !Self {
-    var msg: Self = undefined;
-    msg.version = version;
+    var data: std.ArrayList(u8) = .empty;
+    errdefer data.deinit(gpa);
 
-    var buf = try gpa.alloc(u8, 7);
-    buf[0] = @intFromEnum(MessageType.handshake_ack);
-    buf[1] = @intFromEnum(MessageMagic.type_uint);
-    @memset(buf[2..6], 0);
-    mem.writeInt(u32, buf[2..6], version, .little);
-    buf[6] = @intFromEnum(MessageMagic.end);
+    try data.append(gpa, @intFromEnum(MessageType.handshake_ack));
+    try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
+    var ver_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &ver_buf, version, .little);
+    try data.appendSlice(gpa, &ver_buf);
+    try data.append(gpa, @intFromEnum(MessageMagic.end));
 
-    msg.data = buf;
-    msg.len = buf.len;
-    msg.message_type = .handshake_ack;
-    return msg;
+    const owned = try data.toOwnedSlice(gpa);
+    return .{
+        .version = version,
+        .data = owned,
+        .len = owned.len,
+        .message_type = .handshake_ack,
+    };
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {

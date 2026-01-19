@@ -4,18 +4,16 @@ const c = @cImport({
     @cInclude("sys/socket.h");
     @cInclude("ffi.h");
 });
-const helpers = @import("helpers");
 
 const mem = std.mem;
 
 const Message = @import("../message/messages/root.zig").Message;
-const ServerSocket = @import("../server/ServerSocket.zig");
-const ClientSocket = @import("../server/ServerClient.zig");
 const Object = @import("Object.zig").Object;
 const Method = types.Method;
 const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
+const Trait = @import("trait").Trait;
 
-pub const WireObject = helpers.trait.Trait(.{
+pub const WireObject = Trait(.{
     .getVersion = fn () u32,
     .getListeners = fn () []?*anyopaque,
     .methodsOut = fn () []const Method,

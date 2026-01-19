@@ -113,7 +113,8 @@ pub fn deinit(self: *Self) void {
     }
 }
 
-pub fn call(self: *Self, gpa: mem.Allocator, id: u32) !u32 {
+pub fn call(self: *Self, gpa: mem.Allocator, id: u32, args: *types.Args) !u32 {
+    _ = args;
     _ = gpa;
     _ = self;
     _ = id;

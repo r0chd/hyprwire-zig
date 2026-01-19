@@ -2,8 +2,8 @@ const std = @import("std");
 const helpers = @import("helpers");
 const Object = @import("Object.zig").Object;
 const ProtocolSpec = @import("types.zig").ProtocolSpec;
+const Trait = @import("trait").Trait;
 
-const Trait = helpers.trait.Trait;
 const mem = std.mem;
 
 pub const ServerObjectImplementation = struct {
