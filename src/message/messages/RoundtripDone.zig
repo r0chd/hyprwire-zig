@@ -62,7 +62,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     if (data[offset + 6] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
 
-    const owned = if (isTrace()) try gpa.dupe(u8, data[offset..][0..7]) else try gpa.alloc(u8, 0);
+    const owned = try gpa.dupe(u8, data[offset..][0..7]);
 
     return .{
         .seq = seq,

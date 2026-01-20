@@ -11,7 +11,7 @@ const Message = messages.Message;
 
 const fmt = std.fmt;
 const mem = std.mem;
-const log = std.log;
+const log = std.log.scoped(.hw);
 const meta = std.meta;
 const protocol_version = build_options.protocol_version;
 const isTrace = helpers.isTrace;

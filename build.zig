@@ -84,6 +84,8 @@ pub fn build(b: *std.Build) void {
     hyprwire.addOptions("build_options", exe_options);
     hyprwire.addImport("xml", xml.module("xml"));
 
+    helpers.addImport("hyprwire", hyprwire);
+
     const mod_tests = b.addTest(.{
         .root_module = hyprwire,
     });

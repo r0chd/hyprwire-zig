@@ -3,7 +3,7 @@ const types = @import("../implementation/types.zig");
 const messages = @import("../message/messages/root.zig");
 const helpers = @import("helpers");
 
-const log = std.log;
+const log = std.log.scoped(.hw);
 const mem = std.mem;
 const isTrace = helpers.isTrace;
 
@@ -19,7 +19,7 @@ const Method = types.Method;
 client: ?*ServerClient,
 spec: ?types.ProtocolObjectSpec = null,
 data: ?*anyopaque = null,
-listeners: std.ArrayList(?*anyopaque) = .empty,
+listeners: std.ArrayList(*anyopaque) = .empty,
 on_deinit: ?*const fn () void = null,
 id: u32 = 0,
 version: u32 = 0,
@@ -85,7 +85,7 @@ pub fn getData(self: *Self) ?*anyopaque {
     return self.data;
 }
 
-pub fn setData(self: *Self, data: ?*anyopaque) void {
+pub fn setData(self: *Self, data: *anyopaque) void {
     self.data = data;
 }
 
@@ -133,7 +133,7 @@ pub fn getId(self: *Self) u32 {
     return self.id;
 }
 
-pub fn getListeners(self: *Self) []?*anyopaque {
+pub fn getListeners(self: *Self) []*anyopaque {
     return self.listeners.items;
 }
 

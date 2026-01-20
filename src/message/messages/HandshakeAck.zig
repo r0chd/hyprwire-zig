@@ -70,7 +70,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     needle += 4;
 
-    const owned = if (isTrace()) try gpa.dupe(u8, data[offset .. offset + needle + 1]) else try gpa.alloc(u8, 0);
+    const owned = try gpa.dupe(u8, data[offset .. offset + needle + 1]);
     return .{
         .version = version,
         .data = owned,

@@ -19,7 +19,7 @@ const isTrace = helpers.isTrace;
 const mem = std.mem;
 const posix = std.posix;
 const fs = std.fs;
-const log = std.log;
+const log = std.log.scoped(.hw);
 const steadyMillis = root.steadyMillis;
 
 const Self = @This();

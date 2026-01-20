@@ -1,6 +1,8 @@
 const Trait = @import("trait").Trait;
 const std = @import("std");
 
+const mem = std.mem;
+
 pub const WireObject = @import("WireObject.zig").WireObject;
 pub const Object = @import("Object.zig").Object;
 pub const server_impl = @import("server_impl.zig");
@@ -29,11 +31,10 @@ pub const ProtocolSpec = Trait(.{
 pub const Args = struct {
     args: []const Arg,
     idx: usize = 0,
-    storage: [32]Arg = undefined,
 
     const Self = @This();
 
-    pub fn init(args: anytype) Self {
+    pub fn init(gpa: mem.Allocator, args: anytype) !Self {
         const ArgsType = @TypeOf(args);
         const args_type_info = @typeInfo(ArgsType);
         if (args_type_info != .@"struct") {
@@ -45,17 +46,17 @@ pub const Args = struct {
             @compileError("32 arguments max are supported per format call");
         }
 
-        var self: Self = .{ .args = &.{}, .idx = 0, .storage = undefined };
+        var args_list: std.ArrayList(Arg) = try .initCapacity(gpa, fields_info.len);
 
-        inline for (fields_info, 0..) |field, i| {
+        inline for (fields_info) |field| {
             const field_value = @field(args, field.name);
             const field_type = field.type;
 
             if (@typeInfo(field_type) == .@"enum") {
                 const tag_int: u32 = @intCast(@intFromEnum(field_value));
-                self.storage[i] = Arg{ .uint = tag_int };
+                args_list.appendAssumeCapacity(.{ .uint = tag_int });
             } else {
-                self.storage[i] = switch (field_type) {
+                const arg = switch (field_type) {
                     u32 => Arg{ .uint = field_value },
                     i32 => Arg{ .int = field_value },
                     f32 => Arg{ .f32 = field_value },
@@ -66,11 +67,15 @@ pub const Args = struct {
                     []const [:0]const u8 => Arg{ .array_varchar = field_value },
                     else => @compileError("unsupported type for Arg: " ++ @typeName(field_type)),
                 };
+                args_list.appendAssumeCapacity(arg);
             }
         }
 
-        self.args = self.storage[0..fields_info.len];
-        return self;
+        return .{ .args = try args_list.toOwnedSlice(gpa) };
+    }
+
+    pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+        gpa.free(self.args);
     }
 
     pub fn next(self: *Self) ?Arg {

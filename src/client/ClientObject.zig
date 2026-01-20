@@ -4,7 +4,7 @@ const messages = @import("../message/messages/root.zig");
 const helpers = @import("helpers");
 
 const fmt = std.fmt;
-const log = std.log;
+const log = std.log.scoped(.hw);
 const mem = std.mem;
 const isTrace = helpers.isTrace;
 const meta = std.meta;
@@ -21,7 +21,7 @@ const Message = messages.Message;
 client: ?*ClientSocket,
 spec: ?types.ProtocolObjectSpec = null,
 data: ?*anyopaque = null,
-listeners: std.ArrayList(?*anyopaque) = .empty,
+listeners: std.ArrayList(*anyopaque) = .empty,
 on_deinit: ?*const fn () void = null,
 id: u32 = 0,
 version: u32 = 0,
@@ -49,7 +49,7 @@ pub fn getData(self: *Self) ?*anyopaque {
     return self.data;
 }
 
-pub fn setData(self: *Self, data: ?*anyopaque) void {
+pub fn setData(self: *Self, data: *anyopaque) void {
     self.data = data;
 }
 
@@ -298,7 +298,7 @@ pub fn call(self: *Self, gpa: mem.Allocator, id: u32, args: *types.Args) !u32 {
 
 pub fn listen(self: *Self, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) !void {
     if (self.listeners.items.len <= id) {
-        try self.listeners.resize(gpa, id + 1);
+        try self.listeners.ensureTotalCapacity(gpa, id + 1);
     }
     self.listeners.appendAssumeCapacity(@constCast(callback));
 }
@@ -307,7 +307,7 @@ pub fn getId(self: *Self) u32 {
     return self.id;
 }
 
-pub fn getListeners(self: *Self) []?*anyopaque {
+pub fn getListeners(self: *Self) []*anyopaque {
     return self.listeners.items;
 }
 

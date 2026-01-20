@@ -1,5 +1,9 @@
 const std = @import("std");
-const c = @cImport(@cInclude("sys/socket.h"));
+const c = @cImport({
+    @cInclude("sys/socket.h");
+    @cInclude("ffi.h");
+});
+const MessageMagic = @import("hyprwire").MessageMagic;
 
 const posix = std.posix;
 const mem = std.mem;
@@ -59,3 +63,13 @@ pub const Fd = struct {
         }
     }
 };
+
+pub fn ffiTypeFrom(magic: MessageMagic) *c.ffi_type {
+    return switch (magic) {
+        .type_uint, .type_object, .type_seq => &c.ffi_type_uint32,
+        .type_fd, .type_int => &c.ffi_type_sint32,
+        .type_f32 => &c.ffi_type_float,
+        .type_varchar, .type_array => &c.ffi_type_pointer,
+        else => unreachable,
+    };
+}

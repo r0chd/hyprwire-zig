@@ -102,7 +102,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     return .{
         .versions = versions,
-        .data = if (isTrace()) try gpa.dupe(u8, data[offset .. offset + message_len]) else &[_]u8{},
+        .data = try gpa.dupe(u8, data[offset .. offset + message_len]),
         .len = message_len,
         .message_type = .handshake_begin,
     };

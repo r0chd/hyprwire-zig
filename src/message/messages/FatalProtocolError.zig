@@ -110,7 +110,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     needle += 1;
 
     return Self{
-        .data = if (isTrace()) try gpa.dupe(u8, data[offset..]) else &.{},
+        .data = try gpa.dupe(u8, data[offset..needle]),
         .len = needle - offset,
         .message_type = .fatal_protocol_error,
         .object_id = object_id,

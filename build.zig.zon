@@ -13,8 +13,8 @@
             .hash = "interface-0.0.2-GFlWJ86bAQAUIh_LtjrJReJcFyj-hFbod1hVIneSNGrN",
         },
         .trait = .{
-            .url = "git+https://forgejo.r0chd.pl/r0chd/zig-interface#71d047fa463893b2dbfbbc8e05b8776cd3557d46",
-            .hash = "trait-0.0.2-87cOXsqaAQCNjOrpqGvco48nvIXkpI7OlWyp0-cOgj4M",
+            .url = "git+https://forgejo.r0chd.pl/r0chd/zig-interface#2a42c17f1b7af03d0ffbad8958fedc61bd6f7a5c",
+            .hash = "trait-0.0.2-87cOXjWsAQDe4J4lXNXoHWRQYSI2gV-mNZdKXuxY9wRP",
         },
     },
     .paths = .{

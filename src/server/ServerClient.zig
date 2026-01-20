@@ -9,7 +9,7 @@ const messages = @import("../message/messages/root.zig");
 
 const isTrace = helpers.isTrace;
 const posix = std.posix;
-const log = std.log;
+const log = std.log.scoped(.hw);
 const mem = std.mem;
 
 const Message = messages.Message;
@@ -224,7 +224,9 @@ pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
 pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
-            try types.called(WireObject.from(&obj), gpa, msg.method, msg.data_span, msg.fds_list);
+            const wire_object = try gpa.create(WireObject);
+            wire_object.* = WireObject.from(obj);
+            try types.called(&wire_object, gpa, msg.method, msg.data_span, msg.fds_list);
             break;
         }
     }

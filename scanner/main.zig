@@ -3,7 +3,7 @@ const xml = @import("xml");
 const Cli = @import("Cli.zig");
 const Scanner = @import("./root.zig");
 
-const log = std.log;
+const log = std.log.scoped(.hw);
 const mem = std.mem;
 const process = std.process;
 const ascii = std.ascii;

@@ -48,7 +48,7 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
     if (!mem.eql(u8, &expected, data[offset .. offset + 7])) return error.InvalidMessage;
 
     return .{
-        .data = if (isTrace()) data[offset .. offset + 7] else &[_]u8{},
+        .data = data[offset .. offset + 7],
         .len = expected.len,
         .message_type = .sup,
     };

@@ -152,15 +152,12 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
 
     const message_len = data_needle - offset;
 
-    var data_copy: []const u8 = &.{};
-    if (isTrace()) {
-        data_copy = try gpa.dupe(u8, data[offset .. offset + message_len]);
-    }
+    const data_copy = try gpa.dupe(u8, data[offset .. offset + message_len]);
 
     return .{
         .object = object_id,
         .method = method_id,
-        .data_span = if (isTrace()) data_copy[11..] else &.{},
+        .data_span = data_copy[11..],
         .fds_list = try fds_consumed.toOwnedSlice(gpa),
         .data = data_copy,
         .len = message_len,

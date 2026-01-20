@@ -1,10 +1,14 @@
 const std = @import("std");
 const types = @import("types.zig");
+const helpers = @import("helpers");
+const message_parser = @import("../message/MessageParser.zig");
 const c = @cImport({
     @cInclude("sys/socket.h");
     @cInclude("ffi.h");
 });
 
+const log = std.log.scoped(.hw);
+const fmt = std.fmt;
 const mem = std.mem;
 
 const Message = @import("../message/messages/root.zig").Message;
@@ -15,7 +19,7 @@ const Trait = @import("trait").Trait;
 
 pub const WireObject = Trait(.{
     .getVersion = fn () u32,
-    .getListeners = fn () []?*anyopaque,
+    .getListeners = fn () []*anyopaque,
     .methodsOut = fn () []const Method,
     .methodsIn = fn () []const Method,
     .errd = fn () void,
@@ -24,21 +28,29 @@ pub const WireObject = Trait(.{
     .getId = fn () u32,
 }, .{Object});
 
-pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, fds: []const i32) !void {
+pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, fds: []const i32) !void {
     const methods = self.vtable.methodsIn(self.ptr);
 
-    if (id >= methods.len) {
+    if (methods.len <= id) {
         const msg = try std.fmt.allocPrintSentinel(gpa, "invalid method {} for object {}", .{ id, self.vtable.getId(self.ptr) }, 0);
         defer gpa.free(msg);
         try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
         return;
     }
 
-    if (self.vtable.getListeners(self.ptr).len <= id or self.vtable.getListeners(self.ptr)[id] == null) {
+    if (self.vtable.getListeners(self.ptr).len <= id) {
         return;
     }
 
     const method = methods[id];
+    var params: std.ArrayList(u8) = .empty;
+    defer params.deinit(gpa);
+
+    if (method.returns_type.len > 0) {
+        try params.append(gpa, @intFromEnum(MessageMagic.type_seq));
+    }
+
+    try params.appendSlice(gpa, method.params);
 
     if (method.since > self.vtable.getVersion(self.ptr)) {
         const msg = try std.fmt.allocPrintSentinel(gpa, "method {} since {} but has {}", .{ id, method.since, self.vtable.getVersion(self.ptr) }, 0);
@@ -47,301 +59,242 @@ pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, f
         return;
     }
 
-    var params: std.ArrayList(u8) = .empty;
-    defer params.deinit(gpa);
-
-    if (method.returns_type.len > 0) {
-        try params.append(gpa, @intFromEnum(MessageMagic.type_seq));
-    }
-    try params.appendSlice(gpa, method.params);
-
-    var data_idx: usize = 0;
-    var param_idx: usize = 0;
-
-    while (param_idx < params.items.len) : (param_idx += 1) {
-        if (data_idx >= data.len) {
-            const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: unexpected end of data", .{ id, param_idx }, 0);
-            defer gpa.free(msg);
-            try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-            return;
-        }
-
-        const param_type = params.items[param_idx];
-        const wire_type = data[data_idx];
-
-        if (param_type != wire_type) {
-            const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {} should be {} but was {}", .{ id, param_idx, param_type, wire_type }, 0);
-            defer gpa.free(msg);
-            try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-            return;
-        }
-
-        data_idx += 1;
-
-        switch (@as(MessageMagic, @enumFromInt(wire_type))) {
-            .end => {
-                param_idx += 1;
-                break;
-            },
-            .type_fd => {
-                if (fds.len == 0) {
-                    const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: expected FD but none provided", .{ id, param_idx }, 0);
-                    defer gpa.free(msg);
-                    try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                    return;
-                }
-            },
-            .type_uint, .type_int, .type_f32, .type_seq, .type_object_id => {
-                if (data_idx + 4 > data.len) {
-                    const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: incomplete data", .{ id, param_idx }, 0);
-                    defer gpa.free(msg);
-                    try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                    return;
-                }
-                data_idx += 4;
-            },
-            .type_varchar => {
-                if (data_idx >= data.len) {
-                    const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: incomplete varchar length", .{ id, param_idx }, 0);
-                    defer gpa.free(msg);
-                    try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                    return;
-                }
-                var str_len: usize = 0;
-                var shift: u6 = 0;
-                var len_idx = data_idx;
-                while (len_idx < data.len) {
-                    const byte = data[len_idx];
-                    str_len |= @as(usize, byte & 0x7F) << shift;
-                    len_idx += 1;
-                    if ((byte & 0x80) == 0) break;
-                    shift += 7;
-                    if (shift >= 64) {
-                        const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: invalid varchar length", .{ id, param_idx }, 0);
-                        defer gpa.free(msg);
-                        try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                        return;
-                    }
-                }
-                if (len_idx + str_len > data.len) {
-                    const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: incomplete varchar data", .{ id, param_idx }, 0);
-                    defer gpa.free(msg);
-                    try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                    return;
-                }
-                data_idx = len_idx + str_len;
-            },
-            .type_array => {
-                param_idx += 1;
-                if (param_idx >= params.items.len or data_idx >= data.len) {
-                    const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: incomplete array type", .{ id, param_idx }, 0);
-                    defer gpa.free(msg);
-                    try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                    return;
-                }
-                const arr_type = params.items[param_idx];
-                const wire_arr_type = data[data_idx];
-                if (arr_type != wire_arr_type) {
-                    const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: array type mismatch", .{ id, param_idx }, 0);
-                    defer gpa.free(msg);
-                    try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                    return;
-                }
-                data_idx += 1;
-                var arr_len: usize = 0;
-                var shift: u6 = 0;
-                var len_idx = data_idx;
-                while (len_idx < data.len) {
-                    const byte = data[len_idx];
-                    arr_len |= @as(usize, byte & 0x7F) << shift;
-                    len_idx += 1;
-                    if ((byte & 0x80) == 0) break;
-                    shift += 7;
-                    if (shift >= 64) {
-                        const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: invalid array length", .{ id, param_idx }, 0);
-                        defer gpa.free(msg);
-                        try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                        return;
-                    }
-                }
-                data_idx = len_idx;
-                switch (@as(MessageMagic, @enumFromInt(arr_type))) {
-                    .type_uint, .type_int, .type_f32, .type_object_id => {
-                        if (data_idx + arr_len * 4 > data.len) {
-                            const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: incomplete array data", .{ id, param_idx }, 0);
-                            defer gpa.free(msg);
-                            try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                            return;
-                        }
-                        data_idx += arr_len * 4;
-                    },
-                    .type_varchar => {
-                        var i: usize = 0;
-                        while (i < arr_len) : (i += 1) {
-                            if (data_idx >= data.len) {
-                                const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: incomplete array element {}", .{ id, param_idx, i }, 0);
-                                defer gpa.free(msg);
-                                try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                                return;
-                            }
-                            var elem_len: usize = 0;
-                            var elem_shift: u6 = 0;
-                            var elem_len_idx = data_idx;
-                            while (elem_len_idx < data.len) {
-                                const byte = data[elem_len_idx];
-                                elem_len |= @as(usize, byte & 0x7F) << elem_shift;
-                                elem_len_idx += 1;
-                                if ((byte & 0x80) == 0) break;
-                                elem_shift += 7;
-                                if (elem_shift >= 64) {
-                                    const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: invalid array element length", .{ id, param_idx }, 0);
-                                    defer gpa.free(msg);
-                                    try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                                    return;
-                                }
-                            }
-                            if (elem_len_idx + elem_len > data.len) {
-                                const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: incomplete array element data", .{ id, param_idx }, 0);
-                                defer gpa.free(msg);
-                                try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                                return;
-                            }
-                            data_idx = elem_len_idx + elem_len;
-                        }
-                    },
-                    else => {},
-                }
-            },
-            .type_object => {
-                if (data_idx + 4 > data.len) {
-                    const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: incomplete object ID", .{ id, param_idx }, 0);
-                    defer gpa.free(msg);
-                    try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                    return;
-                }
-                data_idx += 4;
-                var name_len: usize = 0;
-                var shift: u6 = 0;
-                var len_idx = data_idx;
-                while (len_idx < data.len) {
-                    const byte = data[len_idx];
-                    name_len |= @as(usize, byte & 0x7F) << shift;
-                    len_idx += 1;
-                    if ((byte & 0x80) == 0) break;
-                    shift += 7;
-                    if (shift >= 64) {
-                        const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: invalid object name length", .{ id, param_idx }, 0);
-                        defer gpa.free(msg);
-                        try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                        return;
-                    }
-                }
-                if (len_idx + name_len > data.len) {
-                    const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {}: incomplete object name", .{ id, param_idx }, 0);
-                    defer gpa.free(msg);
-                    try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
-                    return;
-                }
-                data_idx = len_idx + name_len;
-            },
-        }
-    }
-
-    const callback = self.vtable.getListeners(self.ptr)[id];
-    var ffi_types: std.ArrayList([*c]c.ffi_type) = .empty;
+    var ffi_types: std.ArrayList(*c.ffi_type) = .empty;
     defer ffi_types.deinit(gpa);
-
     try ffi_types.append(gpa, &c.ffi_type_pointer);
 
-    for (params.items) |param_type| {
-        const ffi_type = switch (@as(MessageMagic, @enumFromInt(param_type))) {
-            .type_uint => &c.ffi_type_uint32,
-            .type_int => &c.ffi_type_sint32,
-            .type_f32 => &c.ffi_type_float,
-            .type_seq => &c.ffi_type_uint32,
-            .type_object_id => &c.ffi_type_uint32,
-            .type_varchar => &c.ffi_type_pointer,
-            .type_fd => &c.ffi_type_sint32,
-            else => &c.ffi_type_pointer,
-        };
-        try ffi_types.append(gpa, ffi_type);
+    var data_idx: usize = 0;
+    var i: usize = 0;
+    while (i < params.items.len) : (i += 1) {
+        const param: MessageMagic = @enumFromInt(params.items[i]);
+        const wire_param: MessageMagic = @enumFromInt(data[data_idx]);
+
+        if (param != wire_param) {
+            const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {} should be {s} but was {s}", .{ id, i, @tagName(param), @tagName(wire_param) }, 0);
+            defer gpa.free(msg);
+            try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+            return;
+        }
+
+        const ffi_type = helpers.ffiTypeFrom(param);
+        try ffi_types.append(gpa, @ptrCast(ffi_type));
+
+        switch (param) {
+            .end => i += 1, // BUG if this happens or malformed message
+            .type_fd => data_idx += 1,
+            .type_uint, .type_f32, .type_int, .type_object, .type_seq => data_idx += 5,
+            .type_varchar => {
+                const a, const b = message_parser.parseVarInt(data[data_idx + 1 ..], 0);
+                data_idx += a + b + i;
+                break;
+            },
+            .type_array => {
+                i += 1;
+                const arr_type: MessageMagic = @enumFromInt(params.items[i]);
+                const wire_type: MessageMagic = @enumFromInt(data[data_idx + 1]);
+
+                if (arr_type != wire_type) {
+                    // raise protocol error
+                    const msg = try fmt.allocPrintSentinel(gpa, "method {} param idx {} should be {s} but was {s}", .{ id, i, @tagName(param), @tagName(wire_param) }, 0);
+                    defer gpa.free(msg);
+                    log.debug("core protocol error: {s}", .{msg});
+                    try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                    return;
+                }
+
+                const arr_len, const len_len = message_parser.parseVarInt(data[data_idx + 2 ..], 0);
+                var arr_message_len = 2 + len_len;
+
+                const ffi_type_2 = helpers.ffiTypeFrom(MessageMagic.type_uint);
+                try ffi_types.append(gpa, @ptrCast(ffi_type_2));
+
+                switch (arr_type) {
+                    .type_uint, .type_f32, .type_int, .type_object, .type_seq => arr_message_len += 4 * arr_len,
+                    .type_varchar => {
+                        for (0..arr_len) |_| {
+                            if (data_idx + arr_message_len > data.len) {
+                                const msg = "failed demarshaling array message";
+                                log.debug("core protocol error: {s}", .{msg});
+                                try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                                return;
+                            }
+
+                            const str_len, const str_len_len = message_parser.parseVarInt(data[data_idx..arr_message_len], 0);
+                            arr_message_len = str_len + str_len_len;
+                        }
+                    },
+                    else => {
+                        const msg = "failed demarshaling array message";
+                        log.debug("core protocol error: {s}", .{msg});
+                        try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                        return;
+                    },
+                }
+
+                data_idx += arr_message_len;
+            },
+            .type_object_id => {
+                const msg = "object type is not impld";
+                log.debug("core protocol error: {s}", .{msg});
+                try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                return;
+            },
+        }
     }
 
     var cif: c.ffi_cif = undefined;
-    if (c.ffi_prep_cif(&cif, c.FFI_DEFAULT_ABI, @intCast(ffi_types.items.len), &c.ffi_type_void, ffi_types.items.ptr) != c.FFI_OK) {
-        return error.FfiFailed;
+    if (c.ffi_prep_cif(&cif, c.FFI_DEFAULT_ABI, @intCast(ffi_types.items.len), @ptrCast(&c.ffi_type_void), @ptrCast(ffi_types.items)) != 0) {
+        log.debug("core protocol error: ffi failed", .{});
+        self.vtable.errd(self.ptr);
+        return;
     }
 
-    var arg_values: std.ArrayList(?*anyopaque) = .empty;
-    defer arg_values.deinit(gpa);
+    var avalues: std.ArrayList(?*anyopaque) = .empty;
+    var other_buffers: std.ArrayList(*anyopaque) = .empty;
 
-    try arg_values.append(gpa, @constCast(&self));
+    try avalues.ensureTotalCapacity(gpa, ffi_types.items.len);
+    // First argument is always the object pointer expected by the listener.
+    // libffi expects each entry in avalues to point to the argument value, so
+    // we must store a pointer-to-pointer for the object.
+    const obj = try gpa.create(Object);
+    obj.* = self.asEmbed(Object);
+    const obj_ptr = try gpa.create(*Object);
+    obj_ptr.* = obj;
+    try avalues.append(gpa, @ptrCast(obj_ptr));
+    var strings: std.ArrayList([]const u8) = .empty;
 
-    data_idx = 0;
-    var fd_idx: usize = 0;
+    var fd_no: usize = 0;
 
-    for (params.items) |param_type| {
-        const value: ?*anyopaque = switch (@as(MessageMagic, @enumFromInt(param_type))) {
-            .type_uint => blk: {
-                const val = std.mem.bytesToValue(u32, data[data_idx..][0..4]);
-                data_idx += 4;
-                const buf = try gpa.create(u32);
-                buf.* = val;
-                break :blk @ptrCast(buf);
+    i = 0;
+    while (i < data.len) : (i += 1) {
+        var buf: ?*anyopaque = null;
+        const param: MessageMagic = @enumFromInt(data[i]);
+
+        switch (param) {
+            .end => break,
+            .type_uint => {
+                const p = try gpa.create(u32);
+                @memcpy(std.mem.asBytes(p), data[i + 1 .. i + 1 + @sizeOf(u32)]);
+                buf = p;
+                i += @sizeOf(u32);
             },
-            .type_int => blk: {
-                const val = std.mem.bytesToValue(i32, data[data_idx..][0..4]);
-                data_idx += 4;
-                const buf = try gpa.create(u32);
-                @as(*i32, @ptrCast(buf)).* = val;
-                break :blk @ptrCast(buf);
+            .type_f32 => {
+                const p = try gpa.create(f32);
+                @memcpy(std.mem.asBytes(p), data[i + 1 .. i + 1 + @sizeOf(f32)]);
+                buf = p;
+                i += @sizeOf(f32);
             },
-            .type_f32 => blk: {
-                const val = std.mem.bytesToValue(f32, data[data_idx..][0..4]);
-                data_idx += 4;
-                const buf = try gpa.create(u32);
-                @as(*f32, @ptrCast(buf)).* = val;
-                break :blk @ptrCast(buf);
+            .type_int => {
+                const p = try gpa.create(i32);
+                @memcpy(std.mem.asBytes(p), data[i + 1 .. i + 1 + @sizeOf(i32)]);
+                buf = p;
+                i += @sizeOf(i32);
             },
-            .type_fd => blk: {
-                const val = fds[fd_idx];
-                fd_idx += 1;
-                const buf = try gpa.create(u32);
-                @as(*i32, @ptrCast(buf)).* = val;
-                break :blk @ptrCast(buf);
+            .type_object => {
+                const p = try gpa.create(u32);
+                @memcpy(std.mem.asBytes(p), data[i + 1 .. i + 1 + @sizeOf(u32)]);
+                buf = p;
+                i += @sizeOf(u32);
             },
-            .type_varchar => blk: {
-                var str_len: usize = 0;
-                var shift: u6 = 0;
-                var len_idx = data_idx;
-                while (len_idx < data.len) : (len_idx += 1) {
-                    const byte = data[len_idx];
-                    str_len |= @as(usize, byte & 0x7F) << shift;
-                    if ((byte & 0x80) == 0) break;
-                    shift += 7;
+            .type_seq => {
+                const p = try gpa.create(u32);
+                @memcpy(std.mem.asBytes(p), data[i + 1 .. i + 1 + @sizeOf(u32)]);
+                buf = p;
+                i += @sizeOf(u32);
+            },
+            .type_varchar => {
+                const str_len, const len = message_parser.parseVarInt(data[i + 1 ..], 0);
+
+                const str_bytes = data[i + 1 + len .. i + 1 + len + str_len];
+                const owned_str = try gpa.allocSentinel(u8, str_bytes.len, 0);
+                @memcpy(owned_str[0..str_bytes.len], str_bytes);
+
+                const slot = try gpa.create([*:0]const u8);
+                slot.* = @ptrCast(owned_str.ptr);
+
+                buf = @ptrCast(slot);
+                try strings.append(gpa, owned_str);
+
+                i += str_len + len;
+            },
+            .type_array => {
+                const arr_type: MessageMagic = @enumFromInt(data[i + 1]);
+                const arr_len, const len_len = message_parser.parseVarInt(data[i + 2 ..], data.len - 1);
+                var arr_message_len: usize = 2 + len_len;
+
+                switch (arr_type) {
+                    .type_seq => {
+                        const data_ptr = try gpa.alloc(u32, if (arr_len == 0) 1 else arr_len);
+                        const data_slot = try gpa.create([*]u32);
+                        data_slot.* = data_ptr.ptr;
+                        const size_slot = try gpa.create(u32);
+                        size_slot.* = @intCast(arr_len);
+
+                        try avalues.append(gpa, @ptrCast(data_slot));
+                        try avalues.append(gpa, @ptrCast(size_slot));
+                        try other_buffers.append(gpa, @ptrCast(data_ptr.ptr));
+
+                        for (0..arr_len) |j| {
+                            @memcpy(std.mem.asBytes(&data_ptr[j]), data[i + arr_message_len .. i + arr_message_len + 4]);
+                            arr_message_len += 4;
+                        }
+                    },
+                    .type_varchar => {
+                        const data_ptr = try gpa.alloc(?[*:0]const u8, if (arr_len == 0) 1 else arr_len);
+                        const data_slot = try gpa.create([*]?[*:0]const u8);
+                        data_slot.* = data_ptr.ptr;
+                        const size_slot = try gpa.create(u32);
+                        size_slot.* = @intCast(arr_len);
+
+                        try avalues.append(gpa, @ptrCast(data_slot));
+                        try avalues.append(gpa, @ptrCast(size_slot));
+                        try other_buffers.append(gpa, @ptrCast(data_ptr.ptr));
+
+                        for (0..arr_len) |j| {
+                            const str_len, const strlen_len = message_parser.parseVarInt(data[i + arr_message_len ..], data.len - i);
+                            const str_data = data[i + arr_message_len + strlen_len .. i + arr_message_len + strlen_len + str_len];
+
+                            const owned_str = try gpa.alloc(u8, str_data.len + 1);
+                            @memcpy(owned_str[0..str_data.len], str_data);
+                            owned_str[str_data.len] = 0; // Add null terminator
+                            try strings.append(gpa, owned_str);
+
+                            // Set pointer to null-terminated string
+                            data_ptr[j] = @ptrCast(owned_str.ptr);
+
+                            arr_message_len += strlen_len + str_len;
+                        }
+                    },
+                    else => {
+                        const msg = "failed demarshaling array message";
+                        log.debug("core protocol error: {s}", .{msg});
+                        try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                        return;
+                    },
                 }
-                len_idx += 1;
 
-                const str = data[len_idx..][0..str_len];
-                data_idx = len_idx + str_len;
-
-                const buf = try gpa.allocSentinel(u8, str_len, 0);
-                @memcpy(buf, str);
-                break :blk @ptrCast(buf.ptr);
+                i += arr_message_len - 1; // For loop does += 1
             },
-            else => null,
-        };
+            .type_object_id => {
+                const msg = "object type is not impld";
+                log.debug("core protocol error: {s}", .{msg});
+                try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                return;
+            },
+            .type_fd => {
+                const p = try gpa.create(i32);
+                p.* = fds[fd_no];
+                fd_no += 1;
 
-        if (value) |v| {
-            try arg_values.append(gpa, v);
+                buf = p;
+            },
+        }
+
+        if (buf) |b| {
+            try avalues.append(gpa, b);
         }
     }
 
-    c.ffi_call(&cif, @ptrCast(callback), null, arg_values.items.ptr);
-
-    for (arg_values.items[1..]) |arg| {
-        if (arg) |a| {
-            gpa.destroy(@as(*u32, @ptrCast(@alignCast(a))));
-        }
-    }
+    const listener = self.vtable.getListeners(self.ptr)[id];
+    c.ffi_call(&cif, @ptrCast(listener), null, avalues.items.ptr);
 }

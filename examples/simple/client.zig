@@ -11,13 +11,12 @@ const ProtocolClientImplementation = hw.types.client_impl.ProtocolClientImplemen
 const TEST_PROTOCOL_VERSION: u32 = 1;
 
 pub fn main() !void {
-    // var gpa: std.heap.DebugAllocator(.{}) = .init;
-    // const alloc = gpa.allocator();
-    // defer {
-    //     const deinit_status = gpa.deinit();
-    //     if (deinit_status == .leak) @panic("TEST FAIL");
-    // }
-    const alloc = std.heap.c_allocator;
+    var gpa: std.heap.DebugAllocator(.{}) = .init;
+    const alloc = gpa.allocator();
+    defer {
+        const deinit_status = gpa.deinit();
+        if (deinit_status == .leak) @panic("TEST FAIL");
+    }
 
     const xdg_runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
     const socket_path = try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{xdg_runtime_dir}, 0);
@@ -39,8 +38,8 @@ pub fn main() !void {
 
     std.debug.print("test protocol supported at version {}. Binding.\n", .{SPEC.vtable.specVer(SPEC.ptr)});
 
-    const obj = try socket.bindProtocol(alloc, protocol, TEST_PROTOCOL_VERSION);
-    var manager = client.MyManagerV1Object.init(obj);
+    var obj = try socket.bindProtocol(alloc, protocol, TEST_PROTOCOL_VERSION);
+    var manager = try client.MyManagerV1Object.init(alloc, &obj);
 
     std.debug.print("Bound!\n", .{});
 
@@ -59,12 +58,13 @@ pub fn main() !void {
     try manager.sendSendMessageArray(alloc, &.{ "Hello", "via", "array!" });
     try manager.sendSendMessageArray(alloc, &.{});
     try manager.sendSendMessageArrayUint(alloc, &.{ 69, 420, 2137 });
-    manager.setSendMessage(&message);
+    manager.setSendMessage(message);
 
     try socket.roundtrip(alloc);
 
-    var object = client.MyObjectV1Object.init(manager.sendMakeObject(alloc).?);
-    object.setSendMessage(&messageOnObject);
+    var object_arg = manager.sendMakeObject(alloc).?;
+    var object = try client.MyObjectV1Object.init(alloc, &object_arg);
+    object.setSendMessage(messageOnObject);
     try object.sendSendMessage(alloc, "Hello on object");
     try object.sendSendEnum(alloc, spec.TestProtocolV1MyEnum.world);
 
@@ -73,12 +73,10 @@ pub fn main() !void {
     while (socket.dispatchEvents(alloc, true)) {} else |_| {}
 }
 
-fn message(self: *client.MyManagerV1Object, msg: [:0]const u8) void {
-    _ = self;
+fn message(msg: [*:0]const u8) void {
     std.debug.print("Server says {s}\n", .{msg});
 }
 
-fn messageOnObject(self: *client.MyObjectV1Object, msg: [:0]const u8) void {
-    _ = self;
+fn messageOnObject(msg: [*:0]const u8) void {
     std.debug.print("Server says on object {s}\n", .{msg});
 }

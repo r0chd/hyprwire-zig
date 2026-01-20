@@ -115,7 +115,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     const len = needle + 1;
 
-    const owned_data = if (isTrace()) try gpa.dupe(u8, data[offset .. offset + len]) else try gpa.alloc(u8, 0);
+    const owned_data = try gpa.dupe(u8, data[offset .. offset + len]);
     errdefer gpa.free(owned_data);
 
     const protocols_owned = try protocols_list.toOwnedSlice(gpa);

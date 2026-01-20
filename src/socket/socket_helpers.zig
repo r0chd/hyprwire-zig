@@ -3,7 +3,7 @@ const c = @cImport(@cInclude("sys/socket.h"));
 
 const posix = std.posix;
 const mem = std.mem;
-const log = std.log;
+const log = std.log.scoped(.hw);
 
 fn CMSG_DATA(cmsg: *c.struct_cmsghdr) [*]u8 {
     const cmsg_bytes: [*]u8 = @ptrCast(cmsg);
