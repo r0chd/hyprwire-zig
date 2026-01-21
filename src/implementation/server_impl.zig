@@ -9,7 +9,7 @@ const mem = std.mem;
 pub const ServerObjectImplementation = struct {
     object_name: []const u8 = "",
     version: u32 = 0,
-    onBind: ?*const fn (object: Object) void = null,
+    onBind: ?*const fn (*Object, mem.Allocator) void = null,
 
     const Self = @This();
 };

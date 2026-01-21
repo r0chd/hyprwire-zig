@@ -7,7 +7,6 @@ const fmt = std.fmt;
 
 const Object = hyprwire.types.Object;
 const ProtocolSpec = hyprwire.types.ProtocolSpec;
-const Arg = hyprwire.types.Arg;
 const Args = hyprwire.types.Args;
 
 const ClientObjectImplementation = hyprwire.types.client_impl.ClientObjectImplementation;

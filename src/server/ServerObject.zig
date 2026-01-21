@@ -2,10 +2,13 @@ const std = @import("std");
 const types = @import("../implementation/types.zig");
 const messages = @import("../message/messages/root.zig");
 const helpers = @import("helpers");
+const message_parser = @import("../message/MessageParser.zig");
 
+const fmt = std.fmt;
 const log = std.log.scoped(.hw);
 const mem = std.mem;
 const isTrace = helpers.isTrace;
+const meta = std.meta;
 
 const FatalErrorMessage = @import("../message/messages/FatalProtocolError.zig");
 const ServerSocket = @import("ServerSocket.zig");
@@ -13,6 +16,8 @@ const ClientSocket = @import("../client/ClientSocket.zig");
 const ServerClient = @import("ServerClient.zig");
 const WireObject = @import("../implementation/WireObject.zig").WireObject;
 const Object = @import("../implementation/Object.zig").Object;
+const MessageType = @import("../message/MessageType.zig").MessageType;
+const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 const Message = messages.Message;
 const Method = types.Method;
 
@@ -116,10 +121,156 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
 }
 
 pub fn call(self: *Self, gpa: mem.Allocator, id: u32, args: *types.Args) !u32 {
-    _ = args;
-    _ = gpa;
-    _ = self;
-    _ = id;
+    const methods = self.methodsOut();
+    if (methods.len <= id) {
+        const msg = try fmt.allocPrintSentinel(gpa, "core protocol error: invalid method {} for object {}", .{ id, self.id }, 0);
+        defer gpa.free(msg);
+        log.debug("core protocol error: {s}", .{msg});
+        try self.err(gpa, id, msg);
+        return error.TODO;
+    }
+
+    const method = methods[id];
+    const params = method.params;
+
+    if (method.since > self.version) {
+        const msg = try fmt.allocPrintSentinel(gpa, "invalid method spec {} for object {} -> server cannot call returnsType methods", .{ id, self.id }, 0);
+        defer gpa.free(msg);
+        log.debug("core protocol error: {s}", .{msg});
+        try self.err(gpa, id, msg);
+        return error.TODO;
+    }
+
+    var data: std.ArrayList(u8) = .empty;
+    defer data.deinit(gpa);
+    var fds: std.ArrayList(i32) = .empty;
+    defer fds.deinit(gpa);
+
+    try data.append(gpa, @intFromEnum(MessageType.generic_protocol_message));
+    try data.append(gpa, @intFromEnum(MessageMagic.type_object));
+
+    var object_id_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &object_id_buf, self.id, .little);
+    try data.appendSlice(gpa, &object_id_buf);
+
+    try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
+    var method_id_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &method_id_buf, id, .little);
+    try data.appendSlice(gpa, &method_id_buf);
+
+    var i: usize = 0;
+    while (i < params.len) : (i += 1) {
+        const param = meta.intToEnum(MessageMagic, params[i]) catch unreachable;
+        switch (param) {
+            .type_uint => {
+                try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
+                const arg = (args.next() orelse return error.InvalidMessage).get(u32) orelse return error.InvalidMessage;
+                var buf: [4]u8 = undefined;
+                mem.writeInt(u32, &buf, arg, .little);
+                try data.appendSlice(gpa, &buf);
+            },
+            .type_int => {
+                try data.append(gpa, @intFromEnum(MessageMagic.type_int));
+                const arg = (args.next() orelse return error.InvalidMessage).get(i32) orelse return error.InvalidMessage;
+                var buf: [4]u8 = undefined;
+                mem.writeInt(i32, &buf, arg, .little);
+                try data.appendSlice(gpa, &buf);
+            },
+            .type_object => {
+                try data.append(gpa, @intFromEnum(MessageMagic.type_object));
+                const arg = (args.next() orelse return error.InvalidMessage).get(u32) orelse return error.InvalidMessage;
+                var buf: [4]u8 = undefined;
+                mem.writeInt(u32, &buf, arg, .little);
+                try data.appendSlice(gpa, &buf);
+            },
+            .type_f32 => {
+                try data.append(gpa, @intFromEnum(MessageMagic.type_f32));
+                const arg = (args.next() orelse return error.InvalidMessage).get(f32) orelse return error.InvalidMessage;
+                const bits: u32 = @bitCast(arg);
+                var buf: [4]u8 = undefined;
+                mem.writeInt(u32, &buf, bits, .little);
+                try data.appendSlice(gpa, &buf);
+            },
+            .type_varchar => {
+                try data.append(gpa, @intFromEnum(MessageMagic.type_varchar));
+                const str = (args.next() orelse return error.InvalidMessage).get([:0]const u8) orelse return error.InvalidMessage;
+                var len_buf: [10]u8 = undefined;
+                try data.appendSlice(gpa, message_parser.encodeVarInt(str.len, &len_buf));
+                try data.appendSlice(gpa, str[0..str.len]);
+            },
+            .type_array => {
+                if (i + 1 >= params.len) return error.InvalidMessage;
+                const arr_type = meta.intToEnum(MessageMagic, params[i + 1]) catch return error.InvalidMessage;
+                i += 1;
+
+                try data.append(gpa, @intFromEnum(MessageMagic.type_array));
+                try data.append(gpa, @intFromEnum(arr_type));
+
+                switch (arr_type) {
+                    .type_uint => {
+                        const arr = (args.next() orelse return error.InvalidMessage).get([]const u32) orelse return error.InvalidMessage;
+                        var len_buf: [10]u8 = undefined;
+                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
+                        for (arr) |v| {
+                            var buf: [4]u8 = undefined;
+                            mem.writeInt(u32, &buf, v, .little);
+                            try data.appendSlice(gpa, &buf);
+                        }
+                    },
+                    .type_int => {
+                        const arr = (args.next() orelse return error.InvalidMessage).get([]const i32) orelse return error.InvalidMessage;
+                        var len_buf: [10]u8 = undefined;
+                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
+                        for (arr) |v| {
+                            var buf: [4]u8 = undefined;
+                            mem.writeInt(i32, &buf, v, .little);
+                            try data.appendSlice(gpa, &buf);
+                        }
+                    },
+                    .type_f32 => {
+                        const arr = (args.next() orelse return error.InvalidMessage).get([]const f32) orelse return error.InvalidMessage;
+                        var len_buf: [10]u8 = undefined;
+                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
+                        for (arr) |v| {
+                            const bits: u32 = @bitCast(v);
+                            var buf: [4]u8 = undefined;
+                            mem.writeInt(u32, &buf, bits, .little);
+                            try data.appendSlice(gpa, &buf);
+                        }
+                    },
+                    .type_varchar => {
+                        const arr = (args.next() orelse return error.InvalidMessage).get([]const [:0]const u8) orelse return error.InvalidMessage;
+                        var len_buf: [10]u8 = undefined;
+                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
+                        for (arr) |s| {
+                            var slen_buf: [10]u8 = undefined;
+                            try data.appendSlice(gpa, message_parser.encodeVarInt(s.len, &slen_buf));
+                            try data.appendSlice(gpa, s[0..s.len]);
+                        }
+                    },
+                    .type_fd => {
+                        const fd = (args.next() orelse return error.InvalidMessage).get(i32) orelse return error.InvalidMessage;
+                        try fds.append(gpa, fd);
+                        var len_buf: [10]u8 = undefined;
+                        try data.appendSlice(gpa, message_parser.encodeVarInt(1, &len_buf));
+                    },
+                    else => return error.InvalidMessage,
+                }
+            },
+            .type_fd => {
+                try data.append(gpa, @intFromEnum(MessageMagic.type_fd));
+                const fd = (args.next() orelse return error.InvalidMessage).get(i32) orelse return error.InvalidMessage;
+                try fds.append(gpa, fd);
+            },
+            else => {},
+        }
+    }
+
+    try data.append(gpa, @intFromEnum(MessageMagic.end));
+
+    var msg = try messages.GenericProtocolMessage.init(gpa, data.items, fds.items);
+    defer msg.deinit(gpa);
+    try self.sendMessage(gpa, Message.from(&msg));
 
     return 0;
 }
@@ -128,7 +279,7 @@ pub fn listen(self: *Self, gpa: mem.Allocator, id: u32, callback: *const fn (*an
     if (self.listeners.items.len <= id) {
         try self.listeners.resize(gpa, id + 1);
     }
-    self.listeners.appendAssumeCapacity(@constCast(callback));
+    self.listeners.items[id] = @constCast(callback);
 }
 
 pub fn getId(self: *Self) u32 {

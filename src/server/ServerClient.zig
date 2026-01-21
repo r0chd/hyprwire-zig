@@ -133,16 +133,16 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void
     _ = c.sendmsg(self.fd.raw, &msg, 0);
 }
 
-pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, object: []const u8, version: u32, seq: u32) !?*ServerObject {
+pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, object: []const u8, version: u32, seq: u32) ?*ServerObject {
     if (self.server == null) return null;
 
-    const obj = try gpa.create(ServerObject);
+    const obj = gpa.create(ServerObject) catch return null;
     errdefer gpa.destroy(obj);
     obj.* = ServerObject.init(self);
     obj.id = self.max_id;
     self.max_id += 1;
     obj.version = version;
-    try self.objects.append(gpa, obj);
+    self.objects.append(gpa, obj) catch return null;
 
     var found_spec: ?types.ProtocolObjectSpec = null;
     var protocol_name: []const u8 = "";
@@ -181,14 +181,14 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
     }
 
     obj.spec = found_spec;
-    obj.protocol_name = try gpa.dupe(u8, protocol_name);
+    obj.protocol_name = gpa.dupe(u8, protocol_name) catch return null;
     errdefer gpa.free(obj.protocol_name);
 
-    var ret = try messages.NewObject.init(gpa, seq, obj.id);
+    var ret = messages.NewObject.init(gpa, seq, obj.id) catch return null;
     defer ret.deinit(gpa);
     self.sendMessage(gpa, Message.from(&ret));
 
-    try self.onBind(gpa, obj);
+    self.onBind(gpa, obj) catch return null;
 
     return obj;
 }
@@ -212,7 +212,9 @@ pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
             if (!mem.eql(u8, implementation.object_name, spec.vtable.objectName(spec.ptr))) continue;
 
             if (implementation.onBind) |on_bind| {
-                on_bind(Object.from(obj));
+                const object = try gpa.create(Object);
+                object.* = Object.from(obj);
+                on_bind(object, gpa);
             }
             break;
         }

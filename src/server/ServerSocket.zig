@@ -27,8 +27,8 @@ const Self = @This();
 fd: ?Fd = null,
 export_fd: ?Fd = null,
 export_write_fd: ?Fd = null,
-exit_fd: ?Fd = null,
-exit_write_fd: ?Fd = null,
+exit_fd: Fd,
+exit_write_fd: Fd,
 wakeup_fd: Fd,
 wakeup_write_fd: Fd,
 pollfds: std.ArrayList(posix.pollfd) = .empty,
@@ -46,11 +46,8 @@ pub fn open(gpa: mem.Allocator, path: ?[:0]const u8) !*Self {
     const socket = try gpa.create(Self);
     errdefer gpa.destroy(socket);
 
-    const pipes = try posix.pipe2(.{ .CLOEXEC = true });
-    socket.* = .{
-        .wakeup_fd = Fd{ .raw = pipes[0] },
-        .wakeup_write_fd = Fd{ .raw = pipes[1] },
-    };
+    socket.* = try Self.init();
+    errdefer socket.deinit(gpa);
 
     if (path) |p| {
         try socket.attempt(gpa, p);
@@ -61,14 +58,24 @@ pub fn open(gpa: mem.Allocator, path: ?[:0]const u8) !*Self {
     return socket;
 }
 
+fn init() !Self {
+    const wake_pipes = try posix.pipe2(.{ .CLOEXEC = true });
+    const exit_pipes = try posix.pipe2(.{ .CLOEXEC = true });
+
+    return .{
+        .wakeup_fd = Fd{ .raw = wake_pipes[0] },
+        .wakeup_write_fd = Fd{ .raw = wake_pipes[1] },
+        .exit_fd = Fd{ .raw = exit_pipes[0] },
+        .exit_write_fd = Fd{ .raw = exit_pipes[1] },
+    };
+}
+
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     self.impls.deinit(gpa);
     if (self.poll_thread) |*thread| {
         self.thread_can_poll = false;
-        if (self.exit_write_fd) |fd| {
-            const write_buf: [1]u8 = .{'x'};
-            _ = posix.write(fd.raw, &write_buf) catch {};
-        }
+        const write_buf: [1]u8 = .{'x'};
+        _ = posix.write(self.exit_write_fd.raw, &write_buf) catch {};
         if (self.export_poll_mtx_locked) {
             self.export_poll_mtx.unlock();
         }
@@ -77,15 +84,15 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
 
     if (self.export_fd) |*fd| fd.close();
     if (self.export_write_fd) |*fd| fd.close();
-    if (self.exit_fd) |*fd| fd.close();
-    if (self.exit_write_fd) |*fd| fd.close();
+    self.exit_fd.close();
+    self.exit_write_fd.close();
     if (self.fd) |*fd| fd.close();
     self.pollfds.deinit(gpa);
     gpa.destroy(self);
 }
 
 pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
-    if (posix.access(path, posix.F_OK)) {
+    if (fs.accessAbsolute(path, .{})) {
         const raw_fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
         var fd = Fd{ .raw = raw_fd };
         defer fd.close();
@@ -110,6 +117,9 @@ pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
         };
 
         if (!failure) {
+            if (self.fd) |*desc| {
+                desc.close();
+            }
             return;
         }
 
@@ -154,14 +164,13 @@ pub fn dispatchPending(self: *Self, gpa: mem.Allocator) !bool {
     if (self.pollfds.items.len == 0) return false;
     _ = try posix.poll(self.pollfds.items, 0);
     if (self.dispatchNewConnections(gpa))
-        return try self.dispatchPending(gpa);
+        return self.dispatchPending(gpa);
 
-    return try self.dispatchExistingConnections(gpa);
+    return self.dispatchExistingConnections(gpa);
 }
 
 pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !bool {
     self.poll_mtx.lock();
-    defer self.poll_mtx.unlock();
 
     while (try self.dispatchPending(gpa)) {}
 
@@ -169,10 +178,11 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !bool {
     self.clearWakeupFd();
 
     if (block) {
-        if (self.pollfds.items.len == 0) return true;
         _ = try posix.poll(self.pollfds.items, -1);
         while (try self.dispatchPending(gpa)) {}
     }
+
+    self.poll_mtx.unlock();
 
     if (self.export_poll_mtx_locked) {
         self.export_poll_mtx.unlock();
@@ -186,13 +196,15 @@ pub fn clearFd(fd: Fd) void {
     var buf: [128]u8 = undefined;
     var fds = [_]posix.pollfd{.{ .fd = fd.raw, .events = posix.POLL.IN, .revents = 0 }};
 
-    while (true) {
+    while (fd.isValid()) {
         _ = posix.poll(&fds, 0) catch break;
 
         if (fds[0].revents & posix.POLL.IN != 0) {
             _ = posix.read(fd.raw, &buf) catch break;
             continue;
         }
+
+        break;
     }
 }
 
@@ -272,13 +284,11 @@ pub fn recheckPollFds(self: *Self, gpa: mem.Allocator) !void {
         });
     }
 
-    if (self.exit_fd) |exit_fd| {
-        try self.pollfds.append(gpa, .{
-            .fd = exit_fd.raw,
-            .events = posix.POLL.IN,
-            .revents = 0,
-        });
-    }
+    try self.pollfds.append(gpa, .{
+        .fd = self.exit_fd.raw,
+        .events = posix.POLL.IN,
+        .revents = 0,
+    });
 
     try self.pollfds.append(gpa, .{
         .fd = self.wakeup_fd.raw,
@@ -302,13 +312,7 @@ pub fn dispatchNewConnections(self: *Self, gpa: mem.Allocator) bool {
 
     if ((self.pollfds.items[0].revents & posix.POLL.IN) == 0) return false;
 
-    var client_address: posix.sockaddr.in = .{
-        .port = 0,
-        .addr = 0,
-    };
-    var client_size: posix.socklen_t = @sizeOf(posix.sockaddr.in);
-
-    const client_fd = posix.accept(fd.raw, @as(*posix.sockaddr, @ptrCast(&client_address.addr)), &client_size, 0) catch return false;
+    const client_fd = posix.accept(fd.raw, null, null, 0) catch return false;
     const client_init = ServerClient.init(client_fd) catch {
         posix.close(client_fd);
         return false;
@@ -335,7 +339,8 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !bool {
     var had_any = false;
     var needs_poll_recheck = false;
 
-    for (self.internalFds()..self.pollfds.items.len) |i| {
+    var i = self.internalFds();
+    while (i < self.pollfds.items.len) : (i += 1) {
         if ((self.pollfds.items[i].revents & posix.POLL.IN) == 0) continue;
 
         try self.dispatchClient(gpa, self.clients.items[i - self.internalFds()]);
@@ -346,18 +351,18 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !bool {
             self.clients.items[i - self.internalFds()].@"error" = true;
             needs_poll_recheck = true;
             if (isTrace()) {
-                log.debug("[{} @ {}] Dropping client (hangup)", .{ self.clients.items[i - self.internalFds()].fd, steadyMillis() });
+                log.debug("[{} @ {}] Dropping client (hangup)", .{ self.clients.items[i - self.internalFds()].fd.raw, steadyMillis() });
             }
             continue;
         }
 
         if (isTrace() and self.clients.items[i - self.internalFds()].@"error") {
-            log.debug("[{} @ {}] Dropping client (protocol error)", .{ self.clients.items[i - self.internalFds()].fd, steadyMillis() });
+            log.debug("[{} @ {}] Dropping client (protocol error)", .{ self.clients.items[i - self.internalFds()].fd.raw, steadyMillis() });
         }
     }
 
     if (needs_poll_recheck) {
-        var i: usize = self.clients.items.len;
+        i = self.clients.items.len;
         while (i > 0) : (i -= 1) {
             const client = self.clients.items[i - 1];
             if (client.@"error") {
@@ -401,6 +406,115 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
     }
 }
 
+fn threadCallback(self: *Self, gpa: mem.Allocator) void {
+    while (self.thread_can_poll) {
+        self.export_poll_mtx.lock(); // wait for dispatch to unlock
+        self.export_poll_mtx_locked = true;
+
+        if (!self.thread_can_poll) break;
+
+        self.poll_mtx.lock();
+
+        var pollfds = std.ArrayList(posix.pollfd).init(gpa);
+        defer pollfds.deinit();
+
+        if (!self.is_empty_listener) {
+            if (self.fd) |fd| {
+                pollfds.append(.{
+                    .fd = fd.raw,
+                    .events = posix.POLL.IN,
+                }) catch {
+                    self.poll_mtx.unlock();
+                    continue;
+                };
+            }
+        }
+
+        if (self.exit_fd) |exit_fd| {
+            pollfds.append(.{
+                .fd = exit_fd.raw,
+                .events = posix.POLL.IN,
+            }) catch {
+                self.poll_mtx.unlock();
+                continue;
+            };
+        }
+
+        pollfds.append(.{
+            .fd = self.wakeup_fd.raw,
+            .events = posix.POLL.IN,
+        }) catch {
+            self.poll_mtx.unlock();
+            continue;
+        };
+
+        for (self.clients.items) |client| {
+            pollfds.append(.{
+                .fd = client.fd.raw,
+                .events = posix.POLL.IN,
+            }) catch {
+                self.poll_mtx.unlock();
+                continue;
+            };
+        }
+
+        self.poll_mtx.unlock();
+
+        if (pollfds.items.len == 0) continue;
+
+        posix.poll(pollfds.items, -1) catch continue;
+
+        if (self.export_write_fd) |export_write_fd| {
+            const write_buf: [1]u8 = .{'x'};
+            _ = posix.write(export_write_fd.raw, &write_buf) catch continue;
+        }
+    }
+}
+
+pub fn extractLoopFD(self: *Self, gpa: mem.Allocator) !i32 {
+    if (self.export_fd) |fd| {
+        if (fd.isValid()) {
+            return fd.raw;
+        }
+    }
+
+    const export_pipes = try posix.pipe2(.{ .CLOEXEC = true });
+    self.export_fd = Fd{ .raw = export_pipes[0] };
+    errdefer {
+        if (self.export_fd) |*fd| fd.close();
+        self.export_fd = null;
+    }
+    self.export_write_fd = Fd{ .raw = export_pipes[1] };
+    errdefer {
+        if (self.export_write_fd) |*fd| fd.close();
+        self.export_write_fd = null;
+    }
+
+    if (self.exit_fd == null or self.exit_write_fd == null) {
+        const exit_pipes = try posix.pipe2(.{ .CLOEXEC = true });
+        self.exit_fd = Fd{ .raw = exit_pipes[0] };
+        errdefer {
+            if (self.exit_fd) |*fd| fd.close();
+            self.exit_fd = null;
+        }
+        self.exit_write_fd = Fd{ .raw = exit_pipes[1] };
+        errdefer {
+            if (self.exit_write_fd) |*fd| fd.close();
+            self.exit_write_fd = null;
+        }
+    }
+
+    self.thread_can_poll = true;
+    errdefer self.thread_can_poll = false;
+
+    try self.recheckPollFds(gpa);
+
+    self.poll_thread = try std.Thread.spawn(.{}, threadCallback, .{ self, gpa });
+
+    const export_fd = self.export_fd orelse return error.NoEventFd;
+    return export_fd.raw;
+}
+
 pub fn createObject(gpa: mem.Allocator, client: ?*ServerClient, reference: ?*ServerObject, object: []const u8, seq: u32) ?*ServerObject {
     if (client == null or reference == null) {
         return null;
@@ -411,75 +525,9 @@ pub fn createObject(gpa: mem.Allocator, client: ?*ServerClient, reference: ?*Ser
             const protocol_name = ref.protocol_name;
             const version = ref.version;
 
-            const new_object = c.createObject(gpa, protocol_name, object, version, seq) catch return null;
-            return new_object;
+            return c.createObject(gpa, protocol_name, object, version, seq);
         }
     }
 
     return null;
-}
-
-fn pollThread(self: *Self, gpa: mem.Allocator) void {
-    var pollfds: std.ArrayList(posix.pollfd) = .empty;
-    defer pollfds.deinit(gpa);
-
-    while (self.thread_can_poll) {
-        self.export_poll_mtx.lock();
-        self.export_poll_mtx_locked = true;
-
-        if (!self.thread_can_poll) {
-            break;
-        }
-
-        self.poll_mtx.lock();
-
-        pollfds.clearRetainingCapacity();
-
-        if (!self.is_empty_listener and self.fd) |fd| {
-            pollfds.append(gpa, .{
-                .fd = fd,
-                .events = posix.POLL.IN,
-            }) catch {
-                self.poll_mtx.unlock();
-                continue;
-            };
-        }
-
-        if (self.exit_fd) |fd| {
-            pollfds.append(gpa, .{
-                .fd = fd.raw,
-                .events = posix.POLL.IN,
-            }) catch {
-                self.poll_mtx.unlock();
-                continue;
-            };
-        }
-
-        pollfds.append(gpa, .{
-            .fd = self.wakeup_fd,
-            .events = posix.POLL.IN,
-        }) catch {
-            self.poll_mtx.unlock();
-            continue;
-        };
-
-        for (self.clients.items) |client| {
-            pollfds.append(gpa, .{
-                .fd = client.fd,
-                .events = posix.POLL.IN,
-            }) catch {
-                self.poll_mtx.unlock();
-                continue;
-            };
-        }
-
-        self.poll_mtx.unlock();
-
-        _ = posix.poll(pollfds.items, -1) catch break;
-
-        const write_buf: [1]u8 = .{'x'};
-        if (self.export_write_fd) |fd| {
-            _ = posix.write(fd.raw, &write_buf) catch {};
-        }
-    }
 }

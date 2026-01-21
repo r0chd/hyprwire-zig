@@ -26,7 +26,7 @@ pub const SocketRawParsedMessage = struct {
                 .len = BUFFER_SIZE,
             };
 
-            var control_buf: [MAX_FDS_PER_MSG * @sizeOf(i32)]u8 = undefined;
+            var control_buf: [c.CMSG_SPACE(@sizeOf(i32) * MAX_FDS_PER_MSG)]u8 align(@alignOf(c.struct_cmsghdr)) = undefined;
             var msg: c.msghdr = .{
                 .msg_iov = @ptrCast(&io),
                 .msg_iovlen = 1,

@@ -150,7 +150,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
                 }
 
-                _ = try client.createObject(gpa, msg.protocol, "", msg.version, msg.seq);
+                _ = client.createObject(gpa, msg.protocol, "", msg.version, msg.seq);
 
                 return msg.getLen();
             },
