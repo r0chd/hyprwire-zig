@@ -16,6 +16,6 @@ pub const Object = Trait(.{
     .setData = fn (*anyopaque) void,
     .getData = fn () ?*anyopaque,
     .err = fn (mem.Allocator, u32, [:0]const u8) anyerror!void,
-    .deinit = fn () void,
+    .deinit = fn (mem.Allocator) void,
     .setOnDeinit = fn (*const fn () void) void,
 }, null);

@@ -162,9 +162,5 @@ test "BindProtocol.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    if (isTrace()) {
-        try std.testing.expectEqualStrings("bind_protocol ( 5, \"test@1\", 1 ) ", data);
-    } else {
-        try std.testing.expectEqualStrings("bind_protocol (  ) ", data);
-    }
+    try std.testing.expectEqualStrings("bind_protocol ( 5, \"test@1\", 1 ) ", data);
 }

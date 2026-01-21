@@ -107,9 +107,5 @@ test "RoundtripRequest.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    if (isTrace()) {
-        try std.testing.expectEqualStrings("roundtrip_request ( 42 ) ", data);
-    } else {
-        try std.testing.expectEqualStrings("roundtrip_request (  ) ", data);
-    }
+    try std.testing.expectEqualStrings("roundtrip_request ( 42 ) ", data);
 }

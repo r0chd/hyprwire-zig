@@ -1,15 +1,10 @@
 const std = @import("std");
 const c = @cImport(@cInclude("sys/socket.h"));
+const helpers = @import("helpers");
 
 const posix = std.posix;
 const mem = std.mem;
 const log = std.log.scoped(.hw);
-
-fn CMSG_DATA(cmsg: *c.struct_cmsghdr) [*]u8 {
-    const cmsg_bytes: [*]u8 = @ptrCast(cmsg);
-    const header_size = c.CMSG_LEN(0);
-    return cmsg_bytes + header_size;
-}
 
 pub const SocketRawParsedMessage = struct {
     data: std.ArrayList(u8) = .empty,
@@ -31,13 +26,12 @@ pub const SocketRawParsedMessage = struct {
                 .len = BUFFER_SIZE,
             };
 
-            var control_buf = try std.ArrayList(u8).initCapacity(gpa, MAX_FDS_PER_MSG * @sizeOf(i32));
-            defer control_buf.deinit(gpa);
+            var control_buf: [MAX_FDS_PER_MSG * @sizeOf(i32)]u8 = undefined;
             var msg: c.msghdr = .{
                 .msg_iov = @ptrCast(&io),
                 .msg_iovlen = 1,
-                .msg_control = control_buf.items.ptr,
-                .msg_controllen = @intCast(control_buf.capacity),
+                .msg_control = &control_buf,
+                .msg_controllen = @intCast(control_buf.len),
                 .msg_flags = 0,
                 .msg_name = null,
                 .msg_namelen = 0,
@@ -57,7 +51,7 @@ pub const SocketRawParsedMessage = struct {
                     return .{ .bad = true };
                 }
 
-                const data_ptr = CMSG_DATA(cmsg);
+                const data_ptr = helpers.CMSG_DATA(@ptrCast(cmsg));
                 const data: [*]i32 = @ptrCast(@alignCast(data_ptr));
                 const payload_size = cmsg.*.cmsg_len - c.CMSG_LEN(0);
                 const num_fds = payload_size / @sizeOf(i32);
@@ -100,15 +94,54 @@ test "SocketRawParsedMessage.fromFd invalid fd" {
     try std.testing.expect(!result.bad);
 }
 
-test "CMSG_DATA function" {
-    var cmsg_buf: [c.CMSG_LEN(4)]u8 align(@alignOf(c.struct_cmsghdr)) = undefined;
-    const cmsg: *c.struct_cmsghdr = @ptrCast(&cmsg_buf);
+test "SocketRawParsedMessage.fromFd receives payload and fd" {
+    const alloc = std.testing.allocator;
 
-    cmsg.*.cmsg_len = c.CMSG_LEN(4);
+    var sockets: [2]posix.socket_t = undefined;
+    try std.testing.expectEqual(@as(c_int, 0), c.socketpair(posix.AF.UNIX, posix.SOCK.STREAM, 0, &sockets));
+    defer for (sockets) |s| posix.close(s);
 
-    const data_ptr = CMSG_DATA(cmsg);
-    const data_start: [*]u8 = @ptrCast(cmsg);
-    const expected_offset = c.CMSG_LEN(0);
+    const pipe_fds = try posix.pipe();
+    defer {
+        for (pipe_fds) |fd| posix.close(fd);
+    }
 
-    try std.testing.expectEqual(data_start + expected_offset, data_ptr);
+    const payload = "hello";
+    var io = c.iovec{
+        .iov_base = @constCast(payload.ptr),
+        .iov_len = payload.len,
+    };
+
+    var control_buf: [c.CMSG_SPACE(@sizeOf(i32))]u8 align(@alignOf(c.struct_cmsghdr)) = undefined;
+    @memset(&control_buf, 0);
+
+    var msg: c.msghdr = .{
+        .msg_iov = &io,
+        .msg_iovlen = 1,
+        .msg_control = &control_buf,
+        .msg_controllen = control_buf.len,
+        .msg_flags = 0,
+        .msg_name = null,
+        .msg_namelen = 0,
+    };
+
+    const cmsg_hdr: *c.struct_cmsghdr = @ptrCast(@alignCast(&control_buf));
+    cmsg_hdr.*.cmsg_len = c.CMSG_LEN(@sizeOf(i32));
+    cmsg_hdr.*.cmsg_level = c.SOL_SOCKET;
+    cmsg_hdr.*.cmsg_type = c.SCM_RIGHTS;
+    const data_ptr = helpers.CMSG_DATA(@ptrCast(cmsg_hdr));
+    const fd_slice: [*]i32 = @ptrCast(@alignCast(data_ptr));
+    fd_slice[0] = pipe_fds[1];
+
+    const sent = c.sendmsg(sockets[0], &msg, 0);
+    try std.testing.expect(sent == payload.len);
+
+    var result = try SocketRawParsedMessage.fromFd(alloc, sockets[1]);
+    defer result.deinit(alloc);
+
+    try std.testing.expect(!result.bad);
+    try std.testing.expectEqualStrings(payload, result.data.items);
+    try std.testing.expect(result.fds.items.len == 1);
+
+    for (result.fds.items) |fd| posix.close(fd);
 }

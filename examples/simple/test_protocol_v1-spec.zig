@@ -1,5 +1,8 @@
+const std = @import("std");
 const types = @import("hyprwire").types;
 const MessageMagic = @import("hyprwire").MessageMagic;
+
+const mem = std.mem;
 
 const Method = types.Method;
 const ProtocolObjectSpec = types.ProtocolObjectSpec;
@@ -154,6 +157,11 @@ pub const TestProtocolV1ProtocolSpec = struct {
     pub fn objects(self: *Self) []const ProtocolObjectSpec {
         _ = self;
         return protocol_objects[0..];
+    }
+
+    pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+        _ = gpa;
+        _ = self;
     }
 };
 

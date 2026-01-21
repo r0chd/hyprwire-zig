@@ -54,26 +54,31 @@ pub const MyManagerV1Object = struct {
 
     pub fn sendSendMessage(self: *Self, gpa: mem.Allocator, message: [:0]const u8) !void {
         var args = try Args.init(gpa, .{message});
+        defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
     pub fn sendSendMessageFd(self: *Self, gpa: mem.Allocator, message: i32) !void {
         var args = try Args.init(gpa, .{message});
+        defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
 
     pub fn sendSendMessageArray(self: *Self, gpa: mem.Allocator, message: []const [:0]const u8) !void {
         var args = try Args.init(gpa, .{message});
+        defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 2, &args);
     }
 
     pub fn sendSendMessageArrayUint(self: *Self, gpa: mem.Allocator, message: []const u32) !void {
         var args = try Args.init(gpa, .{message});
+        defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 3, &args);
     }
 
     pub fn sendMakeObject(self: *Self, gpa: mem.Allocator) ?Object {
         var args = Args.init(gpa, .{}) catch return null;
+        defer args.deinit(gpa);
         const id = self.object.vtable.call(self.object.ptr, gpa, 4, &args) catch return null;
         if (self.object.vtable.clientSock(self.object.ptr)) |sock| {
             return sock.objectForId(id);
@@ -138,16 +143,19 @@ pub const MyObjectV1Object = struct {
 
     pub fn sendSendMessage(self: *Self, gpa: mem.Allocator, message: [:0]const u8) !void {
         var args = try Args.init(gpa, .{message});
+        defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
     pub fn sendSendEnum(self: *Self, gpa: mem.Allocator, message: spec.TestProtocolV1MyEnum) !void {
         var args = try Args.init(gpa, .{message});
+        defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
 
     pub fn sendDestroy(self: *Self, gpa: mem.Allocator) !void {
         var args = try Args.init(gpa, .{});
+        defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 2, &args);
         self.object.destroy();
     }

@@ -174,9 +174,5 @@ test "HandshakeProtocols.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    if (isTrace()) {
-        try std.testing.expectEqualStrings("handshake_protocols ( { \"test@1\", \"test@2\" } ) ", data);
-    } else {
-        try std.testing.expectEqualStrings("handshake_protocols (  ) ", data);
-    }
+    try std.testing.expectEqualStrings("handshake_protocols ( { \"test@1\", \"test@2\" } ) ", data);
 }

@@ -53,14 +53,6 @@ pub fn setData(self: *Self, data: *anyopaque) void {
     self.data = data;
 }
 
-pub fn objectDeinit(self: *Self, id: u32, message: [:0]const u8) void {
-    _ = id;
-    _ = message;
-    if (self.on_deinit) |onDeinit| {
-        onDeinit();
-    }
-}
-
 pub fn setOnDeinit(self: *Self, cb: *const fn () void) void {
     self.on_deinit = cb;
 }
@@ -105,11 +97,12 @@ pub fn server(self: *Self) bool {
     return false;
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     if (isTrace()) {
         log.debug("destroying object {}", .{self.id});
     }
 
+    self.listeners.deinit(gpa);
     if (self.on_deinit) |onDeinit| {
         onDeinit();
     }

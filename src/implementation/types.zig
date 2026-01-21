@@ -26,6 +26,7 @@ pub const ProtocolSpec = Trait(.{
     .specName = fn () []const u8,
     .specVer = fn () u32,
     .objects = fn () []const ProtocolObjectSpec,
+    .deinit = fn (mem.Allocator) void,
 }, null);
 
 pub const Args = struct {

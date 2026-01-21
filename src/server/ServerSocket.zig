@@ -386,13 +386,12 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !v
 
     if (data.data.items.len == 0) return;
 
-    const ret = message_parser.handleMessage(gpa, &data, .{ .server = client });
-    if (ret != MessageParsingResult.ok) {
+    message_parser.handleMessage(gpa, &data, .{ .server = client }) catch {
         var fatal_msg = try FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire");
         client.sendMessage(gpa, Message.from(&fatal_msg));
         client.@"error" = true;
         return;
-    }
+    };
 
     if (client.scheduled_roundtrip_seq > 0) {
         var roundtrip_done = try RoundtripDone.init(gpa, client.scheduled_roundtrip_seq);

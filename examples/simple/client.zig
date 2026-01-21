@@ -39,7 +39,9 @@ pub fn main() !void {
     std.debug.print("test protocol supported at version {}. Binding.\n", .{SPEC.vtable.specVer(SPEC.ptr)});
 
     var obj = try socket.bindProtocol(alloc, protocol, TEST_PROTOCOL_VERSION);
+    defer obj.vtable.deinit(obj.ptr, alloc);
     var manager = try client.MyManagerV1Object.init(alloc, &obj);
+    defer manager.deinit(alloc);
 
     std.debug.print("Bound!\n", .{});
 
@@ -63,7 +65,10 @@ pub fn main() !void {
     try socket.roundtrip(alloc);
 
     var object_arg = manager.sendMakeObject(alloc).?;
+    defer object_arg.vtable.deinit(object_arg.ptr, alloc);
     var object = try client.MyObjectV1Object.init(alloc, &object_arg);
+    defer object.deinit(alloc);
+
     object.setSendMessage(messageOnObject);
     try object.sendSendMessage(alloc, "Hello on object");
     try object.sendSendEnum(alloc, spec.TestProtocolV1MyEnum.world);

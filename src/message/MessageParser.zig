@@ -18,67 +18,67 @@ const isTrace = helpers.isTrace;
 
 const steadyMillis = @import("../root.zig").steadyMillis;
 
-pub const MessageParsingResult = enum(u8) {
-    ok = 0,
-    parse_error = 1,
-    incomplete = 2,
-    stray_fds = 3,
+pub const MessageParsingResult = error{
+    ParseError,
+    Incomplete,
+    StrayFds,
 };
 
-pub fn handleMessage(gpa: mem.Allocator, data: *SocketRawParsedMessage, role: union(enum) { client: *ClientSocket, server: *ServerClient }) MessageParsingResult {
+pub fn handleMessage(gpa: mem.Allocator, data: *SocketRawParsedMessage, role: union(enum) { client: *ClientSocket, server: *ServerClient }) MessageParsingResult!void {
     return switch (role) {
         .client => |client| handleClientMessage(gpa, data, client),
         .server => |client| handleServerMessage(gpa, data, client),
     };
 }
 
-fn handleClientMessage(gpa: mem.Allocator, data: *SocketRawParsedMessage, client: *ClientSocket) MessageParsingResult {
+fn handleClientMessage(gpa: mem.Allocator, data: *SocketRawParsedMessage, client: *ClientSocket) MessageParsingResult!void {
     var needle: usize = 0;
     while (needle < data.data.items.len) {
-        const ret = parseSingleMessageClient(gpa, data, needle, client) catch return .parse_error;
-        if (ret == 0) return .parse_error;
+        const ret = parseSingleMessageClient(gpa, data, needle, client) catch return error.ParseError;
+        if (ret == 0) return error.ParseError;
 
         needle += ret;
 
         if (client.shouldEndReading()) {
             if (isTrace()) log.debug("[{} @ {}] -- handleMessage: End read early", .{ client.fd.raw, steadyMillis() });
             data.data.items = data.data.items[needle..data.data.items.len];
-            client.pending_socket_data.append(gpa, data.*) catch return .parse_error;
-            return .ok;
+            client.pending_socket_data.append(gpa, data.*) catch return error.ParseError;
+            // Ownership transferred to pending_socket_data; clear local to avoid double
+            // deinit by the caller.
+            data.* = SocketRawParsedMessage{};
+            return;
         }
     }
 
     if (data.fds.items.len != 0) {
-        return .stray_fds;
+        return error.StrayFds;
     }
 
     if (isTrace()) {
         log.debug("[{} @ {}] -- handleMessage: Finished read", .{ client.fd.raw, steadyMillis() });
     }
 
-    return .ok;
+    return;
 }
 
-fn handleServerMessage(gpa: mem.Allocator, data: *SocketRawParsedMessage, client: *ServerClient) MessageParsingResult {
+fn handleServerMessage(gpa: mem.Allocator, data: *SocketRawParsedMessage, client: *ServerClient) MessageParsingResult!void {
     var needle: usize = 0;
     while (needle < data.data.items.len and !client.@"error") {
-        const ret = parseSingleMessageServer(gpa, data, needle, client) catch return .parse_error;
-        if (ret == 0) {
-            return .parse_error;
-        }
+        const ret = parseSingleMessageServer(gpa, data, needle, client) catch return error.ParseError;
+        if (ret == 0) return error.ParseError;
 
         needle += ret;
     }
 
     if (data.fds.items.len > 0) {
-        return .stray_fds;
+        return error.StrayFds;
     }
 
     if (isTrace()) {
         log.debug("[{} @ {}] -- handleMessage: Finished read", .{ client.fd.raw, steadyMillis() });
     }
 
-    return .ok;
+    return;
 }
 
 pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage, off: usize, client: *ServerClient) !usize {
@@ -159,6 +159,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                     log.debug("client at fd {} core protocol error: malformed message recvd (generic_protocol_message)", .{client.fd.raw});
                     return err;
                 };
+                defer msg.deinit(gpa);
 
                 if (isTrace()) {
                     const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
@@ -168,6 +169,9 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                     defer gpa.free(parsed);
                     log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
                 }
+
+                try client.onGeneric(gpa, msg);
+                return msg.getLen();
             },
             .roundtrip_request => {
                 var msg = messages.RoundtripRequest.fromBytes(gpa, raw.data.items, off) catch |err| {
@@ -218,6 +222,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                     log.err("server at fd {} core protocol error: malformed message recvd (handshake_begin)", .{client.fd.raw});
                     return err;
                 };
+                defer msg.deinit(gpa);
 
                 var version_supported = false;
                 for (msg.versions) |version| {
@@ -293,6 +298,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                     log.err("server at fd {} core protocol error: malformed message recvd (new_object)", .{client.fd.raw});
                     return err;
                 };
+                defer msg.deinit(gpa);
 
                 if (isTrace()) {
                     const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
@@ -312,6 +318,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                     log.err("server at fd {} core protocol error: malformed message recvd (generic_protocol_message)", .{client.fd.raw});
                     return err;
                 };
+                defer msg.deinit(gpa);
 
                 if (isTrace()) {
                     const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
@@ -331,6 +338,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                     log.err("server at fd {} core protocol error: malformed message recvd (fatal_protocol_error)", .{client.fd.raw});
                     return err;
                 };
+                defer msg.deinit(gpa);
 
                 log.err("fatal protocol error: object {} error {}: {s}", .{ msg.object_id, msg.error_id, msg.error_msg });
                 client.@"error" = true;
@@ -341,6 +349,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                     log.err("server at fd {} core protocol error: malformed message recvd (roundtrip_done)", .{client.fd.raw});
                     return err;
                 };
+                defer msg.deinit(gpa);
 
                 if (isTrace()) {
                     const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
@@ -392,6 +401,7 @@ fn parseVarIntSpan(data: []const u8) meta.Tuple(&.{ usize, usize }) {
 
     return .{ rolling, i };
 }
+
 pub fn encodeVarInt(num: usize, buffer: []u8) []const u8 {
     var n = num;
     var i: usize = 0;
@@ -405,4 +415,18 @@ pub fn encodeVarInt(num: usize, buffer: []u8) []const u8 {
     }
 
     return buffer[0..i];
+}
+
+test "parseVarInt/encodeVarInt" {
+    const testing = std.testing;
+
+    var initial: usize = 1;
+    while (initial < std.math.maxInt(usize) / 2) : (initial *= 2) {
+        var buffer: [10]u8 = undefined;
+        const encoded = encodeVarInt(initial, &buffer);
+
+        const parsed, const encoded_len = parseVarInt(encoded, 0);
+        try testing.expectEqual(parsed, initial);
+        try testing.expectEqual(encoded.len, encoded_len);
+    }
 }

@@ -28,13 +28,16 @@ pub const WireObject = Trait(.{
     .getId = fn () u32,
 }, .{Object});
 
-pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, fds: []const i32) !void {
+pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, fds: []const i32) !void {
+    // Too much shit to keep track of
+    var arena = std.heap.ArenaAllocator.init(gpa);
+    defer arena.deinit();
+
     const methods = self.vtable.methodsIn(self.ptr);
 
     if (methods.len <= id) {
-        const msg = try std.fmt.allocPrintSentinel(gpa, "invalid method {} for object {}", .{ id, self.vtable.getId(self.ptr) }, 0);
-        defer gpa.free(msg);
-        try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+        const msg = try std.fmt.allocPrintSentinel(arena.allocator(), "invalid method {} for object {}", .{ id, self.vtable.getId(self.ptr) }, 0);
+        try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
         return;
     }
 
@@ -44,24 +47,21 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
 
     const method = methods[id];
     var params: std.ArrayList(u8) = .empty;
-    defer params.deinit(gpa);
 
     if (method.returns_type.len > 0) {
-        try params.append(gpa, @intFromEnum(MessageMagic.type_seq));
+        try params.append(arena.allocator(), @intFromEnum(MessageMagic.type_seq));
     }
 
-    try params.appendSlice(gpa, method.params);
+    try params.appendSlice(arena.allocator(), method.params);
 
     if (method.since > self.vtable.getVersion(self.ptr)) {
-        const msg = try std.fmt.allocPrintSentinel(gpa, "method {} since {} but has {}", .{ id, method.since, self.vtable.getVersion(self.ptr) }, 0);
-        defer gpa.free(msg);
-        try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+        const msg = try std.fmt.allocPrintSentinel(arena.allocator(), "method {} since {} but has {}", .{ id, method.since, self.vtable.getVersion(self.ptr) }, 0);
+        try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
         return;
     }
 
     var ffi_types: std.ArrayList(*c.ffi_type) = .empty;
-    defer ffi_types.deinit(gpa);
-    try ffi_types.append(gpa, &c.ffi_type_pointer);
+    try ffi_types.append(arena.allocator(), &c.ffi_type_pointer);
 
     var data_idx: usize = 0;
     var i: usize = 0;
@@ -70,14 +70,13 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
         const wire_param: MessageMagic = @enumFromInt(data[data_idx]);
 
         if (param != wire_param) {
-            const msg = try std.fmt.allocPrintSentinel(gpa, "method {} param idx {} should be {s} but was {s}", .{ id, i, @tagName(param), @tagName(wire_param) }, 0);
-            defer gpa.free(msg);
-            try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+            const msg = try std.fmt.allocPrintSentinel(arena.allocator(), "method {} param idx {} should be {s} but was {s}", .{ id, i, @tagName(param), @tagName(wire_param) }, 0);
+            try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
             return;
         }
 
         const ffi_type = helpers.ffiTypeFrom(param);
-        try ffi_types.append(gpa, @ptrCast(ffi_type));
+        try ffi_types.append(arena.allocator(), @ptrCast(ffi_type));
 
         switch (param) {
             .end => i += 1, // BUG if this happens or malformed message
@@ -95,10 +94,9 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
 
                 if (arr_type != wire_type) {
                     // raise protocol error
-                    const msg = try fmt.allocPrintSentinel(gpa, "method {} param idx {} should be {s} but was {s}", .{ id, i, @tagName(param), @tagName(wire_param) }, 0);
-                    defer gpa.free(msg);
+                    const msg = try fmt.allocPrintSentinel(arena.allocator(), "method {} param idx {} should be {s} but was {s}", .{ id, i, @tagName(param), @tagName(wire_param) }, 0);
                     log.debug("core protocol error: {s}", .{msg});
-                    try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                    try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                     return;
                 }
 
@@ -106,7 +104,7 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
                 var arr_message_len = 2 + len_len;
 
                 const ffi_type_2 = helpers.ffiTypeFrom(MessageMagic.type_uint);
-                try ffi_types.append(gpa, @ptrCast(ffi_type_2));
+                try ffi_types.append(arena.allocator(), @ptrCast(ffi_type_2));
 
                 switch (arr_type) {
                     .type_uint, .type_f32, .type_int, .type_object, .type_seq => arr_message_len += 4 * arr_len,
@@ -115,7 +113,7 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
                             if (data_idx + arr_message_len > data.len) {
                                 const msg = "failed demarshaling array message";
                                 log.debug("core protocol error: {s}", .{msg});
-                                try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                                try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                                 return;
                             }
 
@@ -126,7 +124,7 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
                     else => {
                         const msg = "failed demarshaling array message";
                         log.debug("core protocol error: {s}", .{msg});
-                        try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                        try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                         return;
                     },
                 }
@@ -136,7 +134,7 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
             .type_object_id => {
                 const msg = "object type is not impld";
                 log.debug("core protocol error: {s}", .{msg});
-                try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                 return;
             },
         }
@@ -152,17 +150,17 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
     var avalues: std.ArrayList(?*anyopaque) = .empty;
     var other_buffers: std.ArrayList(*anyopaque) = .empty;
 
-    try avalues.ensureTotalCapacity(gpa, ffi_types.items.len);
+    try avalues.ensureTotalCapacity(arena.allocator(), ffi_types.items.len);
     // First argument is always the object pointer expected by the listener.
     // libffi expects each entry in avalues to point to the argument value, so
     // we must store a pointer-to-pointer for the object.
-    const obj = try gpa.create(Object);
+    const obj = try arena.allocator().create(Object);
     obj.* = self.asEmbed(Object);
-    const obj_ptr = try gpa.create(*Object);
-    obj_ptr.* = obj;
-    try avalues.append(gpa, @ptrCast(obj_ptr));
-    var strings: std.ArrayList([]const u8) = .empty;
 
+    const obj_ptr = try arena.allocator().create(*Object);
+    obj_ptr.* = obj;
+    try avalues.append(arena.allocator(), @ptrCast(obj_ptr));
+    var strings: std.ArrayList([]const u8) = .empty;
     var fd_no: usize = 0;
 
     i = 0;
@@ -173,31 +171,31 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
         switch (param) {
             .end => break,
             .type_uint => {
-                const p = try gpa.create(u32);
+                const p = try arena.allocator().create(u32);
                 @memcpy(std.mem.asBytes(p), data[i + 1 .. i + 1 + @sizeOf(u32)]);
                 buf = p;
                 i += @sizeOf(u32);
             },
             .type_f32 => {
-                const p = try gpa.create(f32);
+                const p = try arena.allocator().create(f32);
                 @memcpy(std.mem.asBytes(p), data[i + 1 .. i + 1 + @sizeOf(f32)]);
                 buf = p;
                 i += @sizeOf(f32);
             },
             .type_int => {
-                const p = try gpa.create(i32);
+                const p = try arena.allocator().create(i32);
                 @memcpy(std.mem.asBytes(p), data[i + 1 .. i + 1 + @sizeOf(i32)]);
                 buf = p;
                 i += @sizeOf(i32);
             },
             .type_object => {
-                const p = try gpa.create(u32);
+                const p = try arena.allocator().create(u32);
                 @memcpy(std.mem.asBytes(p), data[i + 1 .. i + 1 + @sizeOf(u32)]);
                 buf = p;
                 i += @sizeOf(u32);
             },
             .type_seq => {
-                const p = try gpa.create(u32);
+                const p = try arena.allocator().create(u32);
                 @memcpy(std.mem.asBytes(p), data[i + 1 .. i + 1 + @sizeOf(u32)]);
                 buf = p;
                 i += @sizeOf(u32);
@@ -206,14 +204,12 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
                 const str_len, const len = message_parser.parseVarInt(data[i + 1 ..], 0);
 
                 const str_bytes = data[i + 1 + len .. i + 1 + len + str_len];
-                const owned_str = try gpa.allocSentinel(u8, str_bytes.len, 0);
-                @memcpy(owned_str[0..str_bytes.len], str_bytes);
+                const owned_str = try arena.allocator().allocSentinel(u8, str_bytes.len, 0);
+                @memcpy(owned_str, str_bytes);
 
-                const slot = try gpa.create([*:0]const u8);
+                const slot = try arena.allocator().create([*:0]const u8);
                 slot.* = @ptrCast(owned_str.ptr);
-
                 buf = @ptrCast(slot);
-                try strings.append(gpa, owned_str);
 
                 i += str_len + len;
             },
@@ -224,15 +220,15 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
 
                 switch (arr_type) {
                     .type_seq => {
-                        const data_ptr = try gpa.alloc(u32, if (arr_len == 0) 1 else arr_len);
-                        const data_slot = try gpa.create([*]u32);
+                        const data_ptr = try arena.allocator().alloc(u32, if (arr_len == 0) 1 else arr_len);
+                        const data_slot = try arena.allocator().create([*]u32);
                         data_slot.* = data_ptr.ptr;
-                        const size_slot = try gpa.create(u32);
+                        const size_slot = try arena.allocator().create(u32);
                         size_slot.* = @intCast(arr_len);
 
-                        try avalues.append(gpa, @ptrCast(data_slot));
-                        try avalues.append(gpa, @ptrCast(size_slot));
-                        try other_buffers.append(gpa, @ptrCast(data_ptr.ptr));
+                        try avalues.append(arena.allocator(), @ptrCast(data_slot));
+                        try avalues.append(arena.allocator(), @ptrCast(size_slot));
+                        try other_buffers.append(arena.allocator(), @ptrCast(data_ptr.ptr));
 
                         for (0..arr_len) |j| {
                             @memcpy(std.mem.asBytes(&data_ptr[j]), data[i + arr_message_len .. i + arr_message_len + 4]);
@@ -240,26 +236,24 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
                         }
                     },
                     .type_varchar => {
-                        const data_ptr = try gpa.alloc(?[*:0]const u8, if (arr_len == 0) 1 else arr_len);
-                        const data_slot = try gpa.create([*]?[*:0]const u8);
+                        const data_ptr = try arena.allocator().alloc(?[*:0]const u8, if (arr_len == 0) 1 else arr_len);
+                        const data_slot = try arena.allocator().create([*]?[*:0]const u8);
                         data_slot.* = data_ptr.ptr;
-                        const size_slot = try gpa.create(u32);
+                        const size_slot = try arena.allocator().create(u32);
                         size_slot.* = @intCast(arr_len);
 
-                        try avalues.append(gpa, @ptrCast(data_slot));
-                        try avalues.append(gpa, @ptrCast(size_slot));
-                        try other_buffers.append(gpa, @ptrCast(data_ptr.ptr));
+                        try avalues.append(arena.allocator(), @ptrCast(data_slot));
+                        try avalues.append(arena.allocator(), @ptrCast(size_slot));
+                        try other_buffers.append(arena.allocator(), @ptrCast(data_ptr.ptr));
 
                         for (0..arr_len) |j| {
                             const str_len, const strlen_len = message_parser.parseVarInt(data[i + arr_message_len ..], data.len - i);
                             const str_data = data[i + arr_message_len + strlen_len .. i + arr_message_len + strlen_len + str_len];
 
-                            const owned_str = try gpa.alloc(u8, str_data.len + 1);
-                            @memcpy(owned_str[0..str_data.len], str_data);
-                            owned_str[str_data.len] = 0; // Add null terminator
-                            try strings.append(gpa, owned_str);
+                            const owned_str = try arena.allocator().allocSentinel(u8, str_data.len, 0);
+                            @memcpy(owned_str, str_data);
+                            try strings.append(arena.allocator(), owned_str);
 
-                            // Set pointer to null-terminated string
                             data_ptr[j] = @ptrCast(owned_str.ptr);
 
                             arr_message_len += strlen_len + str_len;
@@ -268,7 +262,7 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
                     else => {
                         const msg = "failed demarshaling array message";
                         log.debug("core protocol error: {s}", .{msg});
-                        try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                        try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                         return;
                     },
                 }
@@ -278,11 +272,11 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
             .type_object_id => {
                 const msg = "object type is not impld";
                 log.debug("core protocol error: {s}", .{msg});
-                try self.vtable.err(self.ptr, gpa, self.vtable.getId(self.ptr), msg);
+                try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                 return;
             },
             .type_fd => {
-                const p = try gpa.create(i32);
+                const p = try arena.allocator().create(i32);
                 p.* = fds[fd_no];
                 fd_no += 1;
 
@@ -291,7 +285,7 @@ pub fn called(self: *WireObject, gpa: mem.Allocator, id: u32, data: []const u8, 
         }
 
         if (buf) |b| {
-            try avalues.append(gpa, b);
+            try avalues.append(arena.allocator(), b);
         }
     }
 

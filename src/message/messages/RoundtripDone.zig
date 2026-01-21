@@ -62,11 +62,9 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     if (data[offset + 6] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
 
-    const owned = try gpa.dupe(u8, data[offset..][0..7]);
-
     return .{
         .seq = seq,
-        .data = owned,
+        .data = try gpa.dupe(u8, data[offset..][0..7]),
         .len = 7,
         .message_type = .roundtrip_done,
     };
@@ -107,9 +105,5 @@ test "RoundtripDone.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    if (isTrace()) {
-        try std.testing.expectEqualStrings("roundtrip_done ( 42 ) ", data);
-    } else {
-        try std.testing.expectEqualStrings("roundtrip_done (  ) ", data);
-    }
+    try std.testing.expectEqualStrings("roundtrip_done ( 42 ) ", data);
 }

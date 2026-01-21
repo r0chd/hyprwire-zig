@@ -78,12 +78,10 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     if (data[offset + 11] != @intFromEnum(MessageMagic.end))
         return error.InvalidMessage;
 
-    const owned = try gpa.dupe(u8, data[offset..][0..12]);
-
     return .{
         .id = id,
         .seq = seq,
-        .data = owned,
+        .data = try gpa.dupe(u8, data[offset..][0..12]),
         .len = 12,
         .message_type = .new_object,
     };
@@ -124,9 +122,5 @@ test "NewObject.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    if (isTrace()) {
-        try std.testing.expectEqualStrings("new_object ( 3, 2 ) ", data);
-    } else {
-        try std.testing.expectEqualStrings("new_object (  ) ", data);
-    }
+    try std.testing.expectEqualStrings("new_object ( 3, 2 ) ", data);
 }

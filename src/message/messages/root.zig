@@ -64,7 +64,7 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
     var result: std.Io.Writer.Allocating = .init(gpa);
     defer result.deinit();
 
-    try result.writer.print("{s} ( ", .{messageTypeToStr(message.vtable.getMessageType(message.ptr))});
+    try result.writer.print("{s} ( ", .{@tagName(message.vtable.getMessageType(message.ptr))});
 
     var first: bool = true;
     var needle: usize = 1;
@@ -159,22 +159,6 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
 
     try result.writer.writeAll(" ) ");
     return result.toOwnedSlice();
-}
-
-fn messageTypeToStr(t: MessageType) []const u8 {
-    return switch (t) {
-        .invalid => "invalid",
-        .sup => "sup",
-        .handshake_begin => "handshake_begin",
-        .handshake_ack => "handshake_ack",
-        .handshake_protocols => "handshake_protocols",
-        .bind_protocol => "bind_protocol",
-        .new_object => "new_object",
-        .fatal_protocol_error => "fatal_protocol_error",
-        .generic_protocol_message => "generic_protocol_message",
-        .roundtrip_request => "roundtrip_request",
-        .roundtrip_done => "roundtrip_done",
-    };
 }
 
 test {

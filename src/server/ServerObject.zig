@@ -103,11 +103,13 @@ pub fn err(self: *Self, gpa: mem.Allocator, id: u32, message: [:0]const u8) !voi
     self.errd();
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     if (isTrace()) {
         const fd = if (self.client) |client| client.fd.raw else -1;
         log.debug("[{}] destroying object {}", .{ fd, self.id });
     }
+
+    self.listeners.deinit(gpa);
     if (self.on_deinit) |onDeinit| {
         onDeinit();
     }

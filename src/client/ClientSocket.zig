@@ -62,6 +62,18 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     self.impls.deinit(gpa);
     self.pollfds.deinit(gpa);
     self.fd.close();
+    for (self.objects.items) |object| {
+        gpa.destroy(object);
+    }
+    for (self.pending_socket_data.items) |*data| {
+        data.deinit(gpa);
+    }
+    self.pending_socket_data.deinit(gpa);
+    for (self.server_specs.items) |object| {
+        object.vtable.deinit(object.ptr, gpa);
+    }
+    self.server_specs.deinit(gpa);
+    self.objects.deinit(gpa);
     gpa.destroy(self);
 }
 
@@ -166,7 +178,8 @@ pub fn bindProtocol(self: *Self, gpa: mem.Allocator, spec: ProtocolSpec, version
     try self.objects.append(gpa, object);
 
     const spec_name = spec.vtable.specName(spec.ptr);
-    const bind_message = try messages.BindProtocol.init(gpa, spec_name, object.seq, version);
+    var bind_message = try messages.BindProtocol.init(gpa, spec_name, object.seq, version);
+    defer bind_message.deinit(gpa);
     try self.sendMessage(gpa, Message.from(&bind_message));
 
     try self.waitForObject(gpa, object);
@@ -241,13 +254,17 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
 
     if (self.pending_socket_data.items.len > 0) {
         const datas = try self.pending_socket_data.toOwnedSlice(gpa);
+        self.pending_socket_data = .{}; // clear backing pointer to avoid reuse after freeing datas
+        defer {
+            for (datas) |*data| data.deinit(gpa);
+            gpa.free(datas);
+        }
         for (datas) |*data| {
-            const ret = message_parser.handleMessage(gpa, data, .{ .client = self });
-            if (ret != .ok) {
+            message_parser.handleMessage(gpa, data, .{ .client = self }) catch {
                 log.debug("fatal: failed to handle message on wire", .{});
                 self.disconnectOnError();
                 return error.FailedToHandleMessage;
-            }
+            };
         }
     }
 
@@ -265,6 +282,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
     // dispatch
 
     var data = try SocketRawParsedMessage.fromFd(gpa, self.fd.raw);
+    defer data.deinit(gpa);
     if (data.bad) {
         log.debug("fatal: received malformed message from server", .{});
         self.disconnectOnError();
@@ -276,14 +294,11 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
         return error.ConnectionClosed;
     }
 
-    const ret = message_parser.handleMessage(gpa, &data, .{ .client = self });
-
-    if (ret != .ok) {
+    message_parser.handleMessage(gpa, &data, .{ .client = self }) catch {
         log.debug("fatal: failed to handle message on wire", .{});
         self.disconnectOnError();
-        // TODO: make handleMessage return an error instead of enum
         return error.FailedToHandleMessage;
-    }
+    };
 
     if (self.@"error") {
         return error.ConnectionClosed;
@@ -293,9 +308,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, block: bool) !void {
 pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
-            const wire_object = try gpa.create(WireObject);
-            wire_object.* = WireObject.from(obj);
-            try types.called(wire_object, gpa, msg.method, msg.data_span, msg.fds_list);
+            try types.called(WireObject.from(obj), gpa, msg.method, msg.data_span, msg.fds_list);
             break;
         }
     }
@@ -369,8 +382,7 @@ fn serverSpecsInner(self: *Self, gpa: mem.Allocator, specs: []const []const u8) 
     for (specs) |spec| {
         const at_pos = mem.lastIndexOfScalar(u8, spec, '@') orelse return error.ParseError;
 
-        const s = try gpa.create(ServerSpec);
-        s.* = try ServerSpec.init(gpa, spec[0..at_pos], try fmt.parseInt(u32, spec[at_pos + 1 ..], 10));
+        const s = try ServerSpec.init(gpa, spec[0..at_pos], try fmt.parseInt(u32, spec[at_pos + 1 ..], 10));
         try self.server_specs.append(gpa, ProtocolSpec.from(s));
     }
 }
@@ -389,6 +401,6 @@ pub fn roundtrip(self: *Self, gpa: mem.Allocator) !void {
     try self.sendMessage(gpa, Message.from(&message));
 
     while (self.last_ackd_roundtrip_seq < next_seq) {
-        try self.dispatchEvents(gpa, true);
+        self.dispatchEvents(gpa, true) catch break;
     }
 }

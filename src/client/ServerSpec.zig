@@ -6,15 +6,19 @@ version: u32,
 
 const Self = @This();
 
-pub fn init(gpa: std.mem.Allocator, name: []const u8, version: u32) !Self {
-    return .{
+pub fn init(gpa: std.mem.Allocator, name: []const u8, version: u32) !*Self {
+    const self = try gpa.create(Self);
+    self.* = .{
         .name = try gpa.dupe(u8, name),
         .version = version,
     };
+
+    return self;
 }
 
 pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
     gpa.free(self.name);
+    gpa.destroy(self);
 }
 
 pub fn specName(self: *const Self) []const u8 {

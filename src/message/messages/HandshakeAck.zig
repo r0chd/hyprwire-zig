@@ -110,9 +110,5 @@ test "HandshakeAck.fromBytes" {
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
-    if (isTrace()) {
-        try std.testing.expectEqualStrings("handshake_ack ( 1 ) ", data);
-    } else {
-        try std.testing.expectEqualStrings("handshake_ack (  ) ", data);
-    }
+    try std.testing.expectEqualStrings("handshake_ack ( 1 ) ", data);
 }
