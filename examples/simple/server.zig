@@ -87,7 +87,7 @@ fn sendMakeObject(seq: u32) void {
         fn cb(e: protocol_spec.TestProtocolV1MyEnum) void {
             std.debug.print("Object sent enum: {}\n", .{e});
 
-            std.debug.print("Erroring out the client!", .{});
+            std.debug.print("Erroring out the client!\n", .{});
 
             object.err(alloc, @intFromEnum(e), "Important error occurred!") catch return;
         }

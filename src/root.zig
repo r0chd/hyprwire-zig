@@ -11,6 +11,10 @@ pub const ClientSocket = @import("client/ClientSocket.zig");
 
 pub const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
+// Reexports for codegen
+pub const Trait = @import("trait").Trait;
+pub const FallbackAllocator = @import("helpers").FallbackAllocator;
+
 const ServerObject = @import("server/ServerObject.zig");
 const ClientObject = @import("client/ClientObject.zig");
 

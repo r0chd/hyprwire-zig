@@ -4,6 +4,7 @@ const c = @cImport({
     @cInclude("ffi.h");
 });
 const MessageMagic = @import("hyprwire").MessageMagic;
+pub const FallbackAllocator = @import("FallbackAllocator.zig");
 
 const posix = std.posix;
 const mem = std.mem;

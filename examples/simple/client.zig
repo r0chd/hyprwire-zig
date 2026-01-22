@@ -1,14 +1,47 @@
 const std = @import("std");
 const hw = @import("hyprwire");
-const client = @import("test_protocol_v1-client.zig");
-const spec = @import("test_protocol_v1-spec.zig");
+const proto_client = @import("test_protocol_v1-client.zig");
+const proto_spec = @import("test_protocol_v1-spec.zig");
 
 const posix = std.posix;
 const fmt = std.fmt;
+const mem = std.mem;
 
 const ProtocolClientImplementation = hw.types.client_impl.ProtocolClientImplementation;
 
 const TEST_PROTOCOL_VERSION: u32 = 1;
+
+const Client = struct {
+    const Self = @This();
+
+    pub fn myManagerV1Listener(self: *Self, alloc: mem.Allocator, event: proto_client.MyManagerV1Event) void {
+        _ = alloc;
+        _ = self;
+        switch (event) {
+            .send_message => |message| {
+                std.debug.print("Server says {s}\n", .{message.message});
+            },
+            .recv_message_array_uint => |message| {
+                std.debug.print("Server sent uint array {any}\n", .{message.message});
+            },
+        }
+    }
+
+    pub fn myObjectV1Listener(self: *Self, alloc: mem.Allocator, event: proto_client.MyObjectV1Event) void {
+        _ = alloc;
+        _ = self;
+        switch (event) {
+            .send_message => |message| {
+                std.debug.print("Server says on object{s}\n", .{message.message});
+            },
+        }
+    }
+};
+
+fn buildSocketPath(alloc: mem.Allocator) ![:0]u8 {
+    const runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
+    return try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{runtime_dir}, 0);
+}
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -18,14 +51,13 @@ pub fn main() !void {
         if (deinit_status == .leak) @panic("TEST FAIL");
     }
 
-    const xdg_runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
-    const socket_path = try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{xdg_runtime_dir}, 0);
+    const socket_path = try buildSocketPath(alloc);
     defer alloc.free(socket_path);
 
     const socket = try hw.ClientSocket.open(alloc, .{ .path = socket_path });
     defer socket.deinit(alloc);
 
-    var impl = client.TestProtocolV1Impl.init(1);
+    var impl = proto_client.TestProtocolV1Impl.init(1);
     try socket.addImplementation(alloc, ProtocolClientImplementation.from(&impl));
 
     try socket.waitForHandshake(alloc);
@@ -38,9 +70,11 @@ pub fn main() !void {
 
     std.debug.print("test protocol supported at version {}. Binding.\n", .{SPEC.vtable.specVer(SPEC.ptr)});
 
+    var client = Client{};
+
     var obj = try socket.bindProtocol(alloc, protocol, TEST_PROTOCOL_VERSION);
     defer obj.vtable.deinit(obj.ptr, alloc);
-    var manager = try client.MyManagerV1Object.init(alloc, &obj);
+    var manager = try proto_client.MyManagerV1Object.init(alloc, proto_client.MyManagerV1Listener.from(&client), &obj);
     defer manager.deinit(alloc);
 
     std.debug.print("Bound!\n", .{});
@@ -60,28 +94,18 @@ pub fn main() !void {
     try manager.sendSendMessageArray(alloc, &.{ "Hello", "via", "array!" });
     try manager.sendSendMessageArray(alloc, &.{});
     try manager.sendSendMessageArrayUint(alloc, &.{ 69, 420, 2137 });
-    manager.setSendMessage(message);
 
     try socket.roundtrip(alloc);
 
     var object_arg = manager.sendMakeObject(alloc).?;
     defer object_arg.vtable.deinit(object_arg.ptr, alloc);
-    var object = try client.MyObjectV1Object.init(alloc, &object_arg);
+    var object = try proto_client.MyObjectV1Object.init(alloc, proto_client.MyObjectV1Listener.from(&client), &object_arg);
     defer object.deinit(alloc);
 
-    object.setSendMessage(messageOnObject);
     try object.sendSendMessage(alloc, "Hello on object");
-    try object.sendSendEnum(alloc, spec.TestProtocolV1MyEnum.world);
+    try object.sendSendEnum(alloc, proto_spec.TestProtocolV1MyEnum.world);
 
     std.debug.print("Sent hello!\n", .{});
 
     while (socket.dispatchEvents(alloc, true)) {} else |_| {}
-}
-
-fn message(msg: [*:0]const u8) void {
-    std.debug.print("Server says {s}\n", .{msg});
-}
-
-fn messageOnObject(msg: [*:0]const u8) void {
-    std.debug.print("Server says on object {s}\n", .{msg});
 }

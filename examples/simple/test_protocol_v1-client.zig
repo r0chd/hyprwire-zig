@@ -4,40 +4,81 @@ const hyprwire = @import("hyprwire");
 
 const mem = std.mem;
 const fmt = std.fmt;
+const heap = std.heap;
 
 const Object = hyprwire.types.Object;
 const ProtocolSpec = hyprwire.types.ProtocolSpec;
 const Args = hyprwire.types.Args;
-
 const ClientObjectImplementation = hyprwire.types.client_impl.ClientObjectImplementation;
 
 fn myManagerV1_method0(r: *Object, message: [*:0]const u8) callconv(.c) void {
     const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
-    if (object.listeners.send_message) |cb| {
-        cb(message);
-    }
+    defer _ = object.arena.reset(.retain_capacity);
+    var buffer: [32_768]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+    var fallback_allocator = hyprwire.FallbackAllocator{
+        .fba = &fba,
+        .fallback = fba.allocator(),
+        .fixed = object.arena.allocator(),
+    };
+    object.listener.vtable.myManagerV1Listener(
+        object.listener.ptr,
+        fallback_allocator.allocator(),
+        .{
+            .send_message = .{
+                .message = message,
+            },
+        },
+    );
 }
 
 fn myManagerV1_method1(r: *Object, message: [*:0]u32) void {
     const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
-    if (object.listeners.recv_message_array_uint) |cb| {
-        cb(message);
-    }
+    defer _ = object.arena.reset(.retain_capacity);
+    var buffer: [32_768]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+    var fallback_allocator = hyprwire.FallbackAllocator{
+        .fba = &fba,
+        .fallback = fba.allocator(),
+        .fixed = object.arena.allocator(),
+    };
+    object.listener.vtable.myManagerV1Listener(
+        object.listener.ptr,
+        fallback_allocator.allocator(),
+        .{
+            .recv_message_array_uint = .{
+                .message = message,
+            },
+        },
+    );
 }
+
+pub const MyManagerV1Event = union(enum) {
+    send_message: struct {
+        message: [*:0]const u8,
+    },
+    recv_message_array_uint: struct {
+        message: [*:0]u32,
+    },
+};
+
+pub const MyManagerV1Listener = hyprwire.Trait(.{
+    .myManagerV1Listener = fn (mem.Allocator, MyManagerV1Event) void,
+}, null);
 
 pub const MyManagerV1Object = struct {
     object: *Object,
-    listeners: struct {
-        send_message: ?*const fn ([*:0]const u8) void = null,
-        recv_message_array_uint: ?*const fn ([*:0]u32) void = null,
-    } = .{},
+    listener: MyManagerV1Listener,
+    arena: heap.ArenaAllocator,
 
     const Self = @This();
 
-    pub fn init(gpa: mem.Allocator, object: *Object) !*Self {
+    pub fn init(gpa: mem.Allocator, listener: MyManagerV1Listener, object: *Object) !*Self {
         const self = try gpa.create(Self);
         self.* = Self{
+            .listener = listener,
             .object = object,
+            .arena = heap.ArenaAllocator.init(gpa),
         };
 
         object.vtable.setData(object.ptr, self);
@@ -86,23 +127,15 @@ pub const MyManagerV1Object = struct {
         return null;
     }
 
-    pub fn setSendMessage(self: *Self, @"fn": *const fn ([*:0]const u8) void) void {
-        self.listeners.send_message = @"fn";
-    }
-
-    pub fn setRecvMessageArrayUint(self: *Self, @"fn": *const fn ([]u32) void) void {
-        self.listeners.recv_message_array_uint = @"fn";
-    }
-
     pub fn dispatch(
         self: *Self,
         opcode: u16,
         args: anytype,
     ) void {
         switch (opcode) {
-            0 => if (self.listeners.send_message) |cb|
+            0 => if (self.listener.send_message) |cb|
                 cb(self, args[0]),
-            1 => if (self.listeners.recv_message_array_uint) |cb|
+            1 => if (self.listener.recv_message_array_uint) |cb|
                 cb(self, args[0]),
             else => {},
         }
@@ -111,23 +144,48 @@ pub const MyManagerV1Object = struct {
 
 fn myObjectV1_method0(r: *Object, message: [*:0]const u8) callconv(.c) void {
     const object: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
-    if (object.listeners.send_message) |cb| {
-        cb(message);
-    }
+    defer _ = object.arena.reset(.retain_capacity);
+    var buffer: [32_768]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+    var fallback_allocator = hyprwire.FallbackAllocator{
+        .fba = &fba,
+        .fallback = fba.allocator(),
+        .fixed = object.arena.allocator(),
+    };
+    object.listener.vtable.myObjectV1Listener(
+        object.listener.ptr,
+        fallback_allocator.allocator(),
+        .{
+            .send_message = .{
+                .message = message,
+            },
+        },
+    );
 }
+
+pub const MyObjectV1Event = union(enum) {
+    send_message: struct {
+        message: [*:0]const u8,
+    },
+};
+
+pub const MyObjectV1Listener = hyprwire.Trait(.{
+    .myObjectV1Listener = fn (mem.Allocator, MyObjectV1Event) void,
+}, null);
 
 pub const MyObjectV1Object = struct {
     object: *Object,
-    listeners: struct {
-        send_message: ?*const fn ([*:0]const u8) void = null,
-    } = .{},
+    listener: MyObjectV1Listener,
+    arena: heap.ArenaAllocator,
 
     const Self = @This();
 
-    pub fn init(gpa: mem.Allocator, object: *Object) !*Self {
+    pub fn init(gpa: mem.Allocator, listener: MyObjectV1Listener, object: *Object) !*Self {
         const self = try gpa.create(Self);
         self.* = .{
             .object = object,
+            .listener = listener,
+            .arena = heap.ArenaAllocator.init(gpa),
         };
 
         object.vtable.setData(object.ptr, self);
@@ -160,7 +218,7 @@ pub const MyObjectV1Object = struct {
     }
 
     pub fn setSendMessage(self: *Self, callback: *const fn ([*:0]const u8) void) void {
-        self.listeners.send_message = callback;
+        self.listener.send_message = callback;
     }
 
     pub fn dispatch(
@@ -169,7 +227,7 @@ pub const MyObjectV1Object = struct {
         args: anytype,
     ) void {
         switch (opcode) {
-            0 => if (self.listeners.send_message) |cb|
+            0 => if (self.listener.send_message) |cb|
                 cb(self, args[0]),
             else => {},
         }
