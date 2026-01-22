@@ -3,6 +3,7 @@ const std = @import("std");
 const spec = @import("test_protocol_v1-spec.zig");
 
 const mem = std.mem;
+const heap = std.heap;
 
 const ProtocolSpec = hyprwire.types.ProtocolSpec;
 const Object = hyprwire.types.Object;
@@ -11,56 +12,135 @@ const TestProtocolV1ProtocolSpec = spec.TestProtocolV1ProtocolSpec;
 const Args = hyprwire.types.Args;
 
 fn myManagerV1_method0(r: *Object, message: [*:0]const u8) callconv(.c) void {
-    const self: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
-    if (self.listeners.send_message) |@"fn"| {
-        @"fn"(message);
-    }
+    const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
+    defer _ = object.arena.reset(.retain_capacity);
+    var buffer: [32_768]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+    var fallback_allocator = hyprwire.FallbackAllocator{
+        .fba = &fba,
+        .fallback = fba.allocator(),
+        .fixed = object.arena.allocator(),
+    };
+    object.listener.vtable.myManagerV1Listener(
+        object.listener.ptr,
+        fallback_allocator.allocator(),
+        .{ .send_message = .{
+            .message = message,
+        } },
+    );
 }
 
-fn myManagerV1_method1(r: *Object, message: i32) callconv(.c) void {
-    const self: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
-    if (self.listeners.send_message_fd) |@"fn"| {
-        @"fn"(message);
-    }
+fn myManagerV1_method1(r: *Object, fd: i32) callconv(.c) void {
+    const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
+    defer _ = object.arena.reset(.retain_capacity);
+    var buffer: [32_768]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+    var fallback_allocator = hyprwire.FallbackAllocator{
+        .fba = &fba,
+        .fallback = fba.allocator(),
+        .fixed = object.arena.allocator(),
+    };
+    object.listener.vtable.myManagerV1Listener(
+        object.listener.ptr,
+        fallback_allocator.allocator(),
+        .{ .send_message_fd = .{
+            .message = fd,
+        } },
+    );
 }
 
-fn myManagerV1_method2(r: *Object, message: [*:null]?[*:0]const u8) callconv(.c) void {
-    const self: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
-    if (self.listeners.send_message_array) |@"fn"| {
-        @"fn"(message);
-    }
+fn myManagerV1_method2(r: *Object, message: [*][*:0]const u8, message_len: u32) callconv(.c) void {
+    const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
+    defer _ = object.arena.reset(.retain_capacity);
+    var buffer: [32_768]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+    var fallback_allocator = hyprwire.FallbackAllocator{
+        .fba = &fba,
+        .fallback = fba.allocator(),
+        .fixed = object.arena.allocator(),
+    };
+    object.listener.vtable.myManagerV1Listener(
+        object.listener.ptr,
+        fallback_allocator.allocator(),
+        .{ .send_message_array = .{
+            .message = fallback_allocator.allocator().dupe([*:0]const u8, message[0..message_len]) catch return,
+        } },
+    );
 }
 
 fn myManagerV1_method3(r: *Object, message: [*:0]u32) callconv(.c) void {
-    const self: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
-    if (self.listeners.send_message_array_uint) |@"fn"| {
-        @"fn"(message);
-    }
+    const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
+    defer _ = object.arena.reset(.retain_capacity);
+    var buffer: [32_768]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+    var fallback_allocator = hyprwire.FallbackAllocator{
+        .fba = &fba,
+        .fallback = fba.allocator(),
+        .fixed = object.arena.allocator(),
+    };
+    object.listener.vtable.myManagerV1Listener(
+        object.listener.ptr,
+        fallback_allocator.allocator(),
+        .{ .send_message_array_uint = .{
+            .message = message,
+        } },
+    );
 }
 
 fn myManagerV1_method4(r: *Object, seq: u32) callconv(.c) void {
-    const self: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
-    if (self.listeners.make_object) |@"fn"| {
-        @"fn"(seq);
-    }
+    const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
+    defer _ = object.arena.reset(.retain_capacity);
+    var buffer: [32_768]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+    var fallback_allocator = hyprwire.FallbackAllocator{
+        .fba = &fba,
+        .fallback = fba.allocator(),
+        .fixed = object.arena.allocator(),
+    };
+    object.listener.vtable.myManagerV1Listener(
+        object.listener.ptr,
+        fallback_allocator.allocator(),
+        .{ .make_object = .{
+            .seq = seq,
+        } },
+    );
 }
+
+pub const MyManagerV1Event = union(enum) {
+    send_message: struct {
+        message: [*:0]const u8,
+    },
+    send_message_fd: struct {
+        message: i32,
+    },
+    send_message_array: struct {
+        message: [][*:0]const u8,
+    },
+    send_message_array_uint: struct {
+        message: [*:0]u32,
+    },
+    make_object: struct {
+        seq: u32,
+    },
+};
+
+pub const MyManagerV1Listener = hyprwire.Trait(.{
+    .myManagerV1Listener = fn (mem.Allocator, MyManagerV1Event) void,
+}, null);
 
 pub const MyManagerV1Object = struct {
     object: *Object,
-    listeners: struct {
-        send_message: ?*const fn ([*:0]const u8) void = null,
-        send_message_fd: ?*const fn (i32) void = null,
-        send_message_array: ?*const fn ([*:null]?[*:0]const u8) void = null,
-        send_message_array_uint: ?*const fn ([*:0]u32) void = null,
-        make_object: ?*const fn (u32) void = null,
-    } = .{},
+    listener: MyManagerV1Listener,
+    arena: heap.ArenaAllocator,
 
     const Self = @This();
 
-    pub fn init(gpa: mem.Allocator, object: *Object) !*Self {
+    pub fn init(gpa: mem.Allocator, listener: MyManagerV1Listener, object: *Object) !*Self {
         const self = try gpa.create(Self);
         self.* = .{
+            .listener = listener,
             .object = object,
+            .arena = heap.ArenaAllocator.init(gpa),
         };
 
         object.vtable.setData(object.ptr, self);
@@ -75,6 +155,7 @@ pub const MyManagerV1Object = struct {
     }
 
     pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+        self.arena.deinit();
         gpa.destroy(self);
         self.object.vtable.deinit(self.object.ptr);
     }
@@ -102,64 +183,90 @@ pub const MyManagerV1Object = struct {
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
-
-    pub fn setSendMessage(self: *Self, @"fn": *const fn ([*:0]const u8) void) void {
-        self.listeners.send_message = @"fn";
-    }
-
-    pub fn setSendMessageFd(self: *Self, @"fn": *const fn (i32) void) void {
-        self.listeners.send_message_fd = @"fn";
-    }
-
-    pub fn setSendMessageArray(self: *Self, @"fn": *const fn ([*:null]?[*:0]const u8) void) void {
-        self.listeners.send_message_array = @"fn";
-    }
-
-    pub fn setSendMessageArrayUint(self: *Self, @"fn": *const fn ([*:0]u32) void) void {
-        self.listeners.send_message_array_uint = @"fn";
-    }
-
-    pub fn setMakeObject(self: *Self, @"fn": *const fn (u32) void) void {
-        self.listeners.make_object = @"fn";
-    }
 };
 
 fn myObjectV1_method0(r: *Object, message: [*:0]const u8) callconv(.c) void {
-    const self: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
-    if (self.listeners.send_message) |@"fn"| {
-        @"fn"(message);
-    }
+    const object: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
+    defer _ = object.arena.reset(.retain_capacity);
+    var buffer: [32_768]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+    var fallback_allocator = hyprwire.FallbackAllocator{
+        .fba = &fba,
+        .fallback = fba.allocator(),
+        .fixed = object.arena.allocator(),
+    };
+    object.listener.vtable.myObjectV1Listener(
+        object.listener.ptr,
+        fallback_allocator.allocator(),
+        .{ .send_message = .{
+            .message = message,
+        } },
+    );
 }
 
-fn myObjectV1_method1(r: *Object, message: i32) callconv(.c) void {
-    const self: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
-    if (self.listeners.send_enum) |@"fn"| {
-        @"fn"(@enumFromInt(message));
-    }
+fn myObjectV1_method1(r: *Object, value: i32) callconv(.c) void {
+    const object: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
+    defer _ = object.arena.reset(.retain_capacity);
+    var buffer: [32_768]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+    var fallback_allocator = hyprwire.FallbackAllocator{
+        .fba = &fba,
+        .fallback = fba.allocator(),
+        .fixed = object.arena.allocator(),
+    };
+    object.listener.vtable.myObjectV1Listener(
+        object.listener.ptr,
+        fallback_allocator.allocator(),
+        .{ .send_enum = .{
+            .message = @enumFromInt(value),
+        } },
+    );
 }
 
 fn myObjectV1_method2(r: *Object) callconv(.c) void {
-    const self: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
-    if (self.listeners.destroy) |@"fn"| {
-        @"fn"();
-    }
+    const object: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
+    defer _ = object.arena.reset(.retain_capacity);
+    var buffer: [32_768]u8 = undefined;
+    var fba = heap.FixedBufferAllocator.init(&buffer);
+    var fallback_allocator = hyprwire.FallbackAllocator{
+        .fba = &fba,
+        .fallback = fba.allocator(),
+        .fixed = object.arena.allocator(),
+    };
+    object.listener.vtable.myObjectV1Listener(
+        object.listener.ptr,
+        fallback_allocator.allocator(),
+        .{ .destroy = .{} },
+    );
 }
+
+pub const MyObjectV1Event = union(enum) {
+    send_message: struct {
+        message: [*:0]const u8,
+    },
+    send_enum: struct {
+        message: spec.TestProtocolV1MyEnum,
+    },
+    destroy: struct {},
+};
+
+pub const MyObjectV1Listener = hyprwire.Trait(.{
+    .myObjectV1Listener = fn (mem.Allocator, MyObjectV1Event) void,
+}, null);
 
 pub const MyObjectV1Object = struct {
     object: *Object,
-    listeners: struct {
-        send_message: ?*const fn ([*:0]const u8) void = null,
-        send_enum: ?*const fn (spec.TestProtocolV1MyEnum) void = null,
-        destroy: ?*const fn () void = null,
-    },
+    listener: MyObjectV1Listener,
+    arena: heap.ArenaAllocator,
 
     const Self = @This();
 
-    pub fn init(gpa: mem.Allocator, object: *Object) !*Self {
+    pub fn init(gpa: mem.Allocator, listener: MyObjectV1Listener, object: *Object) !*Self {
         const self = try gpa.create(Self);
         self.* = .{
             .object = object,
-            .listeners = .{},
+            .listener = listener,
+            .arena = heap.ArenaAllocator.init(gpa),
         };
 
         object.vtable.setData(object.ptr, self);
@@ -171,7 +278,8 @@ pub const MyObjectV1Object = struct {
         return self;
     }
 
-    pub fn deinit(self: *Self, gpa: mem.Allocator) Self {
+    pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+        self.arena.deinit();
         gpa.destroy(self);
         self.object.vtable.deinit(self.object.ptr);
     }
@@ -189,35 +297,27 @@ pub const MyObjectV1Object = struct {
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
-
-    pub fn setSendMessage(self: *Self, @"fn": *const fn ([*:0]const u8) void) void {
-        self.listeners.send_message = @"fn";
-    }
-
-    pub fn setSendEnum(self: *Self, @"fn": *const fn (spec.TestProtocolV1MyEnum) void) void {
-        self.listeners.send_enum = @"fn";
-    }
-
-    pub fn setDeinit(self: *Self, @"fn": *const fn () void) void {
-        self.listeners.destroy = @"fn";
-    }
 };
+
+pub const TestProtocolV1Listener = hyprwire.Trait(.{
+    .bind = fn (*Object) void,
+}, null);
 
 const test_protocol_v1_spec = TestProtocolV1ProtocolSpec{};
 
 pub const TestProtocolV1Impl = struct {
     version: u32,
-    bind_fn: *const fn (*Object, mem.Allocator) void,
+    listener: TestProtocolV1Listener,
 
     const Self = @This();
 
     pub fn init(
         version: u32,
-        bind_fn: *const fn (*Object, mem.Allocator) void,
+        listener: TestProtocolV1Listener,
     ) Self {
         return .{
             .version = version,
-            .bind_fn = bind_fn,
+            .listener = listener,
         };
     }
 
@@ -236,14 +336,16 @@ pub const TestProtocolV1Impl = struct {
         impls[0] = try gpa.create(ServerObjectImplementation);
         errdefer gpa.destroy(impls[0]);
         impls[0].* = .{
+            .context = self.listener.ptr,
             .object_name = "my_manager_v1",
             .version = self.version,
-            .onBind = self.bind_fn,
+            .onBind = self.listener.vtable.bind,
         };
 
         impls[1] = try gpa.create(ServerObjectImplementation);
         errdefer gpa.destroy(impls[1]);
         impls[1].* = .{
+            .context = self.listener.ptr,
             .object_name = "my_object_v1",
             .version = self.version,
         };

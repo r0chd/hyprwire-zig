@@ -212,9 +212,10 @@ pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
             if (!mem.eql(u8, implementation.object_name, spec.vtable.objectName(spec.ptr))) continue;
 
             if (implementation.onBind) |on_bind| {
+                const ctx = implementation.context orelse continue;
                 const object = try gpa.create(Object);
                 object.* = Object.from(obj);
-                on_bind(object, gpa);
+                on_bind(ctx, object);
             }
             break;
         }

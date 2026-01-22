@@ -7,96 +7,93 @@ const mem = std.mem;
 const posix = std.posix;
 const fmt = std.fmt;
 
-var socket: *hw.ServerSocket = undefined;
-var manager: *protocol_server.MyManagerV1Object = undefined;
-var object: *protocol_server.MyObjectV1Object = undefined;
+const Server = struct {
+    alloc: mem.Allocator,
+    socket: *hw.ServerSocket,
+    manager: ?*protocol_server.MyManagerV1Object = null,
+    object: ?*protocol_server.MyObjectV1Object = null,
 
-fn bindFn(obj: *hw.types.Object, gpa: mem.Allocator) void {
-    std.debug.print("Object bound XD\n", .{});
+    const Self = @This();
 
-    manager = protocol_server.MyManagerV1Object.init(gpa, obj) catch return;
+    pub fn bind(self: *Self, object: *hw.types.Object) void {
+        std.debug.print("Object bound XD\n", .{});
 
-    manager.sendSendMessage(gpa, "Hello object") catch {};
-    manager.setSendMessage(sendMessage);
-    manager.setSendMessageFd(sendMessageFd);
-    manager.setSendMessageArray(sendMessageArray);
-    manager.setSendMessageArrayUint(sendMessageArrayUint);
-    manager.setMakeObject(sendMakeObject);
-    manager.setOnDeinit(onDeinit);
-}
+        var manager = protocol_server.MyManagerV1Object.init(self.alloc, protocol_server.MyManagerV1Listener.from(self), object) catch return;
+        manager.sendSendMessage(self.alloc, "Hello object") catch {};
 
-fn sendMessage(msg: [*:0]const u8) void {
-    std.debug.print("Recvd message: {s}\n", .{msg});
-}
+        self.manager = manager;
+    }
 
-fn sendMessageFd(fd: i32) void {
-    var buf: [5]u8 = undefined;
-    _ = posix.read(fd, &buf) catch {};
-    std.debug.print("Recvd fd {} with data: {s}\n", .{ fd, buf });
-}
+    pub fn myManagerV1Listener(self: *Self, alloc: mem.Allocator, event: protocol_server.MyManagerV1Event) void {
+        switch (event) {
+            .send_message => |message| {
+                std.debug.print("Recvd message: {s}\n", .{message.message});
+            },
+            .send_message_fd => |message| {
+                var buf: [5]u8 = undefined;
+                _ = posix.read(message.message, &buf) catch {};
+                std.debug.print("Recvd fd {} with data: {s}\n", .{ message.message, buf });
+            },
+            .send_message_array => |message| {
+                var str: std.ArrayList(u8) = .empty;
 
-fn sendMessageArray(data: [*:null]?[*:0]const u8) void {
-    _ = data;
-    // var str: std.ArrayList(u8) = .empty;
-    // defer str.deinit(std.heap.c_allocator);
+                for (message.message) |msg| {
+                    str.print(alloc, "{s}, ", .{msg}) catch unreachable;
+                }
+                if (str.items.len > 1) {
+                    _ = str.pop();
+                    _ = str.pop();
+                }
+                std.debug.print("Got array message: {s}\n", .{str.items});
+            },
+            .send_message_array_uint => |message| {
+                var str: std.ArrayList(u8) = .empty;
 
-    // var i: usize = 0;
-    // while (data[i]) |d| : (i += 1) {
-    //     str.print(std.heap.c_allocator, "{s}, ", .{d}) catch unreachable;
-    // }
-    // if (str.items.len > 1) {
-    //     _ = str.pop();
-    //     _ = str.pop();
-    // }
-    // std.debug.print("Got array message: {s}\n", .{str.items});
-}
-
-fn sendMessageArrayUint(data: [*:0]u32) void {
-    _ = data;
-    // var str: std.ArrayList(u8) = .empty;
-    // defer str.deinit(std.heap.c_allocator);
-
-    // var i: usize = 0;
-    // while (data[i] != 0) : (i += 1) {
-    //     str.print(std.heap.c_allocator, "{}, ", .{data[i]}) catch unreachable;
-    // }
-    // if (str.items.len > 1) {
-    //     _ = str.pop();
-    //     _ = str.pop();
-    // }
-    // std.debug.print("Got uint array message: {s}\n", .{str.items});
-}
-
-fn onDeinit() void {}
-
-fn sendMakeObject(seq: u32) void {
-    const alloc = std.heap.c_allocator;
-    const server_object = socket.createObject(
-        alloc,
-        manager.getObject().vtable.getClient(manager.getObject().ptr),
-        @ptrCast(@alignCast(manager.getObject().ptr)),
-        "my_object_v1",
-        seq,
-    ).?;
-    const obj = alloc.create(hw.types.Object) catch return;
-    obj.* = hw.types.Object.from(server_object);
-    object = protocol_server.MyObjectV1Object.init(alloc, obj) catch return;
-    object.sendSendMessage(alloc, "Hello object") catch return;
-    object.setSendMessage(objectSendMessage);
-    object.setSendEnum(struct {
-        fn cb(e: protocol_spec.TestProtocolV1MyEnum) void {
-            std.debug.print("Object sent enum: {}\n", .{e});
-
-            std.debug.print("Erroring out the client!\n", .{});
-
-            object.err(alloc, @intFromEnum(e), "Important error occurred!") catch return;
+                var i: usize = 0;
+                while (message.message[i] != 0) : (i += 1) {
+                    str.print(alloc, "{}, ", .{message.message[i]}) catch unreachable;
+                }
+                if (str.items.len > 1) {
+                    _ = str.pop();
+                    _ = str.pop();
+                }
+                std.debug.print("Got uint array message: {s}\n", .{str.items});
+            },
+            .make_object => |seq| {
+                const manager = self.manager orelse return;
+                const server_object = self.socket.createObject(
+                    self.alloc,
+                    manager.getObject().vtable.getClient(manager.getObject().ptr),
+                    @ptrCast(@alignCast(manager.getObject().ptr)),
+                    "my_object_v1",
+                    seq.seq,
+                ).?;
+                const obj = self.alloc.create(hw.types.Object) catch return;
+                obj.* = hw.types.Object.from(server_object);
+                self.object = protocol_server.MyObjectV1Object.init(self.alloc, protocol_server.MyObjectV1Listener.from(self), obj) catch return;
+                self.object.?.sendSendMessage(self.alloc, "Hello object") catch return;
+            },
         }
-    }.cb);
-}
+    }
 
-fn objectSendMessage(message: [*:0]const u8) void {
-    std.debug.print("Object says hello: {s}\n", .{message});
-}
+    pub fn myObjectV1Listener(self: *Self, alloc: mem.Allocator, event: protocol_server.MyObjectV1Event) void {
+        _ = alloc;
+        const obj = self.object orelse return;
+        switch (event) {
+            .send_message => |message| {
+                std.debug.print("Object says hello: {s}\n", .{message.message});
+            },
+            .send_enum => |message| {
+                std.debug.print("Object sent enum: {}\n", .{message.message});
+
+                std.debug.print("Erroring out the client!\n", .{});
+
+                obj.err(self.alloc, @intFromEnum(message.message), "Important error occurred!") catch return;
+            },
+            .destroy => {},
+        }
+    }
+};
 
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
@@ -110,10 +107,10 @@ pub fn main() !void {
     const socket_path_buf = try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{xdg_runtime_dir}, 0);
     defer alloc.free(socket_path_buf);
 
-    socket = try hw.ServerSocket.open(alloc, socket_path_buf);
-    defer socket.deinit(alloc);
+    const socket = try hw.ServerSocket.open(alloc, socket_path_buf);
+    var server = Server{ .alloc = alloc, .socket = socket };
 
-    const spec = protocol_server.TestProtocolV1Impl.init(1, bindFn);
+    const spec = protocol_server.TestProtocolV1Impl.init(1, protocol_server.TestProtocolV1Listener.from(&server));
     const pro = hw.types.server_impl.ProtocolServerImplementation.from(&spec);
     try socket.addImplementation(alloc, pro);
 
