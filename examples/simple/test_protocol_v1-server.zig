@@ -24,14 +24,14 @@ fn myManagerV1_method1(r: *Object, message: i32) callconv(.c) void {
     }
 }
 
-fn myManagerV1_method2(r: *Object, message: [*][*:0]const u8) callconv(.c) void {
+fn myManagerV1_method2(r: *Object, message: [*:null]?[*:0]const u8) callconv(.c) void {
     const self: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     if (self.listeners.send_message_array) |@"fn"| {
         @"fn"(message);
     }
 }
 
-fn myManagerV1_method3(r: *Object, message: [*]u32) callconv(.c) void {
+fn myManagerV1_method3(r: *Object, message: [*:0]u32) callconv(.c) void {
     const self: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     if (self.listeners.send_message_array_uint) |@"fn"| {
         @"fn"(message);
@@ -50,10 +50,10 @@ pub const MyManagerV1Object = struct {
     listeners: struct {
         send_message: ?*const fn ([*:0]const u8) void = null,
         send_message_fd: ?*const fn (i32) void = null,
-        send_message_array: ?*const fn ([*][*:0]const u8) void = null,
-        send_message_array_uint: ?*const fn ([*]u32) void = null,
+        send_message_array: ?*const fn ([*:null]?[*:0]const u8) void = null,
+        send_message_array_uint: ?*const fn ([*:0]u32) void = null,
         make_object: ?*const fn (u32) void = null,
-    },
+    } = .{},
 
     const Self = @This();
 
@@ -61,7 +61,6 @@ pub const MyManagerV1Object = struct {
         const self = try gpa.create(Self);
         self.* = .{
             .object = object,
-            .listeners = .{},
         };
 
         object.vtable.setData(object.ptr, self);
@@ -80,7 +79,7 @@ pub const MyManagerV1Object = struct {
         self.object.vtable.deinit(self.object.ptr);
     }
 
-    pub fn getObject(self: *Self) Object {
+    pub fn getObject(self: *Self) *Object {
         return self.object;
     }
 
@@ -112,11 +111,11 @@ pub const MyManagerV1Object = struct {
         self.listeners.send_message_fd = @"fn";
     }
 
-    pub fn setSendMessageArray(self: *Self, @"fn": *const fn ([*][*:0]const u8) void) void {
+    pub fn setSendMessageArray(self: *Self, @"fn": *const fn ([*:null]?[*:0]const u8) void) void {
         self.listeners.send_message_array = @"fn";
     }
 
-    pub fn setSendMessageArrayUint(self: *Self, @"fn": *const fn ([*]u32) void) void {
+    pub fn setSendMessageArrayUint(self: *Self, @"fn": *const fn ([*:0]u32) void) void {
         self.listeners.send_message_array_uint = @"fn";
     }
 
@@ -125,38 +124,38 @@ pub const MyManagerV1Object = struct {
     }
 };
 
-fn myObjectV1_method0(r: Object, message: [:0]const u8) void {
+fn myObjectV1_method0(r: *Object, message: [*:0]const u8) callconv(.c) void {
     const self: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     if (self.listeners.send_message) |@"fn"| {
-        @"fn"(self, message);
+        @"fn"(message);
     }
 }
 
-fn myObjectV1_method1(r: Object, message: i32) void {
+fn myObjectV1_method1(r: *Object, message: i32) callconv(.c) void {
     const self: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     if (self.listeners.send_enum) |@"fn"| {
-        @"fn"(self, message);
+        @"fn"(@enumFromInt(message));
     }
 }
 
-fn myObjectV1_method2(r: Object, message: [][:0]const u8) void {
+fn myObjectV1_method2(r: *Object) callconv(.c) void {
     const self: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     if (self.listeners.destroy) |@"fn"| {
-        @"fn"(self, message);
+        @"fn"();
     }
 }
 
 pub const MyObjectV1Object = struct {
-    object: Object,
+    object: *Object,
     listeners: struct {
-        send_message: ?*const fn (*Self, []const u8) void = null,
-        send_enum: ?*const fn (*Self, spec.TestProtocolV1MyEnum) void = null,
-        destroy: ?*const fn (*Self) void = null,
+        send_message: ?*const fn ([*:0]const u8) void = null,
+        send_enum: ?*const fn (spec.TestProtocolV1MyEnum) void = null,
+        destroy: ?*const fn () void = null,
     },
 
     const Self = @This();
 
-    pub fn init(gpa: mem.Allocator, object: Object) !Self {
+    pub fn init(gpa: mem.Allocator, object: *Object) !*Self {
         const self = try gpa.create(Self);
         self.* = .{
             .object = object,
@@ -165,14 +164,11 @@ pub const MyObjectV1Object = struct {
 
         object.vtable.setData(object.ptr, self);
 
-        object.vtable.listen(object.ptr, 0, myObjectV1_method0);
-        object.vtable.listen(object.ptr, 1, myObjectV1_method1);
-        object.vtable.listen(object.ptr, 2, myObjectV1_method2);
+        try object.vtable.listen(object.ptr, gpa, 0, @ptrCast(&myObjectV1_method0));
+        try object.vtable.listen(object.ptr, gpa, 1, @ptrCast(&myObjectV1_method1));
+        try object.vtable.listen(object.ptr, gpa, 2, @ptrCast(&myObjectV1_method2));
 
-        return .{
-            .object = object,
-            .listeners = .{},
-        };
+        return self;
     }
 
     pub fn deinit(self: *Self, gpa: mem.Allocator) Self {
@@ -184,25 +180,25 @@ pub const MyObjectV1Object = struct {
         self.object.vtable.setOnDeinit(self.object.ptr, @"fn");
     }
 
-    pub fn err(self: *Self, code: u32, message: []const u8) void {
-        self.object.vtable.err(self.object.ptr, code, message);
+    pub fn err(self: *Self, gpa: mem.Allocator, code: u32, message: [:0]const u8) !void {
+        try self.object.vtable.err(self.object.ptr, gpa, code, message);
     }
 
-    pub fn sendSendMessage(self: *Self, gpa: mem.Allocator, message: []const u8) void {
+    pub fn sendSendMessage(self: *Self, gpa: mem.Allocator, message: [:0]const u8) !void {
         var args = try Args.init(gpa, .{message});
         defer args.deinit(gpa);
-        self.object.vtable.call(self.object.ptr, 0, &args);
+        _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
-    pub fn setSendMessage(self: *Self, @"fn": *const fn (*Self, []const u8) void) void {
+    pub fn setSendMessage(self: *Self, @"fn": *const fn ([*:0]const u8) void) void {
         self.listeners.send_message = @"fn";
     }
 
-    pub fn setSendEnum(self: *Self, @"fn": *const fn (*Self, []u32) void) void {
+    pub fn setSendEnum(self: *Self, @"fn": *const fn (spec.TestProtocolV1MyEnum) void) void {
         self.listeners.send_enum = @"fn";
     }
 
-    pub fn setDeinit(self: *Self, @"fn": *const fn (*Self) void) void {
+    pub fn setDeinit(self: *Self, @"fn": *const fn () void) void {
         self.listeners.destroy = @"fn";
     }
 };

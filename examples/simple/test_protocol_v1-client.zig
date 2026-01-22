@@ -18,7 +18,7 @@ fn myManagerV1_method0(r: *Object, message: [*:0]const u8) callconv(.c) void {
     }
 }
 
-fn myManagerV1_method1(r: *Object, message: [*]u32) void {
+fn myManagerV1_method1(r: *Object, message: [*:0]u32) void {
     const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     if (object.listeners.recv_message_array_uint) |cb| {
         cb(message);
@@ -29,7 +29,7 @@ pub const MyManagerV1Object = struct {
     object: *Object,
     listeners: struct {
         send_message: ?*const fn ([*:0]const u8) void = null,
-        recv_message_array_uint: ?*const fn ([*]u32) void = null,
+        recv_message_array_uint: ?*const fn ([*:0]u32) void = null,
     } = .{},
 
     const Self = @This();

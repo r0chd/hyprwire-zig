@@ -254,11 +254,15 @@ pub fn addClient(self: *Self, gpa: mem.Allocator, fd: Fd) ?*ServerClient {
 pub fn removeClient(self: *Self, gpa: mem.Allocator, fd: Fd) bool {
     var removed: u32 = 0;
 
+    std.debug.print("haiii\n", .{});
+
     var i: usize = self.clients.items.len;
     while (i > 0) : (i -= 1) {
         const client = self.clients.items[i];
         if (client.fd == fd) {
-            self.clients.swapRemove(i);
+            std.debug.print("baiiii\n", .{});
+            var c = self.clients.swapRemove(i);
+            c.deinit();
             removed += 1;
         }
     }
@@ -366,7 +370,8 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !bool {
         while (i > 0) : (i -= 1) {
             const client = self.clients.items[i - 1];
             if (client.@"error") {
-                _ = self.clients.swapRemove(i - 1);
+                var c = self.clients.swapRemove(i - 1);
+                c.deinit();
             }
         }
         try self.recheckPollFds(gpa);
@@ -515,7 +520,8 @@ pub fn extractLoopFD(self: *Self, gpa: mem.Allocator) !i32 {
     return export_fd.raw;
 }
 
-pub fn createObject(gpa: mem.Allocator, client: ?*ServerClient, reference: ?*ServerObject, object: []const u8, seq: u32) ?*ServerObject {
+pub fn createObject(self: *Self, gpa: mem.Allocator, client: ?*ServerClient, reference: ?*ServerObject, object: []const u8, seq: u32) ?*ServerObject {
+    _ = self;
     if (client == null or reference == null) {
         return null;
     }

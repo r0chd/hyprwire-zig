@@ -86,6 +86,10 @@ pub fn serverSock(self: *Self) ?*ServerSocket {
     return null;
 }
 
+pub fn getClient(self: *Self) ?*ServerClient {
+    return self.client;
+}
+
 pub fn getData(self: *Self) ?*anyopaque {
     return self.data;
 }

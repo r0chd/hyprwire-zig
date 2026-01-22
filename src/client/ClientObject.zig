@@ -13,6 +13,7 @@ const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../message/MessageType.zig").MessageType;
 const message_parser = @import("../message/MessageParser.zig");
 const ServerSocket = @import("../server/ServerSocket.zig");
+const ServerClient = @import("../server/ServerClient.zig");
 const ClientSocket = @import("ClientSocket.zig");
 const Object = @import("../implementation/Object.zig").Object;
 const Method = types.Method;
@@ -41,6 +42,11 @@ pub fn clientSock(self: *Self) ?*ClientSocket {
 }
 
 pub fn serverSock(self: *Self) ?*ServerSocket {
+    _ = self;
+    return null;
+}
+
+pub fn getClient(self: *Self) ?*ServerClient {
     _ = self;
     return null;
 }

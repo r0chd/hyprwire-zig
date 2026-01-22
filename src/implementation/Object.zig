@@ -4,6 +4,7 @@ const types = @import("types.zig");
 
 const mem = std.mem;
 
+const ServerClient = @import("../server/ServerClient.zig");
 const ClientSocket = @import("../client/ClientSocket.zig");
 const ServerSocket = @import("../server/ServerSocket.zig");
 const Trait = @import("trait").Trait;
@@ -18,4 +19,5 @@ pub const Object = Trait(.{
     .err = fn (mem.Allocator, u32, [:0]const u8) anyerror!void,
     .deinit = fn (mem.Allocator) void,
     .setOnDeinit = fn (*const fn () void) void,
+    .getClient = fn () ?*ServerClient,
 }, null);

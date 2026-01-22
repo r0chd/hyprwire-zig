@@ -82,8 +82,6 @@ fn handleServerMessage(gpa: mem.Allocator, data: *SocketRawParsedMessage, client
 }
 
 pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage, off: usize, client: *ServerClient) !usize {
-    var fds = raw.fds;
-
     if (meta.intToEnum(MessageType, raw.data.items[off])) |message_type| {
         switch (message_type) {
             .sup => {
@@ -155,7 +153,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                 return msg.getLen();
             },
             .generic_protocol_message => {
-                var msg = messages.GenericProtocolMessage.fromBytes(gpa, raw.data.items, &fds, off) catch |err| {
+                var msg = messages.GenericProtocolMessage.fromBytes(gpa, raw.data.items, &raw.fds, off) catch |err| {
                     log.debug("client at fd {} core protocol error: malformed message recvd (generic_protocol_message)", .{client.fd.raw});
                     return err;
                 };
@@ -186,6 +184,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                         return error.ParseError;
                     };
                     defer gpa.free(parsed);
+                    log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
                 }
 
                 client.scheduled_roundtrip_seq = msg.seq;
@@ -213,8 +212,6 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage
 }
 
 pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage, off: usize, client: *ClientSocket) !usize {
-    var fds = raw.fds;
-
     if (meta.intToEnum(MessageType, raw.data.items[off])) |message_type| {
         switch (message_type) {
             .handshake_begin => {
@@ -314,7 +311,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                 return msg.getLen();
             },
             .generic_protocol_message => {
-                var msg = messages.GenericProtocolMessage.fromBytes(gpa, raw.data.items, &fds, off) catch |err| {
+                var msg = messages.GenericProtocolMessage.fromBytes(gpa, raw.data.items, &raw.fds, off) catch |err| {
                     log.err("server at fd {} core protocol error: malformed message recvd (generic_protocol_message)", .{client.fd.raw});
                     return err;
                 };
