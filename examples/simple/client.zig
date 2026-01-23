@@ -6,8 +6,8 @@ const mem = std.mem;
 const hw = @import("hyprwire");
 const types = hw.types;
 
-const proto_client = @import("test_protocol_v1-client.zig");
-const proto_spec = @import("test_protocol_v1-spec.zig");
+const proto_client = hw.proto.test_protocol_v1.client;
+const proto_spec = hw.proto.test_protocol_v1.spec;
 
 const TEST_PROTOCOL_VERSION: u32 = 1;
 
@@ -103,7 +103,7 @@ pub fn main() !void {
     defer object.deinit(alloc);
 
     try object.sendSendMessage(alloc, "Hello on object");
-    try object.sendSendEnum(alloc, proto_spec.MyObjectV1Spec.MyEnum.world);
+    try object.sendSendEnum(alloc, proto_spec.MyEnum.world);
 
     std.debug.print("Sent hello!\n", .{});
 

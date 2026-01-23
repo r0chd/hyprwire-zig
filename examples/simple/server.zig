@@ -1,6 +1,6 @@
 const std = @import("std");
 const hw = @import("hyprwire");
-const protocol_server = @import("test_protocol_v1-server.zig");
+const protocol_server = hw.proto.test_protocol_v1.server;
 
 const mem = std.mem;
 const posix = std.posix;

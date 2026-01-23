@@ -79,6 +79,14 @@ pub fn main() !void {
             log.err("Missing proto path argument\n", .{});
             process.exit(1);
         },
+        error.MissingInputPath => {
+            log.err("Missing input path argument\n", .{});
+            process.exit(1);
+        },
+        error.MissingOutputPath => {
+            log.err("Missing output path argument\n", .{});
+            process.exit(1);
+        },
     };
 
     var input_file = try fs.cwd().openFile(cli.protopath, .{});
@@ -93,11 +101,10 @@ pub fn main() !void {
 
     const proto_data = try ProtoData.init(alloc, cli.protopath, &document);
 
-    switch (cli.role) {
-        .client => try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .client),
-        .server => try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .server),
-    }
+    try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .client);
+    try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .server);
     try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .spec);
+    try writeWrapper(alloc, cli.outpath, proto_data.name_original);
 }
 
 const GeneratedKind = enum {
@@ -113,10 +120,10 @@ fn writeGenerated(
     document: *const Document,
     kind: GeneratedKind,
 ) !void {
-    const suffix = switch (kind) {
-        .client => "-client.zig",
-        .server => "-server.zig",
-        .spec => "-spec.zig",
+    const component = switch (kind) {
+        .client => "client",
+        .server => "server",
+        .spec => "spec",
     };
 
     const source = switch (kind) {
@@ -125,8 +132,11 @@ fn writeGenerated(
         .spec => try Scanner.generateSpecCode(alloc, document),
     };
 
-    const filename = try std.fmt.allocPrint(alloc, "{s}{s}", .{ base_name, suffix });
+    const filename = try std.fmt.allocPrint(alloc, "{s}-{s}.zig", .{ base_name, component });
+    defer alloc.free(filename);
+
     const file_path = try std.fs.path.join(alloc, &.{ outpath, filename });
+    defer alloc.free(file_path);
 
     if (std.fs.path.dirname(file_path)) |dir| {
         try std.fs.cwd().makePath(dir);
@@ -136,4 +146,72 @@ fn writeGenerated(
     defer file.close();
 
     _ = try file.write(source);
+}
+
+fn writeSingleGenerated(
+    alloc: std.mem.Allocator,
+    outpath: []const u8,
+    base_name: []const u8,
+    document: *const Document,
+    kind: GeneratedKind,
+) !void {
+    _ = base_name; // unused parameter
+    const source = switch (kind) {
+        .client => try Scanner.generateClientCode(alloc, document),
+        .server => try Scanner.generateServerCode(alloc, document),
+        .spec => try Scanner.generateSpecCode(alloc, document),
+    };
+
+    var file = try std.fs.cwd().createFile(outpath, .{ .truncate = true });
+    defer file.close();
+
+    _ = try file.write(source);
+}
+
+fn appendToGeneratedFile(
+    alloc: std.mem.Allocator,
+    outpath: []const u8,
+    base_name: []const u8,
+    document: *const Document,
+    kind: GeneratedKind,
+) !void {
+    _ = base_name; // unused parameter
+    const source = switch (kind) {
+        .client => try Scanner.generateClientCode(alloc, document),
+        .server => try Scanner.generateServerCode(alloc, document),
+        .spec => try Scanner.generateSpecCode(alloc, document),
+    };
+
+    var file = try std.fs.cwd().openFile(outpath, .{ .mode = .write_only });
+    defer file.close();
+
+    _ = try file.write(source);
+}
+
+fn writeWrapper(
+    alloc: std.mem.Allocator,
+    outpath: []const u8,
+    base_name: []const u8,
+) !void {
+    const content = try std.fmt.allocPrint(alloc,
+        \\pub const server = @import("{s}-server.zig");
+        \\pub const client = @import("{s}-client.zig");
+        \\pub const spec = @import("{s}-spec.zig");
+    , .{ base_name, base_name, base_name });
+    defer alloc.free(content);
+
+    const filename = try std.fmt.allocPrint(alloc, "{s}.zig", .{base_name});
+    defer alloc.free(filename);
+
+    const file_path = try std.fs.path.join(alloc, &.{ outpath, filename });
+    defer alloc.free(file_path);
+
+    if (std.fs.path.dirname(file_path)) |dir| {
+        try std.fs.cwd().makePath(dir);
+    }
+
+    var file = try std.fs.cwd().createFile(file_path, .{ .truncate = true });
+    defer file.close();
+
+    _ = try file.write(content);
 }

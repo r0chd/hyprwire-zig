@@ -1,30 +1,22 @@
 const std = @import("std");
-const hyprwire = @import("hyprwire");
 
 const meta = std.meta;
 
 const Arguments = enum {
     @"-v",
     @"--version",
-    @"-c",
-    @"--client",
-};
-
-const Role = enum {
-    client,
-    server,
+    @"-o",
+    @"-i",
 };
 
 protopath: [:0]const u8,
 outpath: [:0]const u8,
-role: Role,
 
 const Self = @This();
 
 pub fn init() !Self {
     var protopath: ?[:0]const u8 = null;
     var outpath: ?[:0]const u8 = null;
-    var role: Role = .server;
 
     var args = std.process.args();
     var index: u8 = 0;
@@ -34,10 +26,15 @@ pub fn init() !Self {
         if (meta.stringToEnum(Arguments, arg)) |argument| {
             switch (argument) {
                 .@"--version", .@"-v" => {
-                    std.debug.print("{s}", .{hyprwire.version});
+                    std.debug.print("hyprwire scanner\n", .{});
                     std.process.exit(0);
                 },
-                .@"--client", .@"-c" => role = .client,
+                .@"-o" => {
+                    outpath = args.next() orelse return error.MissingOutputPath;
+                },
+                .@"-i" => {
+                    protopath = args.next() orelse return error.MissingInputPath;
+                },
             }
         } else {
             if (protopath == null) {
@@ -53,6 +50,5 @@ pub fn init() !Self {
     return Self{
         .protopath = protopath orelse return error.MissingProtoPath,
         .outpath = outpath orelse return error.MissingOutPath,
-        .role = role,
     };
 }
