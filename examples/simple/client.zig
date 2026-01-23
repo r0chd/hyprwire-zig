@@ -1,20 +1,20 @@
 const std = @import("std");
-const hw = @import("hyprwire");
-const proto_client = @import("test_protocol_v1-client.zig");
-const proto_spec = @import("test_protocol_v1-spec.zig");
-
 const posix = std.posix;
 const fmt = std.fmt;
 const mem = std.mem;
 
-const ProtocolClientImplementation = hw.types.client_impl.ProtocolClientImplementation;
+const hw = @import("hyprwire");
+const types = hw.types;
+
+const proto_client = @import("test_protocol_v1-client.zig");
+const proto_spec = @import("test_protocol_v1-spec.zig");
 
 const TEST_PROTOCOL_VERSION: u32 = 1;
 
 const Client = struct {
     const Self = @This();
 
-    pub fn myManagerV1Listener(self: *Self, alloc: mem.Allocator, event: proto_client.MyManagerV1Event) void {
+    pub fn myManagerV1Listener(self: *Self, alloc: mem.Allocator, event: proto_client.MyManagerV1Object.Event) void {
         _ = alloc;
         _ = self;
         switch (event) {
@@ -27,7 +27,7 @@ const Client = struct {
         }
     }
 
-    pub fn myObjectV1Listener(self: *Self, alloc: mem.Allocator, event: proto_client.MyObjectV1Event) void {
+    pub fn myObjectV1Listener(self: *Self, alloc: mem.Allocator, event: proto_client.MyObjectV1Object.Event) void {
         _ = alloc;
         _ = self;
         switch (event) {
@@ -58,7 +58,7 @@ pub fn main() !void {
     defer socket.deinit(alloc);
 
     var impl = proto_client.TestProtocolV1Impl.init(1);
-    try socket.addImplementation(alloc, ProtocolClientImplementation.from(&impl));
+    try socket.addImplementation(alloc, types.client.ProtocolImplementation.from(&impl));
 
     try socket.waitForHandshake(alloc);
 
@@ -74,7 +74,7 @@ pub fn main() !void {
 
     var obj = try socket.bindProtocol(alloc, protocol, TEST_PROTOCOL_VERSION);
     defer obj.vtable.deinit(obj.ptr, alloc);
-    var manager = try proto_client.MyManagerV1Object.init(alloc, proto_client.MyManagerV1Listener.from(&client), &obj);
+    var manager = try proto_client.MyManagerV1Object.init(alloc, proto_client.MyManagerV1Object.Listener.from(&client), &obj);
     defer manager.deinit(alloc);
 
     std.debug.print("Bound!\n", .{});
@@ -99,11 +99,11 @@ pub fn main() !void {
 
     var object_arg = manager.sendMakeObject(alloc).?;
     defer object_arg.vtable.deinit(object_arg.ptr, alloc);
-    var object = try proto_client.MyObjectV1Object.init(alloc, proto_client.MyObjectV1Listener.from(&client), &object_arg);
+    var object = try proto_client.MyObjectV1Object.init(alloc, proto_client.MyObjectV1Object.Listener.from(&client), &object_arg);
     defer object.deinit(alloc);
 
     try object.sendSendMessage(alloc, "Hello on object");
-    try object.sendSendEnum(alloc, proto_spec.TestProtocolV1MyEnum.world);
+    try object.sendSendEnum(alloc, proto_spec.MyObjectV1Spec.MyEnum.world);
 
     std.debug.print("Sent hello!\n", .{});
 

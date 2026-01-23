@@ -1,27 +1,25 @@
 const std = @import("std");
-const types = @import("../implementation/types.zig");
-const message_parser = @import("../message/MessageParser.zig");
-const root = @import("../root.zig");
-const helpers = @import("helpers");
-
-const Message = @import("../message/messages/root.zig").Message;
-const ServerObject = @import("ServerObject.zig");
-const ServerClient = @import("ServerClient.zig");
-const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
-const FatalError = @import("../message/messages/FatalProtocolError.zig");
-const RoundtripDone = @import("../message/messages/RoundtripDone.zig");
-
-const ProtocolServerImplementation = types.server_impl.ProtocolServerImplementation;
-const MessageParsingResult = message_parser.MessageParsingResult;
-const Fd = helpers.Fd;
-
-const isTrace = helpers.isTrace;
 const mem = std.mem;
 const posix = std.posix;
 const fs = std.fs;
-const log = std.log.scoped(.hw);
-const steadyMillis = root.steadyMillis;
 
+const helpers = @import("helpers");
+const Fd = helpers.Fd;
+const isTrace = helpers.isTrace;
+
+const types = @import("../implementation/types.zig");
+const ProtocolServerImplementation = types.server.ProtocolImplementation;
+const message_parser = @import("../message/MessageParser.zig");
+const FatalError = @import("../message/messages/FatalProtocolError.zig");
+const Message = @import("../message/messages/root.zig").Message;
+const RoundtripDone = @import("../message/messages/RoundtripDone.zig");
+const root = @import("../root.zig");
+const steadyMillis = root.steadyMillis;
+const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
+const ServerClient = @import("ServerClient.zig");
+const ServerObject = @import("ServerObject.zig");
+
+const log = std.log.scoped(.hw);
 const Self = @This();
 
 fd: ?Fd = null,

@@ -64,9 +64,7 @@ const ProtoData = struct {
 };
 
 pub fn main() !void {
-    var arena_state: heap.ArenaAllocator = .init(heap.page_allocator);
-    defer arena_state.deinit();
-    const alloc = arena_state.allocator();
+    const alloc = heap.page_allocator;
 
     const cli = Cli.init() catch |err| switch (err) {
         error.TooManyArguments => {
@@ -89,7 +87,6 @@ pub fn main() !void {
     var input_buf: [4096]u8 = undefined;
     var input_reader = input_file.reader(&input_buf);
     var streaming_reader: xml.Reader.Streaming = .init(alloc, &input_reader.interface, .{});
-    defer streaming_reader.deinit();
     const reader = &streaming_reader.interface;
 
     const document = try Document.parse(alloc, reader);
@@ -128,13 +125,8 @@ fn writeGenerated(
         .spec => try Scanner.generateSpecCode(alloc, document),
     };
 
-    defer alloc.free(source);
-
     const filename = try std.fmt.allocPrint(alloc, "{s}{s}", .{ base_name, suffix });
-    defer alloc.free(filename);
-
     const file_path = try std.fs.path.join(alloc, &.{ outpath, filename });
-    defer alloc.free(file_path);
 
     if (std.fs.path.dirname(file_path)) |dir| {
         try std.fs.cwd().makePath(dir);

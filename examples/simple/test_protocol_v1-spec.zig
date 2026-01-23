@@ -1,45 +1,31 @@
 const std = @import("std");
-const types = @import("hyprwire").types;
-const MessageMagic = @import("hyprwire").MessageMagic;
 
-const mem = std.mem;
-
-const Method = types.Method;
-const ProtocolObjectSpec = types.ProtocolObjectSpec;
-
-pub const TestProtocolV1MyEnum = enum(u32) {
-    hello = 0,
-    world = 4,
-};
-
-pub const TestProtocolV1MyErrorEnum = enum(u32) {
-    oh_no = 0,
-    error_important = 1,
-};
+const hyprwire = @import("hyprwire");
+const types = hyprwire.types;
 
 pub const MyManagerV1Spec = struct {
-    c2s_methods: []const Method = &.{
+    c2s_methods: []const types.Method = &.{
         .{
             .idx = 0,
-            .params = &[_]u8{@intFromEnum(MessageMagic.type_varchar)},
+            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_varchar)},
             .returns_type = "",
             .since = 0,
         },
         .{
             .idx = 1,
-            .params = &[_]u8{@intFromEnum(MessageMagic.type_fd)},
+            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_fd)},
             .returns_type = "",
             .since = 0,
         },
         .{
             .idx = 2,
-            .params = &[_]u8{ @intFromEnum(MessageMagic.type_array), @intFromEnum(MessageMagic.type_varchar) },
+            .params = &[_]u8{ @intFromEnum(hyprwire.MessageMagic.type_array), @intFromEnum(hyprwire.MessageMagic.type_varchar) },
             .returns_type = "",
             .since = 0,
         },
         .{
             .idx = 3,
-            .params = &[_]u8{ @intFromEnum(MessageMagic.type_array), @intFromEnum(MessageMagic.type_uint) },
+            .params = &[_]u8{ @intFromEnum(hyprwire.MessageMagic.type_array), @intFromEnum(hyprwire.MessageMagic.type_uint) },
             .returns_type = "",
             .since = 0,
         },
@@ -51,15 +37,15 @@ pub const MyManagerV1Spec = struct {
         },
     },
 
-    s2c_methods: []const Method = &.{
+    s2c_methods: []const types.Method = &.{
         .{
             .idx = 0,
-            .params = &[_]u8{@intFromEnum(MessageMagic.type_varchar)},
+            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_varchar)},
             .since = 0,
         },
         .{
             .idx = 1,
-            .params = &[_]u8{ @intFromEnum(MessageMagic.type_array), @intFromEnum(MessageMagic.type_uint) },
+            .params = &[_]u8{ @intFromEnum(hyprwire.MessageMagic.type_array), @intFromEnum(hyprwire.MessageMagic.type_uint) },
             .since = 0,
         },
     },
@@ -75,26 +61,36 @@ pub const MyManagerV1Spec = struct {
         return "my_manager_v1";
     }
 
-    pub fn c2s(self: *const Self) []const Method {
+    pub fn c2s(self: *const Self) []const types.Method {
         return self.c2s_methods;
     }
 
-    pub fn s2c(self: *const Self) []const Method {
+    pub fn s2c(self: *const Self) []const types.Method {
         return self.s2c_methods;
     }
 };
 
 pub const MyObjectV1Spec = struct {
-    c2s_methods: []const Method = &.{
+    pub const MyEnum = enum(u32) {
+        hello = 0,
+        world = 4,
+    };
+
+    pub const MyErrorEnum = enum(u32) {
+        oh_no = 0,
+        error_important = 1,
+    };
+
+    c2s_methods: []const types.Method = &.{
         .{
             .idx = 0,
-            .params = &[_]u8{@intFromEnum(MessageMagic.type_varchar)},
+            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_varchar)},
             .returns_type = "",
             .since = 0,
         },
         .{
             .idx = 1,
-            .params = &[_]u8{@intFromEnum(MessageMagic.type_uint)},
+            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_uint)},
             .returns_type = "",
             .since = 0,
         },
@@ -106,30 +102,26 @@ pub const MyObjectV1Spec = struct {
         },
     },
 
-    s2c_methods: []const Method = &.{
+    s2c_methods: []const types.Method = &.{
         .{
             .idx = 0,
-            .params = &[_]u8{@intFromEnum(MessageMagic.type_varchar)},
+            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_varchar)},
             .since = 0,
         },
     },
 
     const Self = @This();
 
-    pub fn init() Self {
-        return .{};
-    }
-
     pub fn objectName(self: *Self) []const u8 {
         _ = self;
         return "my_object_v1";
     }
 
-    pub fn c2s(self: *const Self) []const Method {
+    pub fn c2s(self: *const Self) []const types.Method {
         return self.c2s_methods;
     }
 
-    pub fn s2c(self: *const Self) []const Method {
+    pub fn s2c(self: *const Self) []const types.Method {
         return self.s2c_methods;
     }
 };
@@ -139,10 +131,6 @@ pub const TestProtocolV1ProtocolSpec = struct {
     object: MyObjectV1Spec = .{},
 
     const Self = @This();
-
-    pub fn init() Self {
-        return .{};
-    }
 
     pub fn specName(self: *Self) []const u8 {
         _ = self;
@@ -154,12 +142,12 @@ pub const TestProtocolV1ProtocolSpec = struct {
         return 1;
     }
 
-    pub fn objects(self: *Self) []const ProtocolObjectSpec {
+    pub fn objects(self: *Self) []const types.ProtocolObjectSpec {
         _ = self;
         return protocol_objects[0..];
     }
 
-    pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
         _ = gpa;
         _ = self;
     }
@@ -167,7 +155,7 @@ pub const TestProtocolV1ProtocolSpec = struct {
 
 pub const protocol = TestProtocolV1ProtocolSpec{};
 
-pub const protocol_objects: [2]ProtocolObjectSpec = .{
-    ProtocolObjectSpec.from(&protocol.manager),
-    ProtocolObjectSpec.from(&protocol.object),
+pub const protocol_objects: [2]types.ProtocolObjectSpec = .{
+    types.ProtocolObjectSpec.from(&protocol.manager),
+    types.ProtocolObjectSpec.from(&protocol.object),
 };

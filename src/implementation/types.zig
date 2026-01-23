@@ -5,8 +5,8 @@ const mem = std.mem;
 
 pub const WireObject = @import("WireObject.zig").WireObject;
 pub const Object = @import("Object.zig").Object;
-pub const server_impl = @import("server_impl.zig");
-pub const client_impl = @import("client_impl.zig");
+pub const server = @import("server_impl.zig");
+pub const client = @import("client_impl.zig");
 pub const called = @import("WireObject.zig").called;
 
 pub const Method = struct {

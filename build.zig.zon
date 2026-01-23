@@ -8,10 +8,6 @@
             .url = "git+https://github.com/ianprime0509/zig-xml#8874de5b846f4e3e806a062cd11a01b2bb90fc7a",
             .hash = "xml-0.2.0-ZTbP3wE6AgCsnyZut_plzxi6WB2tzzh3kFRBOp3AL7n9",
         },
-        .interface = .{
-            .url = "git+https://forgejo.r0chd.pl/r0chd/zig-interface#cf84db0ffd2d6a15396b0f2f05ee67c02a8dbf3f",
-            .hash = "interface-0.0.2-GFlWJ86bAQAUIh_LtjrJReJcFyj-hFbod1hVIneSNGrN",
-        },
         .trait = .{
             .url = "git+https://forgejo.r0chd.pl/r0chd/zig-interface#2a42c17f1b7af03d0ffbad8958fedc61bd6f7a5c",
             .hash = "trait-0.0.2-87cOXjWsAQDe4J4lXNXoHWRQYSI2gV-mNZdKXuxY9wRP",

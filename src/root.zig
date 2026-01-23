@@ -15,15 +15,12 @@ pub const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 pub const Trait = @import("trait").Trait;
 pub const FallbackAllocator = @import("helpers").FallbackAllocator;
 
-const ServerObject = @import("server/ServerObject.zig");
-const ClientObject = @import("client/ClientObject.zig");
-
 var start: ?time.Instant = null;
 
-pub fn steadyMillis() u64 {
+pub fn steadyMillis() f32 {
     const now = time.Instant.now() catch return 0;
     if (start) |s| {
-        return now.since(s);
+        return @as(f32, @floatFromInt(now.since(s))) / 1_000_000.0;
     } else {
         start = now;
         return 0;

@@ -322,7 +322,7 @@ test {
         var self = Self.init(client);
 
         const obj = Object.from(&self);
-        defer obj.vtable.deinit(obj.ptr);
+        defer obj.vtable.deinit(obj.ptr, alloc);
         try obj.vtable.err(obj.ptr, alloc, 1, "test");
 
         self.errd();

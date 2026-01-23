@@ -1,7 +1,4 @@
 const std = @import("std");
-
-const fs = std.fs;
-
 const Build = std.Build;
 
 pub const Options = struct {};

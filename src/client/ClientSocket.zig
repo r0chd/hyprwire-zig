@@ -10,7 +10,7 @@ const Message = messages.Message;
 const Object = types.Object;
 const WireObject = types.WireObject;
 const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
-const ProtocolClientImplementation = types.client_impl.ProtocolClientImplementation;
+const ProtocolImplementation = types.client.ProtocolImplementation;
 const ProtocolSpec = types.ProtocolSpec;
 const Fd = helpers.Fd;
 const ServerSpec = @import("ServerSpec.zig");
@@ -27,7 +27,7 @@ const steadyMillis = @import("../root.zig").steadyMillis;
 const HANDSHAKE_MAX_MS: i64 = 5000;
 
 fd: Fd,
-impls: std.ArrayList(ProtocolClientImplementation) = .empty,
+impls: std.ArrayList(ProtocolImplementation) = .empty,
 server_specs: std.ArrayList(ProtocolSpec) = .empty,
 pollfds: std.ArrayList(posix.pollfd) = .empty,
 objects: std.ArrayList(*ClientObject) = .empty,
@@ -123,7 +123,7 @@ pub fn attemptFromFd(self: *Self, gpa: mem.Allocator, raw_fd: i32) !void {
     try self.sendMessage(gpa, Message.from(&message));
 }
 
-pub fn addImplementation(self: *Self, gpa: mem.Allocator, x: ProtocolClientImplementation) !void {
+pub fn addImplementation(self: *Self, gpa: mem.Allocator, x: ProtocolImplementation) !void {
     try self.impls.append(gpa, x);
 }
 

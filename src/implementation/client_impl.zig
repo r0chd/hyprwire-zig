@@ -4,12 +4,12 @@ const ProtocolSpec = @import("types.zig").ProtocolSpec;
 const Trait = @import("trait").Trait;
 const mem = std.mem;
 
-pub const ClientObjectImplementation = struct {
+pub const ObjectImplementation = struct {
     object_name: []const u8 = "",
     version: u32 = 0,
 };
 
-pub const ProtocolClientImplementation = Trait(.{
+pub const ProtocolImplementation = Trait(.{
     .protocol = fn () ProtocolSpec,
-    .implementation = fn (mem.Allocator) anyerror![]*ClientObjectImplementation,
+    .implementation = fn (mem.Allocator) anyerror![]*ObjectImplementation,
 }, null);

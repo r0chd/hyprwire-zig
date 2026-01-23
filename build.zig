@@ -24,10 +24,6 @@ pub fn buildHelpers(b: *std.Build, target: std.Build.ResolvedTarget) *std.Build.
 }
 
 pub fn buildExamples(b: *std.Build, target: std.Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, hyprwire: *std.Build.Module) void {
-    // var scanner = Scanner.init(b, .{});
-    // scanner.addCustomProtocol(b.path("./examples/simple/protocol-v1.xml"));
-    // scanner.generate("my_manager_v1", 1);
-
     // Build simple-client
     const simple_client = b.addExecutable(.{
         .name = "simple-client",
@@ -110,8 +106,8 @@ pub fn build(b: *std.Build) void {
         }),
     });
 
-    scanner.root_module.addImport("xml", xml.module("xml"));
     scanner.root_module.addImport("hyprwire", hyprwire);
+    scanner.root_module.addImport("xml", xml.module("xml"));
     scanner.root_module.linkSystemLibrary("ffi", .{});
 
     b.installArtifact(scanner);

@@ -1,13 +1,10 @@
 const std = @import("std");
-const message_parser = @import("../MessageParser.zig");
-
 const mem = std.mem;
 
-const MessageType = @import("../MessageType.zig").MessageType;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
+const message_parser = @import("../MessageParser.zig");
+const MessageType = @import("../MessageType.zig").MessageType;
 const Message = @import("root.zig").Message;
-const helpers = @import("helpers");
-const isTrace = helpers.isTrace;
 
 pub fn getFds(self: *const Self) []const i32 {
     _ = self;

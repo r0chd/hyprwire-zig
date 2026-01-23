@@ -1,12 +1,12 @@
 const std = @import("std");
-const helpers = @import("helpers");
-const Object = @import("Object.zig").Object;
-const ProtocolSpec = @import("types.zig").ProtocolSpec;
-const Trait = @import("trait").Trait;
-
 const mem = std.mem;
 
-pub const ServerObjectImplementation = struct {
+const Trait = @import("trait").Trait;
+
+const Object = @import("Object.zig").Object;
+const ProtocolSpec = @import("types.zig").ProtocolSpec;
+
+pub const ObjectImplementation = struct {
     context: ?*anyopaque = null,
     object_name: []const u8 = "",
     version: u32 = 0,
@@ -15,7 +15,7 @@ pub const ServerObjectImplementation = struct {
     const Self = @This();
 };
 
-pub const ProtocolServerImplementation = Trait(.{
+pub const ProtocolImplementation = Trait(.{
     .protocol = fn () ProtocolSpec,
-    .implementation = fn (mem.Allocator) anyerror![]*ServerObjectImplementation,
+    .implementation = fn (mem.Allocator) anyerror![]*ObjectImplementation,
 }, null);

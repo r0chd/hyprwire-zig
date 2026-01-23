@@ -1,7 +1,6 @@
 const std = @import("std");
 const hw = @import("hyprwire");
 const protocol_server = @import("test_protocol_v1-server.zig");
-const protocol_spec = @import("test_protocol_v1-spec.zig");
 
 const mem = std.mem;
 const posix = std.posix;
@@ -19,13 +18,13 @@ const Server = struct {
     pub fn bind(self: *Self, object: *hw.types.Object) void {
         std.debug.print("Object bound XD\n", .{});
 
-        var manager = protocol_server.MyManagerV1Object.init(self.alloc, protocol_server.MyManagerV1Listener.from(self), object) catch return;
+        var manager = protocol_server.MyManagerV1Object.init(self.alloc, protocol_server.MyManagerV1Object.Listener.from(self), object) catch return;
         manager.sendSendMessage(self.alloc, "Hello object") catch {};
 
         self.manager = manager;
     }
 
-    pub fn myManagerV1Listener(self: *Self, alloc: mem.Allocator, event: protocol_server.MyManagerV1Event) void {
+    pub fn myManagerV1Listener(self: *Self, alloc: mem.Allocator, event: protocol_server.MyManagerV1Object.Event) void {
         switch (event) {
             .send_message => |message| {
                 std.debug.print("Recvd message: {s}\n", .{message.message});
@@ -72,14 +71,14 @@ const Server = struct {
 
                 self.object_handle = hw.types.Object.from(server_object);
 
-                var object = protocol_server.MyObjectV1Object.init(self.alloc, protocol_server.MyObjectV1Listener.from(self), &self.object_handle.?) catch return;
+                var object = protocol_server.MyObjectV1Object.init(self.alloc, protocol_server.MyObjectV1Object.Listener.from(self), &self.object_handle.?) catch return;
                 object.sendSendMessage(self.alloc, "Hello object") catch return;
                 self.object = object;
             },
         }
     }
 
-    pub fn myObjectV1Listener(self: *Self, alloc: mem.Allocator, event: protocol_server.MyObjectV1Event) void {
+    pub fn myObjectV1Listener(self: *Self, alloc: mem.Allocator, event: protocol_server.MyObjectV1Object.Event) void {
         _ = alloc;
         const obj = self.object orelse return;
         switch (event) {
@@ -126,7 +125,7 @@ pub fn main() !void {
     defer server.deinit();
 
     const spec = protocol_server.TestProtocolV1Impl.init(1, protocol_server.TestProtocolV1Listener.from(&server));
-    const pro = hw.types.server_impl.ProtocolServerImplementation.from(&spec);
+    const pro = hw.types.server.ProtocolImplementation.from(&spec);
     try socket.addImplementation(alloc, pro);
 
     while (socket.dispatchEvents(alloc, true) catch false) {}
