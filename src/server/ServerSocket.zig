@@ -71,6 +71,11 @@ fn init() !Self {
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+    for (self.clients.items) |client| {
+        client.deinit(gpa);
+        gpa.destroy(client);
+    }
+    self.clients.deinit(gpa);
     self.impls.deinit(gpa);
     if (self.poll_thread) |*thread| {
         self.thread_can_poll = false;
@@ -81,7 +86,6 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
         }
         thread.join();
     }
-
     if (self.export_fd) |*fd| fd.close();
     if (self.export_write_fd) |*fd| fd.close();
     self.exit_fd.close();
@@ -262,7 +266,8 @@ pub fn removeClient(self: *Self, gpa: mem.Allocator, fd: Fd) bool {
         if (client.fd == fd) {
             std.debug.print("baiiii\n", .{});
             var c = self.clients.swapRemove(i);
-            c.deinit();
+            c.deinit(gpa);
+            gpa.destroy(c);
             removed += 1;
         }
     }
@@ -317,15 +322,14 @@ pub fn dispatchNewConnections(self: *Self, gpa: mem.Allocator) bool {
     if ((self.pollfds.items[0].revents & posix.POLL.IN) == 0) return false;
 
     const client_fd = posix.accept(fd.raw, null, null, 0) catch return false;
-    const client_init = ServerClient.init(client_fd) catch {
-        posix.close(client_fd);
-        return false;
-    };
     const x = gpa.create(ServerClient) catch {
         posix.close(client_fd);
         return false;
     };
-    x.* = client_init;
+    x.* = ServerClient.init(client_fd) catch {
+        posix.close(client_fd);
+        return false;
+    };
     x.server = self;
     x.self = x;
 
@@ -371,7 +375,8 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !bool {
             const client = self.clients.items[i - 1];
             if (client.@"error") {
                 var c = self.clients.swapRemove(i - 1);
-                c.deinit();
+                c.deinit(gpa);
+                gpa.destroy(c);
             }
         }
         try self.recheckPollFds(gpa);
@@ -383,12 +388,14 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator) !bool {
 pub fn dispatchClient(self: *Self, gpa: mem.Allocator, client: *ServerClient) !void {
     _ = self;
     var data = try SocketRawParsedMessage.fromFd(gpa, client.fd.raw);
+    defer data.deinit(gpa);
     if (data.bad) {
         var fatal_msg = FatalError.init(gpa, 0, 0, "fatal: invalid message on wire") catch |err| {
             log.err("Failed to create fatal error message: {}", .{err});
             client.@"error" = true;
             return;
         };
+        defer fatal_msg.deinit(gpa);
         client.sendMessage(gpa, Message.from(&fatal_msg));
         client.@"error" = true;
         return;

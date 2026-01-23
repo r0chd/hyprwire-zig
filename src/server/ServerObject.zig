@@ -118,6 +118,7 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
         log.debug("[{}] destroying object {}", .{ fd, self.id });
     }
 
+    gpa.free(self.protocol_name);
     self.listeners.deinit(gpa);
     if (self.on_deinit) |onDeinit| {
         onDeinit();

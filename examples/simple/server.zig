@@ -12,6 +12,7 @@ const Server = struct {
     socket: *hw.ServerSocket,
     manager: ?*protocol_server.MyManagerV1Object = null,
     object: ?*protocol_server.MyObjectV1Object = null,
+    object_handle: ?hw.types.Object = null,
 
     const Self = @This();
 
@@ -68,10 +69,12 @@ const Server = struct {
                     "my_object_v1",
                     seq.seq,
                 ).?;
-                const obj = self.alloc.create(hw.types.Object) catch return;
-                obj.* = hw.types.Object.from(server_object);
-                self.object = protocol_server.MyObjectV1Object.init(self.alloc, protocol_server.MyObjectV1Listener.from(self), obj) catch return;
-                self.object.?.sendSendMessage(self.alloc, "Hello object") catch return;
+
+                self.object_handle = hw.types.Object.from(server_object);
+
+                var object = protocol_server.MyObjectV1Object.init(self.alloc, protocol_server.MyObjectV1Listener.from(self), &self.object_handle.?) catch return;
+                object.sendSendMessage(self.alloc, "Hello object") catch return;
+                self.object = object;
             },
         }
     }
@@ -93,6 +96,17 @@ const Server = struct {
             .destroy => {},
         }
     }
+
+    pub fn deinit(self: *Self) void {
+        if (self.manager) |manager| {
+            self.alloc.destroy(manager.object);
+            manager.deinit(self.alloc);
+        }
+        if (self.object) |object| {
+            object.deinit(self.alloc);
+        }
+        self.socket.deinit(self.alloc);
+    }
 };
 
 pub fn main() !void {
@@ -109,6 +123,7 @@ pub fn main() !void {
 
     const socket = try hw.ServerSocket.open(alloc, socket_path_buf);
     var server = Server{ .alloc = alloc, .socket = socket };
+    defer server.deinit();
 
     const spec = protocol_server.TestProtocolV1Impl.init(1, protocol_server.TestProtocolV1Listener.from(&server));
     const pro = hw.types.server_impl.ProtocolServerImplementation.from(&spec);

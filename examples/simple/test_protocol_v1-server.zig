@@ -157,7 +157,6 @@ pub const MyManagerV1Object = struct {
     pub fn deinit(self: *Self, gpa: mem.Allocator) void {
         self.arena.deinit();
         gpa.destroy(self);
-        self.object.vtable.deinit(self.object.ptr);
     }
 
     pub fn getObject(self: *Self) *Object {
@@ -281,7 +280,6 @@ pub const MyObjectV1Object = struct {
     pub fn deinit(self: *Self, gpa: mem.Allocator) void {
         self.arena.deinit();
         gpa.destroy(self);
-        self.object.vtable.deinit(self.object.ptr);
     }
 
     pub fn setOnDeinit(self: *Self, @"fn": *const fn (*Self) void) void {

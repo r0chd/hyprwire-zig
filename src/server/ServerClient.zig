@@ -43,10 +43,16 @@ pub fn init(raw_fd: i32) !Self {
     };
 }
 
-pub fn deinit(self: *Self) void {
+pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     if (isTrace()) {
         log.debug("[{}] destroying client", .{self.fd.raw});
     }
+    for (self.objects.items) |object| {
+        object.deinit(gpa);
+        gpa.destroy(object);
+    }
+    self.objects.deinit(gpa);
+    self.fd.close();
 }
 
 pub fn dispatchFirstPoll(self: *Self) void {

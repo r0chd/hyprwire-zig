@@ -102,6 +102,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                 client.dispatchFirstPoll();
                 const versions = [_]u32{1};
                 var msg = try messages.HandshakeBegin.init(gpa, &versions);
+                defer msg.deinit(gpa);
                 client.sendMessage(gpa, Message.from(&msg));
                 return hello_msg.getLen();
             },
@@ -123,6 +124,12 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                 }
 
                 var protocol_names: std.ArrayList([:0]const u8) = try .initCapacity(gpa, client.server.?.impls.items.len);
+                defer {
+                    for (protocol_names.items) |name| {
+                        gpa.free(name);
+                    }
+                    protocol_names.deinit(gpa);
+                }
                 for (client.server.?.impls.items) |impl| {
                     var protocol = impl.vtable.protocol(impl.ptr);
                     protocol_names.appendAssumeCapacity(try fmt.allocPrintSentinel(gpa, "{s}@{}", .{ protocol.vtable.specName(protocol.ptr), protocol.vtable.specVer(protocol.ptr) }, 0));
@@ -138,6 +145,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage
                     log.debug("client at fd {} core protocol error: malformed message recvd (bind_protocol)", .{client.fd.raw});
                     return err;
                 };
+                defer msg.deinit(gpa);
 
                 if (isTrace()) {
                     const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
