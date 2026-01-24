@@ -137,7 +137,8 @@ fn buildExamples(b: *Build, target: Build.ResolvedTarget, optimize: std.builtin.
     const scanner = Scanner.init(b);
     scanner.addCustomProtocol(b.path("./examples/simple/protocol-v1.xml"));
     scanner.generate("test_protocol_v1");
-    scanner.finalize(hyprwire);
+
+    hyprwire.import_table.get("protocols").?.root_source_file = scanner.getProtocolsModule().root_source_file;
 
     const client = b.addExecutable(.{
         .name = "simple-client",
@@ -169,10 +170,9 @@ fn buildExamples(b: *Build, target: Build.ResolvedTarget, optimize: std.builtin.
 
 pub const Scanner = struct {
     run: *Build.Step.Run,
-    result: Build.LazyPath,
     output_dir: Build.LazyPath,
     b: *Build,
-    generated_protocols: std.ArrayList([]const u8),
+    protocols_module: *Build.Module,
 
     const Self = @This();
 
@@ -194,13 +194,16 @@ pub const Scanner = struct {
         run.addArg("-o");
         const output_dir = run.addOutputFileArg(".");
 
+        const protocols = b.createModule(.{
+            .root_source_file = b.addWriteFiles().add("protocols.zig", "// Generated protocols\n"),
+        });
+
         const scanner = b.allocator.create(Scanner) catch @panic("OOM");
         scanner.* = .{
             .run = run,
             .output_dir = output_dir,
             .b = b,
-            .generated_protocols = .empty,
-            .result = undefined,
+            .protocols_module = protocols,
         };
 
         return scanner;
@@ -221,7 +224,7 @@ pub const Scanner = struct {
         const client = self.b.createModule(.{
             .root_source_file = self.output_dir.path(self.b, self.b.fmt("{s}-client.zig", .{protocol_name})),
         });
-        const module = self.b.addModule(protocol_name, .{
+        const module = self.b.createModule(.{
             .root_source_file = self.output_dir.path(self.b, self.b.fmt("{s}.zig", .{protocol_name})),
         });
 
@@ -229,33 +232,10 @@ pub const Scanner = struct {
         module.addImport("client", client);
         module.addImport("spec", spec);
 
-        self.generated_protocols.append(self.b.allocator, protocol_name) catch @panic("OOM");
+        self.protocols_module.addImport(protocol_name, module);
     }
 
-    pub fn finalize(self: *Self, hyprwire: *Build.Module) void {
-        const write_files = self.b.addWriteFiles();
-        write_files.step.dependOn(&self.run.step);
-
-        var imports: std.ArrayList(u8) = .empty;
-        defer imports.deinit(self.b.allocator);
-
-        for (self.generated_protocols.items) |protocol_name| {
-            imports.appendSlice(self.b.allocator, self.b.fmt("pub const {s} = @import(\"{s}\");\n", .{ protocol_name, protocol_name })) catch @panic("OOM");
-        }
-
-        const protocols_file = write_files.add("protocols.zig", imports.items);
-        self.result = protocols_file;
-
-        var protocols = hyprwire.import_table.get("protocols").?;
-        protocols.root_source_file = self.result;
-
-        for (self.generated_protocols.items) |protocol_name| {
-            const protocol_module = self.b.createModule(.{
-                .root_source_file = self.output_dir.path(self.b, self.b.fmt("{s}.zig", .{protocol_name})),
-            });
-
-            protocol_module.addImport("hyprwire", hyprwire);
-            protocols.addImport(protocol_name, protocol_module);
-        }
+    pub fn getProtocolsModule(self: *Self) *Build.Module {
+        return self.protocols_module;
     }
 };
