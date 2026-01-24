@@ -38,7 +38,7 @@ const Client = struct {
     }
 };
 
-fn buildSocketPath(alloc: mem.Allocator) ![:0]u8 {
+fn socketPath(alloc: mem.Allocator) ![:0]u8 {
     const runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
     return try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{runtime_dir}, 0);
 }
@@ -51,7 +51,7 @@ pub fn main() !void {
         if (deinit_status == .leak) @panic("TEST FAIL");
     }
 
-    const socket_path = try buildSocketPath(alloc);
+    const socket_path = try socketPath(alloc);
     defer alloc.free(socket_path);
 
     const socket = try hw.ClientSocket.open(alloc, .{ .path = socket_path });
