@@ -5,7 +5,7 @@ const types = hyprwire.types;
 const client = types.client;
 const spec = hyprwire.proto.test_protocol_v1.spec;
 
-fn myManagerV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) void {
+fn myManagerV1_method0(r: *types.Object, @"message": [*:0]const u8) callconv(.c) void {
     const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     defer _ = object.arena.reset(.retain_capacity);
     var buffer: [32_768]u8 = undefined;
@@ -19,14 +19,14 @@ fn myManagerV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) vo
         object.listener.ptr,
         fallback_allocator.allocator(),
         .{
-            .send_message = .{
+            .@"send_message" = .{
                 .message = message,
             },
         },
     );
 }
 
-fn myManagerV1_method1(r: *types.Object, message: [*:0]u32) callconv(.c) void {
+fn myManagerV1_method1(r: *types.Object, @"message": [*:0]u32) callconv(.c) void {
     const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     defer _ = object.arena.reset(.retain_capacity);
     var buffer: [32_768]u8 = undefined;
@@ -40,7 +40,7 @@ fn myManagerV1_method1(r: *types.Object, message: [*:0]u32) callconv(.c) void {
         object.listener.ptr,
         fallback_allocator.allocator(),
         .{
-            .recv_message_array_uint = .{
+            .@"recv_message_array_uint" = .{
                 .message = message,
             },
         },
@@ -49,10 +49,10 @@ fn myManagerV1_method1(r: *types.Object, message: [*:0]u32) callconv(.c) void {
 
 pub const MyManagerV1Object = struct {
     pub const Event = union(enum) {
-        send_message: struct {
+        @"send_message": struct {
             message: [*:0]const u8,
         },
-        recv_message_array_uint: struct {
+        @"recv_message_array_uint": struct {
             message: [*:0]u32,
         },
     };
@@ -61,13 +61,13 @@ pub const MyManagerV1Object = struct {
         .myManagerV1Listener = fn (std.mem.Allocator, Event) void,
     }, null);
 
-    object: *types.Object,
+    object: *const types.Object,
     listener: Listener,
     arena: std.heap.ArenaAllocator,
 
     const Self = @This();
 
-    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *types.Object) !*Self {
+    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {
         const self = try gpa.create(Self);
         self.* = Self{
             .listener = listener,
@@ -86,26 +86,34 @@ pub const MyManagerV1Object = struct {
         gpa.destroy(self);
     }
 
-    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, message: [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{message});
+    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, @"message": [:0]const u8) !void {
+        var args = try types.Args.init(gpa, .{
+            @"message",
+        });
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
-    pub fn sendSendMessageFd(self: *Self, gpa: std.mem.Allocator, message: i32) !void {
-        var args = try types.Args.init(gpa, .{message});
+    pub fn sendSendMessageFd(self: *Self, gpa: std.mem.Allocator, @"message": i32) !void {
+        var args = try types.Args.init(gpa, .{
+            @"message",
+        });
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
 
-    pub fn sendSendMessageArray(self: *Self, gpa: std.mem.Allocator, message: []const [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{message});
+    pub fn sendSendMessageArray(self: *Self, gpa: std.mem.Allocator, @"message": []const [:0]const u8) !void {
+        var args = try types.Args.init(gpa, .{
+            @"message",
+        });
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 2, &args);
     }
 
-    pub fn sendSendMessageArrayUint(self: *Self, gpa: std.mem.Allocator, message: []const u32) !void {
-        var args = try types.Args.init(gpa, .{message});
+    pub fn sendSendMessageArrayUint(self: *Self, gpa: std.mem.Allocator, @"message": []const u32) !void {
+        var args = try types.Args.init(gpa, .{
+            @"message",
+        });
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 3, &args);
     }
@@ -127,16 +135,16 @@ pub const MyManagerV1Object = struct {
         args: anytype,
     ) void {
         switch (opcode) {
-            0 => if (self.listener.send_message) |cb|
+            0 => if (self.listener.@"send_message") |cb|
                 cb(self, args[0]),
-            1 => if (self.listener.recv_message_array_uint) |cb|
+            1 => if (self.listener.@"recv_message_array_uint") |cb|
                 cb(self, args[0]),
             else => {},
         }
     }
 };
 
-fn myObjectV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) void {
+fn myObjectV1_method0(r: *types.Object, @"message": [*:0]const u8) callconv(.c) void {
     const object: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     defer _ = object.arena.reset(.retain_capacity);
     var buffer: [32_768]u8 = undefined;
@@ -150,7 +158,7 @@ fn myObjectV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) voi
         object.listener.ptr,
         fallback_allocator.allocator(),
         .{
-            .send_message = .{
+            .@"send_message" = .{
                 .message = message,
             },
         },
@@ -159,7 +167,7 @@ fn myObjectV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) voi
 
 pub const MyObjectV1Object = struct {
     pub const Event = union(enum) {
-        send_message: struct {
+        @"send_message": struct {
             message: [*:0]const u8,
         },
     };
@@ -168,13 +176,13 @@ pub const MyObjectV1Object = struct {
         .myObjectV1Listener = fn (std.mem.Allocator, Event) void,
     }, null);
 
-    object: *types.Object,
+    object: *const types.Object,
     listener: Listener,
     arena: std.heap.ArenaAllocator,
 
     const Self = @This();
 
-    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *types.Object) !*Self {
+    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {
         const self = try gpa.create(Self);
         self.* = .{
             .object = object,
@@ -192,14 +200,18 @@ pub const MyObjectV1Object = struct {
         gpa.destroy(self);
     }
 
-    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, message: [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{message});
+    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, @"message": [:0]const u8) !void {
+        var args = try types.Args.init(gpa, .{
+            @"message",
+        });
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
-    pub fn sendSendEnum(self: *Self, gpa: std.mem.Allocator, message: spec.MyEnum) !void {
-        var args = try types.Args.init(gpa, .{message});
+    pub fn sendSendEnum(self: *Self, gpa: std.mem.Allocator, @"message": spec.MyEnum) !void {
+        var args = try types.Args.init(gpa, .{
+            @"message",
+        });
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
@@ -221,7 +233,7 @@ pub const MyObjectV1Object = struct {
         args: anytype,
     ) void {
         switch (opcode) {
-            0 => if (self.listener.send_message) |cb|
+            0 => if (self.listener.@"send_message") |cb|
                 cb(self, args[0]),
             else => {},
         }

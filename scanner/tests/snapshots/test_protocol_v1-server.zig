@@ -18,8 +18,8 @@ fn myManagerV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) vo
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
-        .{ .send_message = .{
-            .message = message,
+        .{ .@"send_message" = .{
+            .@"message" = message,
         } },
     );
 }
@@ -37,8 +37,8 @@ fn myManagerV1_method1(r: *types.Object, fd: i32) callconv(.c) void {
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
-        .{ .send_message_fd = .{
-            .message = fd,
+        .{ .@"send_message_fd" = .{
+            .@"message" = fd,
         } },
     );
 }
@@ -56,8 +56,8 @@ fn myManagerV1_method2(r: *types.Object, message: [*][*:0]const u8, message_len:
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
-        .{ .send_message_array = .{
-            .message = fallback_allocator.allocator().dupe([*:0]const u8, message[0..message_len]) catch return,
+        .{ .@"send_message_array" = .{
+            .@"message" = fallback_allocator.allocator().dupe([*:0]const u8, message[0..message_len]) catch return,
         } },
     );
 }
@@ -75,8 +75,8 @@ fn myManagerV1_method3(r: *types.Object, message: [*:0]u32) callconv(.c) void {
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
-        .{ .send_message_array_uint = .{
-            .message = message,
+        .{ .@"send_message_array_uint" = .{
+            .@"message" = message,
         } },
     );
 }
@@ -94,7 +94,7 @@ fn myManagerV1_method4(r: *types.Object, seq: u32) callconv(.c) void {
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
-        .{ .make_object = .{
+        .{ .@"make_object" = .{
             .seq = seq,
         } },
     );
@@ -102,19 +102,19 @@ fn myManagerV1_method4(r: *types.Object, seq: u32) callconv(.c) void {
 
 pub const MyManagerV1Object = struct {
     pub const Event = union(enum) {
-        send_message: struct {
-            message: [*:0]const u8,
+        @"send_message": struct {
+            @"message": [*:0]const u8,
         },
-        send_message_fd: struct {
-            message: i32,
+        @"send_message_fd": struct {
+            @"message": i32,
         },
-        send_message_array: struct {
-            message: [][*:0]const u8,
+        @"send_message_array": struct {
+            @"message": [][*:0]const u8,
         },
-        send_message_array_uint: struct {
-            message: [*:0]u32,
+        @"send_message_array_uint": struct {
+            @"message": [*:0]u32,
         },
-        make_object: struct {
+        @"make_object": struct {
             seq: u32,
         },
     };
@@ -165,13 +165,17 @@ pub const MyManagerV1Object = struct {
     }
 
     pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, message: [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{message});
+        var args = try types.Args.init(gpa, .{
+            @"message",
+        });
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
     pub fn sendRecvMessageArrayUint(self: *Self, gpa: std.mem.Allocator, message: []const u32) !void {
-        var args = try types.Args.init(gpa, .{message});
+        var args = try types.Args.init(gpa, .{
+            @"message",
+        });
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
@@ -190,8 +194,8 @@ fn myObjectV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) voi
     object.listener.vtable.myObjectV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
-        .{ .send_message = .{
-            .message = message,
+        .{ .@"send_message" = .{
+            .@"message" = message,
         } },
     );
 }
@@ -209,8 +213,8 @@ fn myObjectV1_method1(r: *types.Object, value: i32) callconv(.c) void {
     object.listener.vtable.myObjectV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
-        .{ .send_enum = .{
-            .message = @enumFromInt(value),
+        .{ .@"send_enum" = .{
+            .@"message" = @enumFromInt(value),
         } },
     );
 }
@@ -228,19 +232,19 @@ fn myObjectV1_method2(r: *types.Object) callconv(.c) void {
     object.listener.vtable.myObjectV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
-        .{ .destroy = .{} },
+        .{ .@"destroy" = .{} },
     );
 }
 
 pub const MyObjectV1Object = struct {
     pub const Event = union(enum) {
-        send_message: struct {
-            message: [*:0]const u8,
+        @"send_message": struct {
+            @"message": [*:0]const u8,
         },
-        send_enum: struct {
-            message: spec.MyEnum,
+        @"send_enum": struct {
+            @"message": spec.MyEnum,
         },
-        destroy: struct {},
+        @"destroy": struct {},
     };
 
     pub const Listener = hyprwire.Trait(.{
@@ -283,7 +287,9 @@ pub const MyObjectV1Object = struct {
     }
 
     pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, message: [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{message});
+        var args = try types.Args.init(gpa, .{
+            @"message",
+        });
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }

@@ -170,8 +170,6 @@ fn buildExamples(b: *Build, target: Build.ResolvedTarget, optimize: std.builtin.
     examples_step.dependOn(b.getInstallStep());
 }
 
-const hyprwire_build_zig = @This();
-
 pub const Scanner = struct {
     run: *Build.Step.Run,
     output_dir: Build.LazyPath,

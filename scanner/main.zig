@@ -104,14 +104,6 @@ pub fn main() !void {
 
     const proto_data = try ProtoData.init(alloc, cli.protopath, &document);
 
-    if (cli.protocols.len == 0) {
-        try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .client);
-        try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .server);
-        try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .spec);
-        try writeWrapper(alloc, cli.outpath, proto_data.name_original);
-        return;
-    }
-
     for (cli.protocols) |p| {
         const base_name = p.name;
 
@@ -158,21 +150,14 @@ pub fn main() !void {
                 else => return err,
             }
         };
-        defer alloc.free(spec_src);
 
         const client_filename = try std.fmt.allocPrint(alloc, "{s}-client.zig", .{base_name});
-        defer alloc.free(client_filename);
         const server_filename = try std.fmt.allocPrint(alloc, "{s}-server.zig", .{base_name});
-        defer alloc.free(server_filename);
         const spec_filename = try std.fmt.allocPrint(alloc, "{s}-spec.zig", .{base_name});
-        defer alloc.free(spec_filename);
 
         const client_path = try std.fs.path.join(alloc, &.{ cli.outpath, client_filename });
-        defer alloc.free(client_path);
         const server_path = try std.fs.path.join(alloc, &.{ cli.outpath, server_filename });
-        defer alloc.free(server_path);
         const spec_path = try std.fs.path.join(alloc, &.{ cli.outpath, spec_filename });
-        defer alloc.free(spec_path);
 
         if (std.fs.path.dirname(client_path)) |dir| {
             try std.fs.cwd().makePath(dir);
@@ -219,83 +204,6 @@ fn writeProtocolsIndex(
     defer file.close();
 
     _ = try file.write(content.written());
-}
-
-const GeneratedKind = enum {
-    client,
-    server,
-    spec,
-};
-
-fn writeGenerated(
-    alloc: std.mem.Allocator,
-    outpath: []const u8,
-    base_name: []const u8,
-    document: *const Document,
-    kind: GeneratedKind,
-) !void {
-    const component = switch (kind) {
-        .client => "client",
-        .server => "server",
-        .spec => "spec",
-    };
-
-    const source = switch (kind) {
-        .client => try Scanner.generateClientCode(alloc, document),
-        .server => try Scanner.generateServerCode(alloc, document),
-        .spec => try Scanner.generateSpecCode(alloc, document),
-    };
-
-    const filename = try std.fmt.allocPrint(alloc, "{s}-{s}.zig", .{ base_name, component });
-    defer alloc.free(filename);
-
-    const file_path = try std.fs.path.join(alloc, &.{ outpath, filename });
-    defer alloc.free(file_path);
-
-    if (std.fs.path.dirname(file_path)) |dir| {
-        try std.fs.cwd().makePath(dir);
-    }
-
-    var file = try std.fs.cwd().createFile(file_path, .{ .truncate = true });
-    defer file.close();
-
-    _ = try file.write(source);
-}
-
-fn writeSingleGenerated(
-    alloc: std.mem.Allocator,
-    outpath: []const u8,
-    document: *const Document,
-    kind: GeneratedKind,
-) !void {
-    const source = switch (kind) {
-        .client => try Scanner.generateClientCode(alloc, document),
-        .server => try Scanner.generateServerCode(alloc, document),
-        .spec => try Scanner.generateSpecCode(alloc, document),
-    };
-
-    var file = try std.fs.cwd().createFile(outpath, .{ .truncate = true });
-    defer file.close();
-
-    _ = try file.write(source);
-}
-
-fn appendToGeneratedFile(
-    alloc: std.mem.Allocator,
-    outpath: []const u8,
-    document: *const Document,
-    kind: GeneratedKind,
-) !void {
-    const source = switch (kind) {
-        .client => try Scanner.generateClientCode(alloc, document),
-        .server => try Scanner.generateServerCode(alloc, document),
-        .spec => try Scanner.generateSpecCode(alloc, document),
-    };
-
-    var file = try std.fs.cwd().openFile(outpath, .{ .mode = .write_only });
-    defer file.close();
-
-    _ = try file.write(source);
 }
 
 fn writeWrapper(
