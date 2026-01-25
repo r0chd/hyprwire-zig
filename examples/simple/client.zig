@@ -5,16 +5,14 @@ const mem = std.mem;
 
 const hw = @import("hyprwire");
 const types = hw.types;
-
-const proto_client = hw.proto.test_protocol_v1.client;
-const proto_spec = hw.proto.test_protocol_v1.spec;
+const test_protocol = hw.proto.test_protocol_v1.client;
 
 const TEST_PROTOCOL_VERSION: u32 = 1;
 
 const Client = struct {
     const Self = @This();
 
-    pub fn myManagerV1Listener(self: *Self, alloc: mem.Allocator, event: proto_client.MyManagerV1Object.Event) void {
+    pub fn myManagerV1Listener(self: *Self, alloc: mem.Allocator, event: test_protocol.MyManagerV1Object.Event) void {
         _ = alloc;
         _ = self;
         switch (event) {
@@ -27,7 +25,7 @@ const Client = struct {
         }
     }
 
-    pub fn myObjectV1Listener(self: *Self, alloc: mem.Allocator, event: proto_client.MyObjectV1Object.Event) void {
+    pub fn myObjectV1Listener(self: *Self, alloc: mem.Allocator, event: test_protocol.MyObjectV1Object.Event) void {
         _ = alloc;
         _ = self;
         switch (event) {
@@ -57,7 +55,7 @@ pub fn main() !void {
     const socket = try hw.ClientSocket.open(alloc, .{ .path = socket_path });
     defer socket.deinit(alloc);
 
-    var impl = proto_client.TestProtocolV1Impl.init(1);
+    var impl = test_protocol.TestProtocolV1Impl.init(1);
     try socket.addImplementation(alloc, types.client.ProtocolImplementation.from(&impl));
 
     try socket.waitForHandshake(alloc);
@@ -74,9 +72,9 @@ pub fn main() !void {
 
     var obj = try socket.bindProtocol(alloc, protocol, TEST_PROTOCOL_VERSION);
     defer obj.deinit(alloc);
-    var manager = try proto_client.MyManagerV1Object.init(
+    var manager = try test_protocol.MyManagerV1Object.init(
         alloc,
-        proto_client.MyManagerV1Object.Listener.from(&client),
+        test_protocol.MyManagerV1Object.Listener.from(&client),
         &types.Object.from(obj),
     );
     defer manager.deinit(alloc);
@@ -103,11 +101,11 @@ pub fn main() !void {
 
     var object_arg = manager.sendMakeObject(alloc).?;
     defer object_arg.vtable.deinit(object_arg.ptr, alloc);
-    var object = try proto_client.MyObjectV1Object.init(alloc, proto_client.MyObjectV1Object.Listener.from(&client), &object_arg);
+    var object = try test_protocol.MyObjectV1Object.init(alloc, test_protocol.MyObjectV1Object.Listener.from(&client), &object_arg);
     defer object.deinit(alloc);
 
     try object.sendSendMessage(alloc, "Hello on object");
-    try object.sendSendEnum(alloc, proto_spec.MyEnum.world);
+    try object.sendSendEnum(alloc, .world);
 
     std.debug.print("Sent hello!\n", .{});
 
