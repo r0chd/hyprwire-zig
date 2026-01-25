@@ -49,9 +49,8 @@ const Server = struct {
             .send_message_array_uint => |message| {
                 var str: std.ArrayList(u8) = .empty;
 
-                var i: usize = 0;
-                while (message.message[i] != 0) : (i += 1) {
-                    str.print(alloc, "{}, ", .{message.message[i]}) catch unreachable;
+                for (message.message) |msg| {
+                    str.print(alloc, "{}, ", .{msg}) catch unreachable;
                 }
                 if (str.items.len > 1) {
                     _ = str.pop();
@@ -72,14 +71,13 @@ const Server = struct {
                 self.object_handle = hw.types.Object.from(server_object);
 
                 var object = protocol_server.MyObjectV1Object.init(self.alloc, protocol_server.MyObjectV1Object.Listener.from(self), &self.object_handle.?) catch return;
-                object.sendSendMessage(self.alloc, "Hello object") catch return;
+                object.sendSendMessage(alloc, "Hello object") catch return;
                 self.object = object;
             },
         }
     }
 
     pub fn myObjectV1Listener(self: *Self, alloc: mem.Allocator, event: protocol_server.MyObjectV1Object.Event) void {
-        _ = alloc;
         const obj = self.object orelse return;
         switch (event) {
             .send_message => |message| {
@@ -90,7 +88,7 @@ const Server = struct {
 
                 std.debug.print("Erroring out the client!\n", .{});
 
-                obj.err(self.alloc, @intFromEnum(message.message), "Important error occurred!") catch return;
+                obj.err(alloc, @intFromEnum(message.message), "Important error occurred!") catch return;
             },
             .destroy => {},
         }
@@ -108,6 +106,11 @@ const Server = struct {
     }
 };
 
+fn socketPath(alloc: mem.Allocator) ![:0]u8 {
+    const runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
+    return try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{runtime_dir}, 0);
+}
+
 pub fn main() !void {
     var gpa: std.heap.DebugAllocator(.{}) = .init;
     const alloc = gpa.allocator();
@@ -116,11 +119,10 @@ pub fn main() !void {
         if (deinit_status == .leak) @panic("LEAK DETECTED");
     }
 
-    const xdg_runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
-    const socket_path_buf = try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{xdg_runtime_dir}, 0);
-    defer alloc.free(socket_path_buf);
+    const socket_path = try socketPath(alloc);
+    defer alloc.free(socket_path);
 
-    const socket = try hw.ServerSocket.open(alloc, socket_path_buf);
+    const socket = try hw.ServerSocket.open(alloc, socket_path);
     var server = Server{ .alloc = alloc, .socket = socket };
     defer server.deinit();
 

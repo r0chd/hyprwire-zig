@@ -165,17 +165,15 @@ pub const MyManagerV1Object = struct {
     }
 
     pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, message: [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{
-            @"message",
-        });
+        var args = try types.Args.init(gpa, .{@"message",
+});
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
     pub fn sendRecvMessageArrayUint(self: *Self, gpa: std.mem.Allocator, message: []const u32) !void {
-        var args = try types.Args.init(gpa, .{
-            @"message",
-        });
+        var args = try types.Args.init(gpa, .{@"message",
+});
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
@@ -287,9 +285,8 @@ pub const MyObjectV1Object = struct {
     }
 
     pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, message: [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{
-            @"message",
-        });
+        var args = try types.Args.init(gpa, .{@"message",
+});
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }

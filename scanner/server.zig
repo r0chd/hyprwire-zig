@@ -205,8 +205,8 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
         try writer.print(
             \\
             \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator) !void {{
-            \\        var args = try types.Args.init(gpa, .{{}});
-            \\        defer args.deinit(gpa);
+            \\        var buffer: [0]types.Arg = undefined;
+            \\        var args = types.Args.init(&buffer, .{{}});
             \\        _ = try self.object.vtable.call(self.object.ptr, gpa, {}, &args);
             \\    }}
         , .{ method.name_pascal, method.idx });
@@ -219,9 +219,10 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
 
         try writer.print(
             \\) !void {{
-            \\        var args = try types.Args.init(gpa, .{{
+            \\        var buffer: [{d}]types.Arg = undefined;
+            \\        var args = types.Args.init(&buffer, .{{
             \\
-        , .{});
+        , .{method.args.len});
 
         for (method.args) |arg| {
             try writer.print("            @\"{s}\",\n", .{arg.name});
@@ -229,7 +230,6 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
 
         try writer.print(
             \\        }});
-            \\        defer args.deinit(gpa);
             \\        _ = try self.object.vtable.call(self.object.ptr, gpa, {}, &args);
             \\    }}
             \\

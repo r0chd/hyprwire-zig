@@ -34,7 +34,6 @@ const Client = struct {
             .send_message => |message| {
                 std.debug.print("Server says on object {s}\n", .{message.message});
             },
-            else => {},
         }
     }
 };

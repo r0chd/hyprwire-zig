@@ -200,8 +200,8 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
         try writer.print(
             \\
             \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator) ?types.Object {{
-            \\        var args = types.Args.init(gpa, .{{}}) catch return null;
-            \\        defer args.deinit(gpa);
+            \\        var buffer: [0]types.Arg = undefined;
+            \\        var args = types.Args.init(&buffer, .{{}});
             \\        const id = self.object.vtable.call(self.object.ptr, gpa, {}, &args) catch return null;
             \\        if (self.object.vtable.clientSock(self.object.ptr)) |sock| {{
             \\            return sock.objectForId(id);
@@ -215,8 +215,8 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
         try writer.print(
             \\
             \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator) !void {{
-            \\        var args = try types.Args.init(gpa, .{{}});
-            \\        defer args.deinit(gpa);
+            \\        var buffer: [0]types.Arg = undefined;
+            \\        var args = types.Args.init(&buffer, .{{}});
             \\        _ = try self.object.vtable.call(self.object.ptr, gpa, {}, &args);
             \\        self.object.destroy();
             \\    }}
@@ -226,8 +226,8 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
         try writer.print(
             \\
             \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator) !void {{
-            \\        var args = try types.Args.init(gpa, .{{}});
-            \\        defer args.deinit(gpa);
+            \\        var buffer: [0]types.Arg = undefined;
+            \\        var args = types.Args.init(&buffer, .{{}});
             \\        _ = try self.object.vtable.call(self.object.ptr, gpa, {}, &args);
             \\    }}
             \\
@@ -239,7 +239,7 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
             try writer.print(", @\"{s}\": {s}", .{ arg.name, arg.zig_send_type });
         }
 
-        try writer.print(") !void {{\n        var args = try types.Args.init(gpa, .{{\n", .{});
+        try writer.print(") !void {{\n        var buffer: [{d}]types.Arg = undefined;\n        var args = types.Args.init(&buffer, .{{\n", .{method.args.len});
 
         for (method.args) |arg| {
             try writer.print("            @\"{s}\",\n", .{arg.name});
@@ -247,7 +247,6 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
 
         try writer.print(
             \\        }});
-            \\        defer args.deinit(gpa);
             \\        _ = try self.object.vtable.call(self.object.ptr, gpa, {}, &args);
             \\    }}
             \\

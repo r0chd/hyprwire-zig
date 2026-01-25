@@ -153,8 +153,8 @@ pub fn writeMethodHandler(writer: anytype, obj: Object, method: Method, idx: usi
         \\    var fba = std.heap.FixedBufferAllocator.init(&buffer);
         \\    var fallback_allocator = hyprwire.FallbackAllocator{{
         \\        .fba = &fba,
-        \\        .fallback = fba.allocator(),
-        \\        .fixed = object.arena.allocator(),
+        \\        .fixed = fba.allocator(),
+        \\        .fallback = object.arena.allocator(),
         \\    }};
         \\    object.listener.vtable.{s}Listener(
         \\        object.listener.ptr,

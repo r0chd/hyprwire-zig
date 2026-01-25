@@ -35,7 +35,7 @@ pub const Args = struct {
 
     const Self = @This();
 
-    pub fn init(gpa: mem.Allocator, args: anytype) !Self {
+    pub fn init(buffer: []Arg, args: anytype) Self {
         const ArgsType = @TypeOf(args);
         const args_type_info = @typeInfo(ArgsType);
         if (args_type_info != .@"struct") {
@@ -47,7 +47,7 @@ pub const Args = struct {
             @compileError("32 arguments max are supported per format call");
         }
 
-        var args_list: std.ArrayList(Arg) = try .initCapacity(gpa, fields_info.len);
+        var args_list: std.ArrayList(Arg) = .initBuffer(buffer);
 
         inline for (fields_info) |field| {
             const field_value = @field(args, field.name);
@@ -72,7 +72,7 @@ pub const Args = struct {
             }
         }
 
-        return .{ .args = try args_list.toOwnedSlice(gpa) };
+        return .{ .args = args_list.items };
     }
 
     pub fn deinit(self: *Self, gpa: mem.Allocator) void {
@@ -87,7 +87,7 @@ pub const Args = struct {
     }
 };
 
-const Arg = union(enum) {
+pub const Arg = union(enum) {
     uint: u32,
     int: i32,
     f32: f32,

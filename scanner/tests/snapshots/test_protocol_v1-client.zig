@@ -87,33 +87,29 @@ pub const MyManagerV1Object = struct {
     }
 
     pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, @"message": [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{
-            @"message",
-        });
+        var args = try types.Args.init(gpa, .{@"message",
+});
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
     pub fn sendSendMessageFd(self: *Self, gpa: std.mem.Allocator, @"message": i32) !void {
-        var args = try types.Args.init(gpa, .{
-            @"message",
-        });
+        var args = try types.Args.init(gpa, .{@"message",
+});
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
 
     pub fn sendSendMessageArray(self: *Self, gpa: std.mem.Allocator, @"message": []const [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{
-            @"message",
-        });
+        var args = try types.Args.init(gpa, .{@"message",
+});
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 2, &args);
     }
 
     pub fn sendSendMessageArrayUint(self: *Self, gpa: std.mem.Allocator, @"message": []const u32) !void {
-        var args = try types.Args.init(gpa, .{
-            @"message",
-        });
+        var args = try types.Args.init(gpa, .{@"message",
+});
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 3, &args);
     }
@@ -201,17 +197,15 @@ pub const MyObjectV1Object = struct {
     }
 
     pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, @"message": [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{
-            @"message",
-        });
+        var args = try types.Args.init(gpa, .{@"message",
+});
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
     pub fn sendSendEnum(self: *Self, gpa: std.mem.Allocator, @"message": spec.MyEnum) !void {
-        var args = try types.Args.init(gpa, .{
-            @"message",
-        });
+        var args = try types.Args.init(gpa, .{@"message",
+});
         defer args.deinit(gpa);
         _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
