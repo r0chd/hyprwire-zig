@@ -38,7 +38,7 @@ pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, f
     if (methods.len <= id) {
         const msg = try std.fmt.allocPrintSentinel(arena.allocator(), "invalid method {} for object {}", .{ id, self.vtable.getId(self.ptr) }, 0);
         log.debug("core protocol error: {s}", .{msg});
-        try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
+        self.vtable.@"error"(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
         return;
     }
 
@@ -58,7 +58,7 @@ pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, f
     if (method.since > self.vtable.getVersion(self.ptr)) {
         const msg = try std.fmt.allocPrintSentinel(arena.allocator(), "method {} since {} but has {}", .{ id, method.since, self.vtable.getVersion(self.ptr) }, 0);
         log.debug("core protocol error: {s}", .{msg});
-        try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
+        self.vtable.@"error"(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
         return;
     }
 
@@ -74,7 +74,7 @@ pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, f
         if (param != wire_param) {
             const msg = try std.fmt.allocPrintSentinel(arena.allocator(), "method {} param idx {} should be {s} but was {s}", .{ id, i, @tagName(param), @tagName(wire_param) }, 0);
             log.debug("core protocol error: {s}", .{msg});
-            try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
+            self.vtable.@"error"(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
             return;
         }
 
@@ -99,7 +99,7 @@ pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, f
                     // raise protocol error
                     const msg = try fmt.allocPrintSentinel(arena.allocator(), "method {} param idx {} should be {s} but was {s}", .{ id, i, @tagName(param), @tagName(wire_param) }, 0);
                     log.debug("core protocol error: {s}", .{msg});
-                    try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
+                    self.vtable.@"error"(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                     return;
                 }
 
@@ -116,7 +116,7 @@ pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, f
                             if (data_idx + arr_message_len > data.len) {
                                 const msg = "failed demarshaling array message";
                                 log.debug("core protocol error: {s}", .{msg});
-                                try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
+                                self.vtable.@"error"(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                                 return;
                             }
 
@@ -127,7 +127,7 @@ pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, f
                     else => {
                         const msg = "failed demarshaling array message";
                         log.debug("core protocol error: {s}", .{msg});
-                        try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
+                        self.vtable.@"error"(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                         return;
                     },
                 }
@@ -137,7 +137,7 @@ pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, f
             .type_object_id => {
                 const msg = "object type is not impld";
                 log.debug("core protocol error: {s}", .{msg});
-                try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
+                self.vtable.@"error"(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                 return;
             },
         }
@@ -265,7 +265,7 @@ pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, f
                     else => {
                         const msg = "failed demarshaling array message";
                         log.debug("core protocol error: {s}", .{msg});
-                        try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
+                        self.vtable.@"error"(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                         return;
                     },
                 }
@@ -275,7 +275,7 @@ pub fn called(self: WireObject, gpa: mem.Allocator, id: u32, data: []const u8, f
             .type_object_id => {
                 const msg = "object type is not impld";
                 log.debug("core protocol error: {s}", .{msg});
-                try self.vtable.err(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
+                self.vtable.@"error"(self.ptr, arena.allocator(), self.vtable.getId(self.ptr), msg);
                 return;
             },
             .type_fd => {

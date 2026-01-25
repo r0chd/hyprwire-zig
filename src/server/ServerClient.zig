@@ -117,10 +117,7 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void
     var control_buf: std.ArrayList(u8) = .empty;
     const fds = message.vtable.getFds(message.ptr);
     if (fds.len != 0) {
-        control_buf.resize(gpa, c.CMSG_SPACE(@sizeOf(i32) * fds.len)) catch |err| {
-            log.debug("Failed to resize control buffer: {}", .{err});
-            return;
-        };
+        control_buf.resize(gpa, c.CMSG_SPACE(@sizeOf(i32) * fds.len)) catch return;
         msg.msg_controllen = control_buf.capacity;
         msg.msg_control = control_buf.items.ptr;
 

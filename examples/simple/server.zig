@@ -88,7 +88,7 @@ const Server = struct {
 
                 std.debug.print("Erroring out the client!\n", .{});
 
-                obj.err(alloc, @intFromEnum(message.message), "Important error occurred!") catch return;
+                obj.@"error"(alloc, @intFromEnum(message.message), "Important error occurred!");
             },
             .destroy => {},
         }

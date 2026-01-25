@@ -31,36 +31,91 @@ message_type: MessageType = .fatal_protocol_error,
 
 const Self = @This();
 
-pub fn init(gpa: mem.Allocator, object_id: u32, error_id: u32, error_msg: []const u8) !Self {
-    var data: std.ArrayList(u8) = .empty;
-    errdefer data.deinit(gpa);
-
-    try data.append(gpa, @intFromEnum(MessageType.fatal_protocol_error));
-    try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
-    var object_id_buf: [4]u8 = undefined;
-    mem.writeInt(u32, &object_id_buf, object_id, .little);
-    try data.appendSlice(gpa, &object_id_buf);
-
-    try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
-    var error_id_buf: [4]u8 = undefined;
-    mem.writeInt(u32, &error_id_buf, error_id, .little);
-    try data.appendSlice(gpa, &error_id_buf);
-
-    try data.append(gpa, @intFromEnum(MessageMagic.type_varchar));
+pub fn initBuffer(buffer: []u8, object_id: u32, error_id: u32, error_msg: []const u8) Self {
+    var varint_len: usize = 1;
     var msg_len = error_msg.len;
     while (msg_len > 0x7F) {
-        try data.append(gpa, @as(u8, @truncate(msg_len & 0x7F)) | 0x80);
+        varint_len += 1;
         msg_len >>= 7;
     }
-    try data.append(gpa, @as(u8, @truncate(msg_len)));
-    try data.appendSlice(gpa, error_msg);
 
-    try data.append(gpa, @intFromEnum(MessageMagic.end));
+    // message_type(1) + magic_type_uint(1) + object_id(4) +  magic_type_uint(1) + error_id(4) +
+    // magic_type_varchar(1) + varint_len(error_msg) + error_msg_len + magic_end(1)
+    const estimated_capacity = 1 + 1 + 4 + 1 + 4 + 1 + varint_len + error_msg.len + 1;
+
+    var data = std.ArrayList(u8).initBuffer(buffer);
+
+    data.appendAssumeCapacity(@intFromEnum(MessageType.fatal_protocol_error));
+    data.appendAssumeCapacity(@intFromEnum(MessageMagic.type_uint));
+    var object_id_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &object_id_buf, object_id, .little);
+    data.appendSliceAssumeCapacity(&object_id_buf);
+
+    data.appendAssumeCapacity(@intFromEnum(MessageMagic.type_uint));
+    var error_id_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &error_id_buf, error_id, .little);
+    data.appendSliceAssumeCapacity(&error_id_buf);
+
+    data.appendAssumeCapacity(@intFromEnum(MessageMagic.type_varchar));
+    while (msg_len > 0x7F) {
+        data.appendAssumeCapacity(@as(u8, @truncate(msg_len & 0x7F)) | 0x80);
+        msg_len >>= 7;
+    }
+    data.appendAssumeCapacity(@as(u8, @truncate(msg_len)));
+    data.appendSliceAssumeCapacity(error_msg);
+
+    data.appendAssumeCapacity(@intFromEnum(MessageMagic.end));
 
     return .{
         .object_id = object_id,
         .error_id = error_id,
-        .error_msg = try gpa.dupe(u8, error_msg),
+        .error_msg = error_msg,
+        .len = estimated_capacity,
+        .data = data.items[0..data.items.len],
+        .message_type = .fatal_protocol_error,
+    };
+}
+
+pub fn init(gpa: mem.Allocator, object_id: u32, error_id: u32, error_msg: []const u8) !Self {
+    var varint_len: usize = 1;
+    var msg_len = error_msg.len;
+    while (msg_len > 0x7F) {
+        varint_len += 1;
+        msg_len >>= 7;
+    }
+
+    // message_type(1) + magic_type_uint(1) + object_id(4) +  magic_type_uint(1) + error_id(4) +
+    // magic_type_varchar(1) + varint_len(error_msg) + error_msg_len + magic_end(1)
+    const estimated_capacity = 1 + 1 + 4 + 1 + 4 + 1 + varint_len + error_msg.len + 1;
+
+    var data = try std.ArrayList(u8).initCapacity(gpa, estimated_capacity);
+    errdefer data.deinit(gpa);
+
+    data.appendAssumeCapacity(@intFromEnum(MessageType.fatal_protocol_error));
+    data.appendAssumeCapacity(@intFromEnum(MessageMagic.type_uint));
+    var object_id_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &object_id_buf, object_id, .little);
+    data.appendSliceAssumeCapacity(&object_id_buf);
+
+    data.appendAssumeCapacity(@intFromEnum(MessageMagic.type_uint));
+    var error_id_buf: [4]u8 = undefined;
+    mem.writeInt(u32, &error_id_buf, error_id, .little);
+    data.appendSliceAssumeCapacity(&error_id_buf);
+
+    data.appendAssumeCapacity(@intFromEnum(MessageMagic.type_varchar));
+    while (msg_len > 0x7F) {
+        data.appendAssumeCapacity(@as(u8, @truncate(msg_len & 0x7F)) | 0x80);
+        msg_len >>= 7;
+    }
+    data.appendAssumeCapacity(@as(u8, @truncate(msg_len)));
+    data.appendSliceAssumeCapacity(error_msg);
+
+    data.appendAssumeCapacity(@intFromEnum(MessageMagic.end));
+
+    return .{
+        .object_id = object_id,
+        .error_id = error_id,
+        .error_msg = error_msg,
         .len = data.items.len,
         .data = try data.toOwnedSlice(gpa),
         .message_type = .fatal_protocol_error,
@@ -100,7 +155,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     }
 
     if (needle + msg_len > data.len) return error.OutOfRange;
-    const error_msg_copy = try gpa.dupe(u8, data[needle..][0..msg_len]);
+    const error_msg = data[needle..][0..msg_len];
     needle += msg_len;
 
     if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
@@ -112,12 +167,11 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
         .message_type = .fatal_protocol_error,
         .object_id = object_id,
         .error_id = error_id,
-        .error_msg = error_msg_copy,
+        .error_msg = error_msg,
     };
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    gpa.free(self.error_msg);
     gpa.free(self.data);
 }
 

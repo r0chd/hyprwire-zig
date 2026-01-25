@@ -12,8 +12,8 @@ fn myManagerV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) vo
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     var fallback_allocator = hyprwire.FallbackAllocator{
         .fba = &fba,
-        .fallback = fba.allocator(),
-        .fixed = object.arena.allocator(),
+        .fixed = fba.allocator(),
+        .fallback = object.arena.allocator(),
     };
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
@@ -31,8 +31,8 @@ fn myManagerV1_method1(r: *types.Object, fd: i32) callconv(.c) void {
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     var fallback_allocator = hyprwire.FallbackAllocator{
         .fba = &fba,
-        .fallback = fba.allocator(),
-        .fixed = object.arena.allocator(),
+        .fixed = fba.allocator(),
+        .fallback = object.arena.allocator(),
     };
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
@@ -43,40 +43,40 @@ fn myManagerV1_method1(r: *types.Object, fd: i32) callconv(.c) void {
     );
 }
 
-fn myManagerV1_method2(r: *types.Object, message: [*][*:0]const u8, message_len: u32) callconv(.c) void {
+fn myManagerV1_method2(r: *types.Object, message: [*]const [*:0]const u8, message_len: u32) callconv(.c) void {
     const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     defer _ = object.arena.reset(.retain_capacity);
     var buffer: [32_768]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     var fallback_allocator = hyprwire.FallbackAllocator{
         .fba = &fba,
-        .fallback = fba.allocator(),
-        .fixed = object.arena.allocator(),
+        .fixed = fba.allocator(),
+        .fallback = object.arena.allocator(),
     };
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
         .{ .@"send_message_array" = .{
-            .@"message" = fallback_allocator.allocator().dupe([*:0]const u8, message[0..message_len]) catch return,
+            .@"message" = fallback_allocator.allocator().dupe([*:0]const u8, message[0..message_len]) catch @panic("OOM"),
         } },
     );
 }
 
-fn myManagerV1_method3(r: *types.Object, message: [*:0]u32) callconv(.c) void {
+fn myManagerV1_method3(r: *types.Object, message: [*]const u32, message_len: u32) callconv(.c) void {
     const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     defer _ = object.arena.reset(.retain_capacity);
     var buffer: [32_768]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     var fallback_allocator = hyprwire.FallbackAllocator{
         .fba = &fba,
-        .fallback = fba.allocator(),
-        .fixed = object.arena.allocator(),
+        .fixed = fba.allocator(),
+        .fallback = object.arena.allocator(),
     };
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
         .{ .@"send_message_array_uint" = .{
-            .@"message" = message,
+            .@"message" = fallback_allocator.allocator().dupe(u32, message[0..message_len]) catch @panic("OOM"),
         } },
     );
 }
@@ -88,8 +88,8 @@ fn myManagerV1_method4(r: *types.Object, seq: u32) callconv(.c) void {
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     var fallback_allocator = hyprwire.FallbackAllocator{
         .fba = &fba,
-        .fallback = fba.allocator(),
-        .fixed = object.arena.allocator(),
+        .fixed = fba.allocator(),
+        .fallback = object.arena.allocator(),
     };
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
@@ -112,7 +112,7 @@ pub const MyManagerV1Object = struct {
             @"message": [][*:0]const u8,
         },
         @"send_message_array_uint": struct {
-            @"message": [*:0]u32,
+            @"message": []const u32,
         },
         @"make_object": struct {
             seq: u32,
@@ -156,8 +156,8 @@ pub const MyManagerV1Object = struct {
         return self.object;
     }
 
-    pub fn err(self: *Self, code: u32, message: []const u8) void {
-        self.object.vtable.err(self.object.ptr, code, message);
+    pub fn @"error"(self: *Self, code: u32, message: []const u8) void {
+        self.object.vtable.@"error"(self.object.ptr, code, message);
     }
 
     pub fn setOnDeinit(self: *Self, @"fn": *const fn () void) void {
@@ -165,16 +165,18 @@ pub const MyManagerV1Object = struct {
     }
 
     pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, message: [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{@"message",
-});
-        defer args.deinit(gpa);
+        var buffer: [1]types.Arg = undefined;
+        var args = types.Args.init(&buffer, .{
+            @"message",
+        });
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 
     pub fn sendRecvMessageArrayUint(self: *Self, gpa: std.mem.Allocator, message: []const u32) !void {
-        var args = try types.Args.init(gpa, .{@"message",
-});
-        defer args.deinit(gpa);
+        var buffer: [1]types.Arg = undefined;
+        var args = types.Args.init(&buffer, .{
+            @"message",
+        });
         _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
     }
 };
@@ -186,8 +188,8 @@ fn myObjectV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) voi
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     var fallback_allocator = hyprwire.FallbackAllocator{
         .fba = &fba,
-        .fallback = fba.allocator(),
-        .fixed = object.arena.allocator(),
+        .fixed = fba.allocator(),
+        .fallback = object.arena.allocator(),
     };
     object.listener.vtable.myObjectV1Listener(
         object.listener.ptr,
@@ -205,8 +207,8 @@ fn myObjectV1_method1(r: *types.Object, value: i32) callconv(.c) void {
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     var fallback_allocator = hyprwire.FallbackAllocator{
         .fba = &fba,
-        .fallback = fba.allocator(),
-        .fixed = object.arena.allocator(),
+        .fixed = fba.allocator(),
+        .fallback = object.arena.allocator(),
     };
     object.listener.vtable.myObjectV1Listener(
         object.listener.ptr,
@@ -224,8 +226,8 @@ fn myObjectV1_method2(r: *types.Object) callconv(.c) void {
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
     var fallback_allocator = hyprwire.FallbackAllocator{
         .fba = &fba,
-        .fallback = fba.allocator(),
-        .fixed = object.arena.allocator(),
+        .fixed = fba.allocator(),
+        .fallback = object.arena.allocator(),
     };
     object.listener.vtable.myObjectV1Listener(
         object.listener.ptr,
@@ -280,14 +282,15 @@ pub const MyObjectV1Object = struct {
         self.object.vtable.setOnDeinit(self.object.ptr, @"fn");
     }
 
-    pub fn err(self: *Self, gpa: std.mem.Allocator, code: u32, message: [:0]const u8) !void {
-        try self.object.vtable.err(self.object.ptr, gpa, code, message);
+    pub fn @"error"(self: *Self, gpa: std.mem.Allocator, code: u32, message: [:0]const u8) void {
+        self.object.vtable.@"error"(self.object.ptr, gpa, code, message);
     }
 
     pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, message: [:0]const u8) !void {
-        var args = try types.Args.init(gpa, .{@"message",
-});
-        defer args.deinit(gpa);
+        var buffer: [1]types.Arg = undefined;
+        var args = types.Args.init(&buffer, .{
+            @"message",
+        });
         _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
     }
 };

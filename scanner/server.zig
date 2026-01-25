@@ -5,7 +5,6 @@ const ir = @import("ir.zig");
 const Protocol = ir.Protocol;
 const Object = ir.Object;
 const Method = ir.Method;
-const Arg = ir.Arg;
 const ObjectSet = ir.ObjectSet;
 const root = @import("root.zig");
 const Document = root.Document;
@@ -159,8 +158,8 @@ fn writeObjectStruct(writer: anytype, obj: Object, is_last: bool) !void {
             \\        return self.object;
             \\    }}
             \\
-            \\    pub fn err(self: *Self, code: u32, message: []const u8) void {{
-            \\        self.object.vtable.err(self.object.ptr, code, message);
+            \\    pub fn @"error"(self: *Self, code: u32, message: []const u8) void {{
+            \\        self.object.vtable.@"error"(self.object.ptr, code, message);
             \\    }}
             \\
             \\    pub fn setOnDeinit(self: *Self, @"fn": *const fn () void) void {{
@@ -182,8 +181,8 @@ fn writeObjectStruct(writer: anytype, obj: Object, is_last: bool) !void {
             \\        self.object.vtable.setOnDeinit(self.object.ptr, @"fn");
             \\    }}
             \\
-            \\    pub fn err(self: *Self, gpa: std.mem.Allocator, code: u32, message: [:0]const u8) !void {{
-            \\        try self.object.vtable.err(self.object.ptr, gpa, code, message);
+            \\    pub fn @"error"(self: *Self, gpa: std.mem.Allocator, code: u32, message: [:0]const u8) void {{
+            \\        self.object.vtable.@"error"(self.object.ptr, gpa, code, message);
             \\    }}
             \\
         , .{});

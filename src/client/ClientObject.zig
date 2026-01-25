@@ -85,7 +85,7 @@ pub fn errd(self: *Self) void {
     }
 }
 
-pub fn err(self: *Self, gpa: mem.Allocator, id: u32, message: [:0]const u8) anyerror!void {
+pub fn @"error"(self: *Self, gpa: mem.Allocator, id: u32, message: [:0]const u8) void {
     _ = self;
     _ = gpa;
     _ = id;
@@ -120,8 +120,8 @@ pub fn call(self: *Self, gpa: mem.Allocator, id: u32, args: *types.Args) !u32 {
         const msg = try fmt.allocPrintSentinel(gpa, "core protocol error: invalid method {} for object {}", .{ id, self.id }, 0);
         defer gpa.free(msg);
         log.debug("core protocol error: {s}", .{msg});
-        try self.err(gpa, id, msg);
-        return error.TODO;
+        self.@"error"(gpa, id, msg);
+        return error.InvalidMethod;
     }
 
     const method = methods[id];
@@ -131,8 +131,8 @@ pub fn call(self: *Self, gpa: mem.Allocator, id: u32, args: *types.Args) !u32 {
         const msg = try fmt.allocPrintSentinel(gpa, "invalid method spec {} for object {} -> server cannot call returnsType methods", .{ id, self.id }, 0);
         defer gpa.free(msg);
         log.debug("core protocol error: {s}", .{msg});
-        try self.err(gpa, id, msg);
-        return error.TODO;
+        self.@"error"(gpa, id, msg);
+        return error.InvalidMethod;
     }
 
     var data: std.ArrayList(u8) = .empty;
@@ -323,7 +323,7 @@ test {
 
         const obj = Object.from(&self);
         defer obj.vtable.deinit(obj.ptr, alloc);
-        try obj.vtable.err(obj.ptr, alloc, 1, "test");
+        obj.vtable.@"error"(obj.ptr, alloc, 1, "test");
 
         self.errd();
 
