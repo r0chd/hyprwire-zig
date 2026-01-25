@@ -137,8 +137,7 @@ fn buildExamples(b: *Build, target: Build.ResolvedTarget, optimize: std.builtin.
     const scanner = Scanner.init(b);
     scanner.addCustomProtocol(b.path("./examples/simple/protocol-v1.xml"));
     scanner.generate("test_protocol_v1");
-
-    hyprwire.import_table.get("protocols").?.root_source_file = scanner.getProtocolsModule().root_source_file;
+    scanner.finalize(hyprwire);
 
     const client = b.addExecutable(.{
         .name = "simple-client",
@@ -172,7 +171,8 @@ pub const Scanner = struct {
     run: *Build.Step.Run,
     output_dir: Build.LazyPath,
     b: *Build,
-    protocols_module: *Build.Module,
+    write_files: *Build.Step.WriteFile,
+    generated_protocols: std.ArrayList([]const u8),
 
     const Self = @This();
 
@@ -194,16 +194,16 @@ pub const Scanner = struct {
         run.addArg("-o");
         const output_dir = run.addOutputFileArg(".");
 
-        const protocols = b.createModule(.{
-            .root_source_file = b.addWriteFiles().add("protocols.zig", "// Generated protocols\n"),
-        });
+        const write_files = b.addWriteFiles();
+        write_files.step.dependOn(&run.step);
 
         const scanner = b.allocator.create(Scanner) catch @panic("OOM");
         scanner.* = .{
             .run = run,
             .output_dir = output_dir,
             .b = b,
-            .protocols_module = protocols,
+            .write_files = write_files,
+            .generated_protocols = .empty,
         };
 
         return scanner;
@@ -215,27 +215,42 @@ pub const Scanner = struct {
     }
 
     pub fn generate(self: *Self, protocol_name: []const u8) void {
-        const spec = self.b.createModule(.{
-            .root_source_file = self.output_dir.path(self.b, self.b.fmt("{s}-spec.zig", .{protocol_name})),
-        });
-        const server = self.b.createModule(.{
-            .root_source_file = self.output_dir.path(self.b, self.b.fmt("{s}-server.zig", .{protocol_name})),
-        });
-        const client = self.b.createModule(.{
-            .root_source_file = self.output_dir.path(self.b, self.b.fmt("{s}-client.zig", .{protocol_name})),
-        });
-        const module = self.b.createModule(.{
-            .root_source_file = self.output_dir.path(self.b, self.b.fmt("{s}.zig", .{protocol_name})),
-        });
-
-        module.addImport("server", server);
-        module.addImport("client", client);
-        module.addImport("spec", spec);
-
-        self.protocols_module.addImport(protocol_name, module);
+        self.generated_protocols.append(self.b.allocator, protocol_name) catch @panic("OOM");
     }
 
-    pub fn getProtocolsModule(self: *Self) *Build.Module {
-        return self.protocols_module;
+    pub fn finalize(self: *Self, hyprwire: *Build.Module) void {
+        var imports: std.ArrayList(u8) = .empty;
+        imports.appendSlice(self.b.allocator, "// Generated protocols\n") catch @panic("OOM");
+
+        for (self.generated_protocols.items) |protocol_name| {
+            imports.appendSlice(self.b.allocator, self.b.fmt("pub const {s} = @import(\"{s}\");\n", .{ protocol_name, protocol_name })) catch @panic("OOM");
+        }
+
+        const protocols_file = self.write_files.add("protocols.zig", imports.items);
+
+        const protocols = hyprwire.import_table.get("protocols").?;
+        protocols.root_source_file = protocols_file;
+
+        for (self.generated_protocols.items) |protocol_name| {
+            const spec = self.b.createModule(.{
+                .root_source_file = self.output_dir.path(self.b, self.b.fmt("{s}-spec.zig", .{protocol_name})),
+            });
+            const server = self.b.createModule(.{
+                .root_source_file = self.output_dir.path(self.b, self.b.fmt("{s}-server.zig", .{protocol_name})),
+            });
+            const client = self.b.createModule(.{
+                .root_source_file = self.output_dir.path(self.b, self.b.fmt("{s}-client.zig", .{protocol_name})),
+            });
+            const module = self.b.createModule(.{
+                .root_source_file = self.output_dir.path(self.b, self.b.fmt("{s}.zig", .{protocol_name})),
+            });
+
+            module.addImport("server", server);
+            module.addImport("client", client);
+            module.addImport("spec", spec);
+            module.addImport("hyprwire", hyprwire);
+
+            protocols.addImport(protocol_name, module);
+        }
     }
 };
