@@ -160,7 +160,7 @@ pub fn onSeq(self: *Self, seq: u32, id: u32) void {
     }
 }
 
-pub fn bindProtocol(self: *Self, gpa: mem.Allocator, spec: ProtocolSpec, version: u32) !Object {
+pub fn bindProtocol(self: *Self, gpa: mem.Allocator, spec: ProtocolSpec, version: u32) !*ClientObject {
     if (version > spec.vtable.specVer(spec.ptr)) {
         log.debug("version {} is larger than current spec ver of {}", .{ version, spec.vtable.specVer(spec.ptr) });
         self.disconnectOnError();
@@ -184,7 +184,7 @@ pub fn bindProtocol(self: *Self, gpa: mem.Allocator, spec: ProtocolSpec, version
 
     try self.waitForObject(gpa, object);
 
-    return Object.from(object);
+    return object;
 }
 
 pub fn makeObject(self: *Self, gpa: mem.Allocator, protocol_name: []const u8, object_name: []const u8, seq: u32) ?*ClientObject {

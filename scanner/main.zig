@@ -66,7 +66,7 @@ const ProtoData = struct {
 pub fn main() !void {
     const alloc = heap.page_allocator;
 
-    const cli = Cli.init() catch |err| switch (err) {
+    const cli = Cli.init(alloc) catch |err| switch (err) {
         error.TooManyArguments => {
             log.err("Too many arguments\n", .{});
             process.exit(1);
@@ -87,6 +87,9 @@ pub fn main() !void {
             log.err("Missing output path argument\n", .{});
             process.exit(1);
         },
+        else => {
+            return err;
+        },
     };
 
     var input_file = try fs.cwd().openFile(cli.protopath, .{});
@@ -101,10 +104,121 @@ pub fn main() !void {
 
     const proto_data = try ProtoData.init(alloc, cli.protopath, &document);
 
-    try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .client);
-    try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .server);
-    try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .spec);
-    try writeWrapper(alloc, cli.outpath, proto_data.name_original);
+    if (cli.protocols.len == 0) {
+        try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .client);
+        try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .server);
+        try writeGenerated(alloc, cli.outpath, proto_data.name_original, &document, .spec);
+        try writeWrapper(alloc, cli.outpath, proto_data.name_original);
+        return;
+    }
+
+    for (cli.protocols) |p| {
+        const base_name = p.name;
+
+        const client_src = Scanner.generateClientCodeForGlobal(alloc, &document, p.name, p.version) catch |err| {
+            switch (err) {
+                Scanner.GenerateError.ProtocolVersionTooLow => {
+                    log.err("Protocol xml version ({}) is less than requested version ({})\n", .{ proto_data.version, p.version });
+                    process.exit(1);
+                },
+                Scanner.GenerateError.UnknownGlobalInterface => {
+                    log.err("Unknown global interface '{s}'\n", .{p.name});
+                    process.exit(1);
+                },
+                else => return err,
+            }
+        };
+        defer alloc.free(client_src);
+
+        const server_src = Scanner.generateServerCodeForGlobal(alloc, &document, p.name, p.version) catch |err| {
+            switch (err) {
+                Scanner.GenerateError.ProtocolVersionTooLow => {
+                    log.err("Protocol xml version ({}) is less than requested version ({})\n", .{ proto_data.version, p.version });
+                    process.exit(1);
+                },
+                Scanner.GenerateError.UnknownGlobalInterface => {
+                    log.err("Unknown global interface '{s}'\n", .{p.name});
+                    process.exit(1);
+                },
+                else => return err,
+            }
+        };
+        defer alloc.free(server_src);
+
+        const spec_src = Scanner.generateSpecCodeForGlobal(alloc, &document, p.name, p.version) catch |err| {
+            switch (err) {
+                Scanner.GenerateError.ProtocolVersionTooLow => {
+                    log.err("Protocol xml version ({}) is less than requested version ({})\n", .{ proto_data.version, p.version });
+                    process.exit(1);
+                },
+                Scanner.GenerateError.UnknownGlobalInterface => {
+                    log.err("Unknown global interface '{s}'\n", .{p.name});
+                    process.exit(1);
+                },
+                else => return err,
+            }
+        };
+        defer alloc.free(spec_src);
+
+        const client_filename = try std.fmt.allocPrint(alloc, "{s}-client.zig", .{base_name});
+        defer alloc.free(client_filename);
+        const server_filename = try std.fmt.allocPrint(alloc, "{s}-server.zig", .{base_name});
+        defer alloc.free(server_filename);
+        const spec_filename = try std.fmt.allocPrint(alloc, "{s}-spec.zig", .{base_name});
+        defer alloc.free(spec_filename);
+
+        const client_path = try std.fs.path.join(alloc, &.{ cli.outpath, client_filename });
+        defer alloc.free(client_path);
+        const server_path = try std.fs.path.join(alloc, &.{ cli.outpath, server_filename });
+        defer alloc.free(server_path);
+        const spec_path = try std.fs.path.join(alloc, &.{ cli.outpath, spec_filename });
+        defer alloc.free(spec_path);
+
+        if (std.fs.path.dirname(client_path)) |dir| {
+            try std.fs.cwd().makePath(dir);
+        }
+
+        var client_file = try std.fs.cwd().createFile(client_path, .{ .truncate = true });
+        defer client_file.close();
+        _ = try client_file.write(client_src);
+
+        var server_file = try std.fs.cwd().createFile(server_path, .{ .truncate = true });
+        defer server_file.close();
+        _ = try server_file.write(server_src);
+
+        var spec_file = try std.fs.cwd().createFile(spec_path, .{ .truncate = true });
+        defer spec_file.close();
+        _ = try spec_file.write(spec_src);
+
+        try writeWrapper(alloc, cli.outpath, base_name);
+    }
+
+    try writeProtocolsIndex(alloc, cli.outpath, cli.protocols);
+}
+
+fn writeProtocolsIndex(
+    alloc: std.mem.Allocator,
+    outpath: []const u8,
+    protocols: []const Cli.Protocol,
+) !void {
+    var content: std.Io.Writer.Allocating = .init(alloc);
+    var writer = &content.writer;
+
+    for (protocols) |p| {
+        try writer.print("pub const {s} = @import(\"{s}.zig\");\n", .{ p.name, p.name });
+    }
+
+    const file_path = try std.fs.path.join(alloc, &.{ outpath, "protocols.zig" });
+    defer alloc.free(file_path);
+
+    if (std.fs.path.dirname(file_path)) |dir| {
+        try std.fs.cwd().makePath(dir);
+    }
+
+    var file = try std.fs.cwd().createFile(file_path, .{ .truncate = true });
+    defer file.close();
+
+    _ = try file.write(content.written());
 }
 
 const GeneratedKind = enum {
@@ -151,11 +265,9 @@ fn writeGenerated(
 fn writeSingleGenerated(
     alloc: std.mem.Allocator,
     outpath: []const u8,
-    base_name: []const u8,
     document: *const Document,
     kind: GeneratedKind,
 ) !void {
-    _ = base_name; // unused parameter
     const source = switch (kind) {
         .client => try Scanner.generateClientCode(alloc, document),
         .server => try Scanner.generateServerCode(alloc, document),
@@ -171,11 +283,9 @@ fn writeSingleGenerated(
 fn appendToGeneratedFile(
     alloc: std.mem.Allocator,
     outpath: []const u8,
-    base_name: []const u8,
     document: *const Document,
     kind: GeneratedKind,
 ) !void {
-    _ = base_name; // unused parameter
     const source = switch (kind) {
         .client => try Scanner.generateClientCode(alloc, document),
         .server => try Scanner.generateServerCode(alloc, document),

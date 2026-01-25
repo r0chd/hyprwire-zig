@@ -28,11 +28,9 @@ pub const MessageMagic = enum(u8) {
     type_fd = 0x40,
 };
 
-const types = struct {
-    pub const Method = struct {
-        idx: u32,
-        params: []const u8,
-    };
+pub const GenerateError = error{
+    ProtocolVersionTooLow,
+    UnknownGlobalInterface,
 };
 
 pub const Document = struct {
@@ -172,6 +170,108 @@ pub fn generateClientCode(gpa: mem.Allocator, doc: *const Document) ![]const u8 
             \\
         , .{ idx, idx, idx, obj_info.name });
         if (idx < protocol_info.objects.len - 1) {
+            try writer.print("\n", .{});
+        }
+    }
+
+    try writer.print(
+        \\
+        \\        return impls;
+        \\    }}
+        \\}};
+    , .{});
+
+    return output.toOwnedSlice();
+}
+
+pub fn generateClientCodeForGlobal(gpa: mem.Allocator, doc: *const Document, global_iface: []const u8, requested_version: u32) ![]const u8 {
+    const protocol_info = try extractProtocolInfo(doc, gpa);
+
+    if (protocol_info.version < requested_version) {
+        return GenerateError.ProtocolVersionTooLow;
+    }
+
+    if (mem.eql(u8, global_iface, protocol_info.name)) {
+        return generateClientCode(gpa, doc);
+    }
+
+    var selected = try computeReachableObjects(gpa, protocol_info, global_iface, requested_version);
+
+    var output: std.Io.Writer.Allocating = .init(gpa);
+    var writer = &output.writer;
+
+    try writer.print(
+        \\const std = @import("std");
+        \\
+        \\const hyprwire = @import("hyprwire");
+        \\const types = hyprwire.types;
+        \\const client = types.client;
+        \\const spec = hyprwire.proto.{s}.spec;
+        \\
+        \\
+    , .{protocol_info.name});
+
+    var obj_count: usize = 0;
+    for (protocol_info.objects, 0..) |obj_info, obj_idx| {
+        _ = obj_idx;
+        if (!selected.contains(obj_info.name)) continue;
+        obj_count += 1;
+    }
+
+    var seen: usize = 0;
+    for (protocol_info.objects) |obj_info| {
+        if (!selected.contains(obj_info.name)) continue;
+        const struct_name = try toPascalCase(obj_info.name, gpa);
+        const camel_name = try toCamelCase(obj_info.name, gpa);
+
+        for (obj_info.s2c_methods, 0..) |method, idx| {
+            try writeClientMethodHandler(writer, gpa, struct_name, camel_name, method, idx);
+        }
+
+        try writeClientObjectStruct(writer, gpa, struct_name, camel_name, obj_info, seen > 0, seen > 0);
+        seen += 1;
+    }
+
+    const protocol_struct_name = try toPascalCase(protocol_info.name, gpa);
+    try writer.print(
+        \\pub const {s}Impl = struct {{
+        \\    version: u32,
+        \\
+        \\    const Self = @This();
+        \\
+        \\    pub fn init(version: u32) Self {{
+        \\        return .{{ .version = version }};
+        \\    }}
+        \\
+        \\    pub fn protocol(self: *Self) types.ProtocolSpec {{
+        \\        _ = self;
+        \\        return types.ProtocolSpec.from(&spec.protocol);
+        \\    }}
+        \\
+        \\    pub fn implementation(
+        \\        self: *Self,
+        \\        gpa: std.mem.Allocator,
+        \\    ) ![]*client.ObjectImplementation {{
+        \\        const impls = try gpa.alloc(*client.ObjectImplementation, {});
+        \\        errdefer gpa.free(impls);
+        \\
+        \\
+    , .{ protocol_struct_name, obj_count });
+
+    var idx: usize = 0;
+    for (protocol_info.objects) |obj_info| {
+        if (!selected.contains(obj_info.name)) continue;
+        try writer.print(
+            \\        impls[{}] = try gpa.create(client.ObjectImplementation);
+            \\        errdefer gpa.destroy(impls[{}]);
+            \\        impls[{}].* = .{{
+            \\            .object_name = "{s}",
+            \\            .version = self.version,
+            \\        }};
+            \\
+        , .{ idx, idx, idx, obj_info.name });
+        idx += 1;
+        if (idx < obj_count) {
             try writer.print("\n", .{});
         }
     }
@@ -989,6 +1089,237 @@ const ArgInfo = struct {
     base_type: []const u8,
 };
 
+fn freeProtocolInfo(gpa: mem.Allocator, protocol_info: ProtocolInfo) void {
+    for (protocol_info.objects) |obj_info| {
+        for (obj_info.c2s_methods) |method| {
+            gpa.free(method.params);
+            gpa.free(method.args);
+        }
+        for (obj_info.s2c_methods) |method| {
+            gpa.free(method.params);
+            gpa.free(method.args);
+        }
+        gpa.free(obj_info.c2s_methods);
+        gpa.free(obj_info.s2c_methods);
+    }
+
+    for (protocol_info.enums) |enum_info| {
+        gpa.free(enum_info.values);
+    }
+
+    gpa.free(protocol_info.objects);
+    gpa.free(protocol_info.enums);
+}
+
+const ObjectSet = struct {
+    map: std.StringHashMapUnmanaged(void) = .empty,
+
+    fn deinit(self: *ObjectSet, gpa: mem.Allocator) void {
+        self.map.deinit(gpa);
+    }
+
+    fn contains(self: *const ObjectSet, name: []const u8) bool {
+        return self.map.contains(name);
+    }
+
+    fn insert(self: *ObjectSet, gpa: mem.Allocator, name: []const u8) !void {
+        try self.map.put(gpa, name, {});
+    }
+};
+
+fn findObject(protocol_info: ProtocolInfo, name: []const u8) ?ObjectInfo {
+    for (protocol_info.objects) |obj_info| {
+        if (mem.eql(u8, obj_info.name, name)) return obj_info;
+    }
+    return null;
+}
+
+fn computeReachableObjects(gpa: mem.Allocator, protocol_info: ProtocolInfo, global_iface: []const u8, requested_version: u32) !ObjectSet {
+    if (findObject(protocol_info, global_iface) == null) {
+        return GenerateError.UnknownGlobalInterface;
+    }
+
+    var selected: ObjectSet = .{};
+    var queue: std.ArrayList([]const u8) = .empty;
+    defer queue.deinit(gpa);
+
+    try selected.insert(gpa, global_iface);
+    try queue.append(gpa, global_iface);
+
+    var idx: usize = 0;
+    while (idx < queue.items.len) : (idx += 1) {
+        const current = queue.items[idx];
+        const obj = findObject(protocol_info, current) orelse continue;
+
+        for (obj.c2s_methods) |method| {
+            if (method.since > requested_version) continue;
+            if (method.returns_type.len > 0 and !selected.contains(method.returns_type)) {
+                if (findObject(protocol_info, method.returns_type) != null) {
+                    try selected.insert(gpa, method.returns_type);
+                    try queue.append(gpa, method.returns_type);
+                }
+            }
+            for (method.args) |arg| {
+                if (arg.interface.len == 0) continue;
+                if (selected.contains(arg.interface)) continue;
+                if (findObject(protocol_info, arg.interface) != null) {
+                    try selected.insert(gpa, arg.interface);
+                    try queue.append(gpa, arg.interface);
+                }
+            }
+        }
+
+        for (obj.s2c_methods) |method| {
+            if (method.since > requested_version) continue;
+            if (method.returns_type.len > 0 and !selected.contains(method.returns_type)) {
+                if (findObject(protocol_info, method.returns_type) != null) {
+                    try selected.insert(gpa, method.returns_type);
+                    try queue.append(gpa, method.returns_type);
+                }
+            }
+            for (method.args) |arg| {
+                if (arg.interface.len == 0) continue;
+                if (selected.contains(arg.interface)) continue;
+                if (findObject(protocol_info, arg.interface) != null) {
+                    try selected.insert(gpa, arg.interface);
+                    try queue.append(gpa, arg.interface);
+                }
+            }
+        }
+    }
+
+    return selected;
+}
+
+pub fn generateServerCodeForGlobal(gpa: mem.Allocator, doc: *const Document, global_iface: []const u8, requested_version: u32) ![]const u8 {
+    const protocol_info = try extractProtocolInfo(doc, gpa);
+
+    if (protocol_info.version < requested_version) {
+        return GenerateError.ProtocolVersionTooLow;
+    }
+
+    if (mem.eql(u8, global_iface, protocol_info.name)) {
+        return generateServerCode(gpa, doc);
+    }
+
+    var selected = try computeReachableObjects(gpa, protocol_info, global_iface, requested_version);
+
+    var output: std.Io.Writer.Allocating = .init(gpa);
+    var writer = &output.writer;
+
+    try writer.print(
+        \\const std = @import("std");
+        \\
+        \\const hyprwire = @import("hyprwire");
+        \\const types = hyprwire.types;
+        \\const server = types.server;
+        \\const spec = hyprwire.proto.{s}.spec;
+        \\
+        \\
+    , .{protocol_info.name});
+
+    var obj_count: usize = 0;
+    for (protocol_info.objects) |obj_info| {
+        if (!selected.contains(obj_info.name)) continue;
+        obj_count += 1;
+    }
+
+    var seen: usize = 0;
+    for (protocol_info.objects, 0..) |obj_info, obj_idx| {
+        _ = obj_idx;
+        if (!selected.contains(obj_info.name)) continue;
+        const struct_name = try toPascalCase(obj_info.name, gpa);
+        const camel_name = try toCamelCase(obj_info.name, gpa);
+
+        for (obj_info.c2s_methods, 0..) |method, idx2| {
+            try writeServerMethodHandler(writer, gpa, struct_name, camel_name, method, idx2);
+        }
+
+        const is_last = seen == obj_count - 1;
+        try writeServerObjectStruct(writer, gpa, struct_name, camel_name, obj_info, is_last);
+        seen += 1;
+    }
+
+    const protocol_struct_name = try toPascalCase(protocol_info.name, gpa);
+    try writer.print(
+        \\pub const {s}Listener = hyprwire.Trait(.{{
+        \\    .bind = fn (*types.Object) void,
+        \\}}, null);
+        \\
+        \\pub const {s}Impl = struct {{
+        \\    version: u32,
+        \\    listener: {s}Listener,
+        \\
+        \\    const Self = @This();
+        \\
+        \\    pub fn init(
+        \\        version: u32,
+        \\        listener: {s}Listener,
+        \\    ) Self {{
+        \\        return .{{
+        \\            .version = version,
+        \\            .listener = listener,
+        \\        }};
+        \\    }}
+        \\
+        \\    pub fn protocol(_: *Self) types.ProtocolSpec {{
+        \\        return types.ProtocolSpec.from(&spec.{s}ProtocolSpec{{}});
+        \\    }}
+        \\
+        \\    pub fn implementation(
+        \\        self: *Self,
+        \\        gpa: std.mem.Allocator,
+        \\    ) ![]*server.ObjectImplementation {{
+        \\        const impls = try gpa.alloc(*server.ObjectImplementation, {});
+        \\        errdefer gpa.free(impls);
+        \\
+        \\
+    , .{ protocol_struct_name, protocol_struct_name, protocol_struct_name, protocol_struct_name, protocol_struct_name, obj_count });
+
+    var idx: usize = 0;
+    for (protocol_info.objects) |obj_info| {
+        if (!selected.contains(obj_info.name)) continue;
+        const is_first = idx == 0;
+        try writer.print(
+            \\        impls[{}] = try gpa.create(server.ObjectImplementation);
+            \\        errdefer gpa.destroy(impls[{}]);
+            \\        impls[{}].* = .{{
+            \\            .context = self.listener.ptr,
+            \\            .object_name = "{s}",
+            \\            .version = self.version,
+        , .{ idx, idx, idx, obj_info.name });
+
+        if (is_first) {
+            try writer.print(
+                \\
+                \\            .onBind = self.listener.vtable.bind,
+                \\        }};
+                \\
+            , .{});
+        } else {
+            try writer.print(
+                \\
+                \\        }};
+                \\
+            , .{});
+        }
+
+        idx += 1;
+        if (idx < obj_count) {
+            try writer.print("\n", .{});
+        }
+    }
+
+    try writer.print(
+        \\
+        \\        return impls;
+        \\    }}
+        \\}};
+    , .{});
+
+    return output.toOwnedSlice();
+}
+
 const MethodInfo = struct {
     name: []const u8,
     idx: u32,
@@ -1081,6 +1412,9 @@ fn extractMethodInfo(method_elem: *const Node.Element, idx: u32, gpa: mem.Alloca
     const name = method_elem.attributes.get("name") orelse return error.MissingMethodName;
     const is_destructor = if (method_elem.attributes.get("destructor")) |d| mem.eql(u8, d, "true") else false;
 
+    const since_str = method_elem.attributes.get("since") orelse "0";
+    const since = std.fmt.parseInt(u32, since_str, 10) catch 0;
+
     const params = try generateMethodParams(method_elem, gpa);
 
     var args: std.ArrayList(ArgInfo) = .empty;
@@ -1116,7 +1450,7 @@ fn extractMethodInfo(method_elem: *const Node.Element, idx: u32, gpa: mem.Alloca
         .idx = idx,
         .params = params,
         .returns_type = returns_type,
-        .since = 0,
+        .since = since,
         .args = try args.toOwnedSlice(gpa),
         .is_destructor = is_destructor,
     };
@@ -1294,6 +1628,172 @@ pub fn generateSpecCode(gpa: mem.Allocator, doc: *const Document) ![]const u8 {
     , .{ protocol_info.name, protocol_info.version, protocol_struct_name, protocol_info.objects.len });
 
     for (protocol_info.objects) |obj_info| {
+        const field_name = try toCamelCase(obj_info.name, gpa);
+        defer gpa.free(field_name);
+
+        try writer.print("    types.ProtocolObjectSpec.from(&protocol.{s}),\n", .{field_name});
+    }
+
+    try writer.print("}};\n", .{});
+
+    return try output.toOwnedSlice();
+}
+
+pub fn generateSpecCodeForGlobal(gpa: mem.Allocator, doc: *const Document, global_iface: []const u8, requested_version: u32) ![]const u8 {
+    const protocol_info = try extractProtocolInfo(doc, gpa);
+
+    if (protocol_info.version < requested_version) {
+        return GenerateError.ProtocolVersionTooLow;
+    }
+
+    if (mem.eql(u8, global_iface, protocol_info.name)) {
+        return generateSpecCode(gpa, doc);
+    }
+
+    var selected = try computeReachableObjects(gpa, protocol_info, global_iface, requested_version);
+
+    var output: std.Io.Writer.Allocating = .init(gpa);
+    var writer = &output.writer;
+
+    try writer.print(
+        \\const std = @import("std");
+        \\
+        \\const hyprwire = @import("hyprwire");
+        \\const types = hyprwire.types;
+        \\
+    , .{});
+
+    for (protocol_info.enums) |enum_info| {
+        const enum_struct_name = try toPascalCase(enum_info.name, gpa);
+        defer gpa.free(enum_struct_name);
+
+        try writer.print("\npub const {s} = enum(u32) {{\n", .{enum_struct_name});
+        for (enum_info.values) |value| {
+            try writer.print("   {s} = {},\n", .{ value.name, value.idx });
+        }
+        try writer.print("}};\n", .{});
+    }
+
+    var obj_count: usize = 0;
+    for (protocol_info.objects) |obj_info| {
+        if (!selected.contains(obj_info.name)) continue;
+        obj_count += 1;
+    }
+
+    for (protocol_info.objects) |obj_info| {
+        if (!selected.contains(obj_info.name)) continue;
+
+        const struct_name = try toPascalCase(obj_info.name, gpa);
+        defer gpa.free(struct_name);
+
+        try writer.print("\npub const {s}Spec = struct {{\n", .{struct_name});
+
+        try writer.print("    c2s_methods: []const types.Method = &.{{\n", .{});
+        for (obj_info.c2s_methods) |method| {
+            try writer.print(
+                \\        .{{
+                \\            .idx = {},
+                \\            .params = &[_]u8{{
+            , .{method.idx});
+
+            for (method.params, 0..) |param_byte, i| {
+                if (i > 0) try writer.print(", ", .{});
+                try writer.print("@intFromEnum(hyprwire.MessageMagic.{s})", .{getMessageMagicName(param_byte)});
+            }
+
+            try writer.print(
+                \\}},
+                \\            .returns_type = "{s}",
+                \\            .since = {},
+                \\        }},
+                \\
+            , .{ method.returns_type, method.since });
+        }
+        try writer.print("    }},\n\n", .{});
+
+        try writer.print("    s2c_methods: []const types.Method = &.{{\n", .{});
+        for (obj_info.s2c_methods) |method| {
+            try writer.print(
+                \\        .{{
+                \\            .idx = {},
+                \\            .params = &[_]u8{{
+            , .{method.idx});
+
+            for (method.params, 0..) |param_byte, i| {
+                if (i > 0) try writer.print(", ", .{});
+                try writer.print("@intFromEnum(hyprwire.MessageMagic.{s})", .{getMessageMagicName(param_byte)});
+            }
+
+            try writer.print(
+                \\}},
+                \\            .since = {},
+                \\        }},
+                \\
+            , .{method.since});
+        }
+        try writer.print("    }},\n\n", .{});
+
+        try writer.print(
+            \\    const Self = @This();
+            \\
+            \\    pub fn objectName(_: *const Self) []const u8 {{
+            \\        return "{s}";
+            \\    }}
+            \\
+            \\    pub fn c2s(self: *const Self) []const types.Method {{
+            \\        return self.c2s_methods;
+            \\    }}
+            \\
+            \\    pub fn s2c(self: *const Self) []const types.Method {{
+            \\        return self.s2c_methods;
+            \\    }}
+            \\}};
+            \\
+        , .{obj_info.name});
+    }
+
+    const protocol_struct_name = try toPascalCase(protocol_info.name, gpa);
+    defer gpa.free(protocol_struct_name);
+
+    try writer.print("\npub const {s}ProtocolSpec = struct {{\n", .{protocol_struct_name});
+
+    for (protocol_info.objects) |obj_info| {
+        if (!selected.contains(obj_info.name)) continue;
+        const field_name = try toCamelCase(obj_info.name, gpa);
+        defer gpa.free(field_name);
+        const struct_name = try toPascalCase(obj_info.name, gpa);
+        defer gpa.free(struct_name);
+
+        try writer.print("    {s}: {s}Spec = .{{}},\n", .{ field_name, struct_name });
+    }
+
+    try writer.print(
+        \\
+        \\    const Self = @This();
+        \\
+        \\    pub fn specName(_: *const Self) []const u8 {{
+        \\        return "{s}";
+        \\    }}
+        \\
+        \\    pub fn specVer(_: *Self) u32 {{
+        \\        return {};
+        \\    }}
+        \\
+        \\    pub fn objects(_: *Self) []const types.ProtocolObjectSpec {{
+        \\        return protocol_objects[0..];
+        \\    }}
+        \\
+        \\    pub fn deinit(_: *Self, _: std.mem.Allocator) void {{}}
+        \\}};
+        \\
+        \\pub const protocol = {s}ProtocolSpec{{}};
+        \\
+        \\pub const protocol_objects: [{}]types.ProtocolObjectSpec = .{{
+        \\
+    , .{ protocol_info.name, protocol_info.version, protocol_struct_name, obj_count });
+
+    for (protocol_info.objects) |obj_info| {
+        if (!selected.contains(obj_info.name)) continue;
         const field_name = try toCamelCase(obj_info.name, gpa);
         defer gpa.free(field_name);
 

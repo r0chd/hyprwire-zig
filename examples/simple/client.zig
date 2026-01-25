@@ -32,7 +32,7 @@ const Client = struct {
         _ = self;
         switch (event) {
             .send_message => |message| {
-                std.debug.print("Server says on object{s}\n", .{message.message});
+                std.debug.print("Server says on object {s}\n", .{message.message});
             },
         }
     }
@@ -73,8 +73,12 @@ pub fn main() !void {
     var client = Client{};
 
     var obj = try socket.bindProtocol(alloc, protocol, TEST_PROTOCOL_VERSION);
-    defer obj.vtable.deinit(obj.ptr, alloc);
-    var manager = try proto_client.MyManagerV1Object.init(alloc, proto_client.MyManagerV1Object.Listener.from(&client), &obj);
+    defer obj.deinit(alloc);
+    var manager = try proto_client.MyManagerV1Object.init(
+        alloc,
+        proto_client.MyManagerV1Object.Listener.from(&client),
+        &types.Object.from(obj),
+    );
     defer manager.deinit(alloc);
 
     std.debug.print("Bound!\n", .{});
