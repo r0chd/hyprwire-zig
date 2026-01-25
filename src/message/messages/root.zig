@@ -4,6 +4,7 @@ const message_parser = @import("../MessageParser.zig");
 const mem = std.mem;
 const fmt = std.fmt;
 const meta = std.meta;
+const enums = std.enums;
 
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../MessageType.zig").MessageType;
@@ -30,15 +31,15 @@ pub const Message = Trait(.{
 fn formatPrimitiveType(gpa: mem.Allocator, s: []const u8, @"type": MessageMagic) !std.meta.Tuple(&.{ [:0]const u8, usize }) {
     switch (@"type") {
         .type_uint => {
-            const value = std.mem.readVarInt(u32, s[0..4], .little);
+            const value = mem.readVarInt(u32, s[0..4], .little);
             return .{ try fmt.allocPrintSentinel(gpa, "{}", .{value}, 0), 4 };
         },
         .type_int => {
-            const value = std.mem.readVarInt(i32, s[0..4], .little);
+            const value = mem.readVarInt(i32, s[0..4], .little);
             return .{ try fmt.allocPrintSentinel(gpa, "{}", .{value}, 0), 4 };
         },
         .type_f32 => {
-            const int_bits = std.mem.readVarInt(u32, s[0..4], .little);
+            const int_bits = mem.readVarInt(u32, s[0..4], .little);
             const value: f32 = @bitCast(int_bits);
             return .{ try fmt.allocPrintSentinel(gpa, "{}", .{value}, 0), 4 };
         },
@@ -46,7 +47,7 @@ fn formatPrimitiveType(gpa: mem.Allocator, s: []const u8, @"type": MessageMagic)
             return .{ try gpa.dupeZ(u8, "<fd>"), 0 };
         },
         .type_object => {
-            const id = std.mem.readVarInt(u32, s[0..4], .little);
+            const id = mem.readVarInt(u32, s[0..4], .little);
             const obj_str = if (id == 0) "null" else try fmt.allocPrintSentinel(gpa, "{}", .{id}, 0);
             return .{ try fmt.allocPrintSentinel(gpa, "object: {s}", .{obj_str}, 0), 4 };
         },
@@ -73,7 +74,7 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
         const magic_byte = message_data[needle];
         needle += 1;
 
-        const magic = meta.intToEnum(MessageMagic, magic_byte) catch return error.InvalidMessage;
+        const magic = enums.fromInt(MessageMagic, magic_byte) orelse return error.InvalidMessage;
         switch (magic) {
             .end => {
                 break;
@@ -81,28 +82,28 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
             .type_seq => {
                 if (!first) _ = try result.writer.write(", ");
                 first = false;
-                const value = std.mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
+                const value = mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
                 try result.writer.print("seq: {}", .{value});
                 needle += 4;
             },
             .type_uint => {
                 if (!first) _ = try result.writer.write(", ");
                 first = false;
-                const value = std.mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
+                const value = mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
                 try result.writer.print("{}", .{value});
                 needle += 4;
             },
             .type_int => {
                 if (!first) _ = try result.writer.write(", ");
                 first = false;
-                const value = std.mem.readVarInt(i32, message_data[needle .. needle + 4], .little);
+                const value = mem.readVarInt(i32, message_data[needle .. needle + 4], .little);
                 try result.writer.print("{}", .{value});
                 needle += 4;
             },
             .type_f32 => {
                 if (!first) _ = try result.writer.write(", ");
                 first = false;
-                const int_bits = std.mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
+                const int_bits = mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
                 const value: f32 = @bitCast(int_bits);
                 try result.writer.print("{}", .{value});
                 needle += 4;
@@ -122,7 +123,7 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
             .type_array => {
                 if (!first) _ = try result.writer.write(", ");
                 first = false;
-                const this_type = meta.intToEnum(MessageMagic, message_data[needle]) catch return error.InvalidMessage;
+                const this_type = enums.fromInt(MessageMagic, message_data[needle]) orelse return error.InvalidMessage;
                 needle += 1;
                 const els, const int_len = message_parser.parseVarInt(message_data, needle);
                 _ = try result.writer.write("{ ");
@@ -144,7 +145,7 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
             .type_object => {
                 if (!first) _ = try result.writer.write(", ");
                 first = false;
-                const id = std.mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
+                const id = mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
                 needle += 4;
                 try result.writer.print("object({})", .{id});
             },

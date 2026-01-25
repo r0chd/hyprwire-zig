@@ -9,8 +9,8 @@
             .hash = "xml-0.2.0-ZTbP3wE6AgCsnyZut_plzxi6WB2tzzh3kFRBOp3AL7n9",
         },
         .trait = .{
-            .url = "git+https://forgejo.r0chd.pl/r0chd/zig-interface#2a42c17f1b7af03d0ffbad8958fedc61bd6f7a5c",
-            .hash = "trait-0.0.2-87cOXjWsAQDe4J4lXNXoHWRQYSI2gV-mNZdKXuxY9wRP",
+            .url = "git+https://forgejo.r0chd.pl/r0chd/zig-interface?ref=0.16#4c4a4e16fc5e5a6c423e3a45423b5ebf22416353",
+            .hash = "trait-0.0.2-87cOXiqyAQBq5ZivgJW6qsJqSoqsDZzpk5MNAdzFB2Cb",
         },
     },
     .paths = .{

@@ -1,27 +1,28 @@
 const std = @import("std");
-const types = @import("../implementation/types.zig");
-const messages = @import("../message/messages/root.zig");
-const helpers = @import("helpers");
-const message_parser = @import("../message/MessageParser.zig");
-
 const fmt = std.fmt;
-const log = std.log.scoped(.hw);
+const enums = std.enums;
 const mem = std.mem;
-const isTrace = helpers.isTrace;
 const meta = std.meta;
 
-pub const MAX_ERROR_MSG_SIZE: usize = 256;
+const helpers = @import("helpers");
+const isTrace = helpers.isTrace;
 
-const FatalErrorMessage = @import("../message/messages/FatalProtocolError.zig");
-const ServerSocket = @import("ServerSocket.zig");
 const ClientSocket = @import("../client/ClientSocket.zig");
-const ServerClient = @import("ServerClient.zig");
-const WireObject = @import("../implementation/WireObject.zig").WireObject;
 const Object = @import("../implementation/Object.zig").Object;
+const types = @import("../implementation/types.zig");
+const Method = types.Method;
+const WireObject = @import("../implementation/WireObject.zig").WireObject;
+const message_parser = @import("../message/MessageParser.zig");
+const FatalErrorMessage = @import("../message/messages/FatalProtocolError.zig");
+const messages = @import("../message/messages/root.zig");
+const Message = messages.Message;
 const MessageType = @import("../message/MessageType.zig").MessageType;
 const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
-const Message = messages.Message;
-const Method = types.Method;
+const ServerClient = @import("ServerClient.zig");
+const ServerSocket = @import("ServerSocket.zig");
+
+const log = std.log.scoped(.hw);
+pub const MAX_ERROR_MSG_SIZE: usize = 256;
 
 client: ?*ServerClient,
 spec: ?types.ProtocolObjectSpec = null,
@@ -173,7 +174,7 @@ pub fn call(self: *Self, gpa: mem.Allocator, id: u32, args: *types.Args) !u32 {
 
     var i: usize = 0;
     while (i < params.len) : (i += 1) {
-        const param = meta.intToEnum(MessageMagic, params[i]) catch unreachable;
+        const param = enums.fromInt(MessageMagic, params[i]) orelse return error.InvalidMessage;
         switch (param) {
             .type_uint => {
                 try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
@@ -213,7 +214,7 @@ pub fn call(self: *Self, gpa: mem.Allocator, id: u32, args: *types.Args) !u32 {
             },
             .type_array => {
                 if (i + 1 >= params.len) return error.InvalidMessage;
-                const arr_type = meta.intToEnum(MessageMagic, params[i + 1]) catch return error.InvalidMessage;
+                const arr_type = enums.fromInt(MessageMagic, params[i + 1]) orelse return error.InvalidMessage;
                 i += 1;
 
                 try data.append(gpa, @intFromEnum(MessageMagic.type_array));

@@ -42,7 +42,7 @@ waiting_on_object: ?*ClientObject = null,
 
 const Self = @This();
 
-pub fn open(gpa: mem.Allocator, source: union(enum) { fd: i32, path: [:0]const u8 }) !*Self {
+pub fn open(gpa: mem.Allocator, io: std.Io, source: union(enum) { fd: i32, path: [:0]const u8 }) !*Self {
     const sock = try gpa.create(Self);
     errdefer gpa.destroy(sock);
     sock.* = .{
@@ -52,7 +52,7 @@ pub fn open(gpa: mem.Allocator, source: union(enum) { fd: i32, path: [:0]const u
 
     switch (source) {
         .fd => |fd| try sock.attemptFromFd(gpa, fd),
-        .path => |path| try sock.attempt(gpa, path),
+        .path => |path| try sock.attempt(gpa, io, path),
     }
 
     return sock;
@@ -77,7 +77,7 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.destroy(self);
 }
 
-pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
+pub fn attempt(self: *Self, gpa: mem.Allocator, io: std.Io, path: [:0]const u8) !void {
     const raw_fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
     const fd = Fd{ .raw = raw_fd };
 
@@ -85,7 +85,7 @@ pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
         .path = undefined,
     };
 
-    try fs.cwd().access(path, .{});
+    try std.Io.Dir.cwd().access(io, path, .{});
 
     if (path.len >= 108) return error.PathTooLong;
 

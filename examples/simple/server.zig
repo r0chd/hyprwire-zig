@@ -106,29 +106,22 @@ const Server = struct {
     }
 };
 
-fn socketPath(alloc: mem.Allocator) ![:0]u8 {
-    const runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
+fn socketPath(alloc: mem.Allocator, environ: *std.process.Environ.Map) ![:0]u8 {
+    const runtime_dir = environ.get("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
     return try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{runtime_dir}, 0);
 }
 
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    const alloc = gpa.allocator();
-    defer {
-        const deinit_status = gpa.deinit();
-        if (deinit_status == .leak) @panic("LEAK DETECTED");
-    }
+pub fn main(init: std.process.Init) !void {
+    const socket_path = try socketPath(init.gpa, init.environ_map);
+    defer init.gpa.free(socket_path);
 
-    const socket_path = try socketPath(alloc);
-    defer alloc.free(socket_path);
-
-    const socket = try hw.ServerSocket.open(alloc, socket_path);
-    var server = Server{ .alloc = alloc, .socket = socket };
+    const socket = try hw.ServerSocket.open(init.gpa, init.io, socket_path);
+    var server = Server{ .alloc = init.gpa, .socket = socket };
     defer server.deinit();
 
     const spec = test_protocol.TestProtocolV1Impl.init(1, test_protocol.TestProtocolV1Listener.from(&server));
     const pro = hw.types.server.ProtocolImplementation.from(&spec);
-    try socket.addImplementation(alloc, pro);
+    try socket.addImplementation(init.gpa, pro);
 
-    while (socket.dispatchEvents(alloc, true) catch false) {}
+    while (socket.dispatchEvents(init.gpa, true) catch false) {}
 }

@@ -1,17 +1,21 @@
 const std = @import("std");
+const posix = std.posix;
+const mem = std.mem;
+
+const MessageMagic = @import("hyprwire").MessageMagic;
+
+pub const FallbackAllocator = @import("FallbackAllocator.zig");
+
 const c = @cImport({
     @cInclude("sys/socket.h");
     @cInclude("ffi.h");
 });
-const MessageMagic = @import("hyprwire").MessageMagic;
-pub const FallbackAllocator = @import("FallbackAllocator.zig");
-
-const posix = std.posix;
-const mem = std.mem;
-
 pub fn isTrace() bool {
-    const trace = posix.getenv("HW_TRACE") orelse return false;
-    return mem.eql(u8, "1", trace) or mem.eql(u8, "true", trace);
+    // Holy moly I'm not going to ask user to pass
+    // Environ.Map everytime I need to know if tracing
+    // is enabled, that would be insane lmfao
+    const trace = std.c.getenv("HW_TRACE") orelse return false;
+    return mem.eql(u8, "1", mem.span(trace)) or mem.eql(u8, "true", mem.span(trace));
 }
 
 pub fn sunLen(addr: *const posix.sockaddr.un) usize {

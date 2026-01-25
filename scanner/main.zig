@@ -63,10 +63,10 @@ const ProtoData = struct {
     }
 };
 
-pub fn main() !void {
-    const alloc = heap.page_allocator;
+pub fn main(init: std.process.Init) !void {
+    const alloc = init.arena.allocator();
 
-    const cli = Cli.init(alloc) catch |err| switch (err) {
+    const cli = Cli.init(alloc, init.minimal.args) catch |err| switch (err) {
         error.TooManyArguments => {
             log.err("Too many arguments\n", .{});
             process.exit(1);
@@ -92,11 +92,11 @@ pub fn main() !void {
         },
     };
 
-    var input_file = try fs.cwd().openFile(cli.protopath, .{});
-    defer input_file.close();
+    var input_file = try std.Io.Dir.cwd().openFile(init.io, cli.protopath, .{});
+    defer input_file.close(init.io);
 
     var input_buf: [4096]u8 = undefined;
-    var input_reader = input_file.reader(&input_buf);
+    var input_reader = input_file.reader(init.io, &input_buf);
     var streaming_reader: xml.Reader.Streaming = .init(alloc, &input_reader.interface, .{});
     const reader = &streaming_reader.interface;
 
@@ -160,54 +160,68 @@ pub fn main() !void {
         const spec_path = try std.fs.path.join(alloc, &.{ cli.outpath, spec_filename });
 
         if (std.fs.path.dirname(client_path)) |dir| {
-            try std.fs.cwd().makePath(dir);
+            try std.Io.Dir.cwd().createDirPath(init.io, dir);
         }
 
-        var client_file = try std.fs.cwd().createFile(client_path, .{ .truncate = true });
-        defer client_file.close();
-        _ = try client_file.write(client_src);
+        var client_file = try std.Io.Dir.cwd().createFile(init.io, client_path, .{ .truncate = true });
+        defer client_file.close(init.io);
+        {
+            var buffer: [1024]u8 = undefined;
+            var writer = client_file.writer(init.io, &buffer);
+            try writer.interface.writeAll(client_src);
+        }
 
-        var server_file = try std.fs.cwd().createFile(server_path, .{ .truncate = true });
-        defer server_file.close();
-        _ = try server_file.write(server_src);
+        var server_file = try std.Io.Dir.cwd().createFile(init.io, server_path, .{ .truncate = true });
+        defer server_file.close(init.io);
+        {
+            var buffer: [1024]u8 = undefined;
+            var writer = server_file.writer(init.io, &buffer);
+            try writer.interface.writeAll(server_src);
+        }
 
-        var spec_file = try std.fs.cwd().createFile(spec_path, .{ .truncate = true });
-        defer spec_file.close();
-        _ = try spec_file.write(spec_src);
+        var spec_file = try std.Io.Dir.cwd().createFile(init.io, spec_path, .{ .truncate = true });
+        defer spec_file.close(init.io);
+        {
+            var buffer: [1024]u8 = undefined;
+            var writer = spec_file.writer(init.io, &buffer);
+            try writer.interface.writeAll(spec_src);
+        }
 
-        try writeWrapper(alloc, cli.outpath, base_name);
+        try writeWrapper(alloc, init.io, cli.outpath, base_name);
     }
 
-    try writeProtocolsIndex(alloc, cli.outpath, cli.protocols);
+    try writeProtocolsIndex(alloc, init.io, cli.outpath, cli.protocols);
 }
 
 fn writeProtocolsIndex(
     alloc: std.mem.Allocator,
+    io: std.Io,
     outpath: []const u8,
     protocols: []const Cli.Protocol,
 ) !void {
-    var content: std.Io.Writer.Allocating = .init(alloc);
-    var writer = &content.writer;
-
-    for (protocols) |p| {
-        try writer.print("pub const {s} = @import(\"{s}.zig\");\n", .{ p.name, p.name });
-    }
-
     const file_path = try std.fs.path.join(alloc, &.{ outpath, "protocols.zig" });
     defer alloc.free(file_path);
 
     if (std.fs.path.dirname(file_path)) |dir| {
-        try std.fs.cwd().makePath(dir);
+        try std.Io.Dir.cwd().createDirPath(io, dir);
     }
 
-    var file = try std.fs.cwd().createFile(file_path, .{ .truncate = true });
-    defer file.close();
-
-    _ = try file.write(content.written());
+    var file = try std.Io.Dir.cwd().createFile(io, file_path, .{ .truncate = true });
+    defer file.close(io);
+    {
+        var buffer: [1024]u8 = undefined;
+        var writer = file.writer(io, &buffer);
+        var iowriter = &writer.interface;
+        for (protocols) |p| {
+            try iowriter.print("pub const {s} = @import(\"{s}.zig\");\n", .{ p.name, p.name });
+        }
+        try iowriter.flush();
+    }
 }
 
 fn writeWrapper(
     alloc: std.mem.Allocator,
+    io: std.Io,
     outpath: []const u8,
     base_name: []const u8,
 ) !void {
@@ -225,11 +239,16 @@ fn writeWrapper(
     defer alloc.free(file_path);
 
     if (std.fs.path.dirname(file_path)) |dir| {
-        try std.fs.cwd().makePath(dir);
+        try std.Io.Dir.cwd().createDirPath(io, dir);
     }
 
-    var file = try std.fs.cwd().createFile(file_path, .{ .truncate = true });
-    defer file.close();
-
-    _ = try file.write(content);
+    var client_file = try std.Io.Dir.cwd().createFile(io, file_path, .{ .truncate = true });
+    defer client_file.close(io);
+    {
+        var buffer: [1024]u8 = undefined;
+        var writer = client_file.writer(io, &buffer);
+        var iowriter = &writer.interface;
+        try iowriter.writeAll(content);
+        try iowriter.flush();
+    }
 }

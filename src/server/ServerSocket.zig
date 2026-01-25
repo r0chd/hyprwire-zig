@@ -40,7 +40,7 @@ export_poll_mtx_locked: bool = false,
 is_empty_listener: bool = false,
 path: ?[:0]const u8 = null,
 
-pub fn open(gpa: mem.Allocator, path: ?[:0]const u8) !*Self {
+pub fn open(gpa: mem.Allocator, io: std.Io, path: ?[:0]const u8) !*Self {
     const socket = try gpa.create(Self);
     errdefer gpa.destroy(socket);
 
@@ -48,7 +48,7 @@ pub fn open(gpa: mem.Allocator, path: ?[:0]const u8) !*Self {
     errdefer socket.deinit(gpa);
 
     if (path) |p| {
-        try socket.attempt(gpa, p);
+        try socket.attempt(gpa, io, p);
     } else {
         try socket.attemptEmpty(gpa);
     }
@@ -57,8 +57,10 @@ pub fn open(gpa: mem.Allocator, path: ?[:0]const u8) !*Self {
 }
 
 fn init() !Self {
-    const wake_pipes = try posix.pipe2(.{ .CLOEXEC = true });
-    const exit_pipes = try posix.pipe2(.{ .CLOEXEC = true });
+    var wake_pipes: [2]i32 = undefined;
+    var exit_pipes: [2]i32 = undefined;
+    _ = posix.system.pipe2(&wake_pipes, .{ .CLOEXEC = true });
+    _ = posix.system.pipe2(&exit_pipes, .{ .CLOEXEC = true });
 
     return .{
         .wakeup_fd = Fd{ .raw = wake_pipes[0] },
@@ -93,8 +95,8 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     gpa.destroy(self);
 }
 
-pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
-    if (fs.accessAbsolute(path, .{})) {
+pub fn attempt(self: *Self, gpa: mem.Allocator, io: std.Io, path: [:0]const u8) !void {
+    if (std.Io.Dir.accessAbsolute(io, path, .{})) {
         const raw_fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);
         var fd = Fd{ .raw = raw_fd };
         defer fd.close();
@@ -125,7 +127,7 @@ pub fn attempt(self: *Self, gpa: mem.Allocator, path: [:0]const u8) !void {
             return;
         }
 
-        try fs.deleteFileAbsolute(path);
+        try std.Io.Dir.deleteFileAbsolute(io, path);
     } else |_| {}
 
     const raw_fd = try posix.socket(posix.AF.UNIX, posix.SOCK.STREAM, 0);

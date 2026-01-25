@@ -1,23 +1,23 @@
 const std = @import("std");
-const build_options = @import("build_options");
-const messages = @import("./messages/root.zig");
-const helpers = @import("helpers");
-
-const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
-const ServerClient = @import("../server/ServerClient.zig");
-const ClientSocket = @import("../client/ClientSocket.zig");
-const MessageType = @import("MessageType.zig").MessageType;
-const Message = messages.Message;
-
+const enums = std.enums;
 const fmt = std.fmt;
 const mem = std.mem;
-const log = std.log.scoped(.hw);
 const meta = std.meta;
+const build_options = @import("build_options");
 const protocol_version = build_options.protocol_version;
+
+const helpers = @import("helpers");
 const isTrace = helpers.isTrace;
 
+const ClientSocket = @import("../client/ClientSocket.zig");
 const steadyMillis = @import("../root.zig").steadyMillis;
+const ServerClient = @import("../server/ServerClient.zig");
+const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
+const messages = @import("./messages/root.zig");
+const Message = messages.Message;
+const MessageType = @import("MessageType.zig").MessageType;
 
+const log = std.log.scoped(.hw);
 pub const MessageParsingResult = error{
     ParseError,
     Incomplete,
@@ -82,7 +82,7 @@ fn handleServerMessage(gpa: mem.Allocator, data: *SocketRawParsedMessage, client
 }
 
 pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage, off: usize, client: *ServerClient) !usize {
-    if (meta.intToEnum(MessageType, raw.data.items[off])) |message_type| {
+    if (enums.fromInt(MessageType, raw.data.items[off])) |message_type| {
         switch (message_type) {
             .sup => {
                 var hello_msg = messages.Hello.fromBytes(raw.data.items, off) catch |err| {
@@ -211,7 +211,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage
             },
             .invalid => {},
         }
-    } else |_| {}
+    }
 
     log.debug("client at fd {} core protocol error: malformed message recvd (invalid type code)", .{client.fd.raw});
     client.@"error" = true;
@@ -220,7 +220,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, raw: *SocketRawParsedMessage
 }
 
 pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage, off: usize, client: *ClientSocket) !usize {
-    if (meta.intToEnum(MessageType, raw.data.items[off])) |message_type| {
+    if (enums.fromInt(MessageType, raw.data.items[off])) |message_type| {
         switch (message_type) {
             .handshake_begin => {
                 var msg = messages.HandshakeBegin.fromBytes(gpa, raw.data.items, off) catch |err| {
@@ -379,7 +379,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, raw: *SocketRawParsedMessage
             },
             .invalid => {},
         }
-    } else |_| {}
+    }
 
     log.err("server at fd {} core protocol error: invalid message recvd (invalid type code)", .{client.fd.raw});
     client.@"error" = true;

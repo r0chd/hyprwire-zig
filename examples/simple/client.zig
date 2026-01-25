@@ -36,29 +36,22 @@ const Client = struct {
     }
 };
 
-fn socketPath(alloc: mem.Allocator) ![:0]u8 {
-    const runtime_dir = posix.getenv("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
+fn socketPath(alloc: mem.Allocator, environ: *std.process.Environ.Map) ![:0]u8 {
+    const runtime_dir = environ.get("XDG_RUNTIME_DIR") orelse return error.NoXdgRuntimeDir;
     return try fmt.allocPrintSentinel(alloc, "{s}/test-hw.sock", .{runtime_dir}, 0);
 }
 
-pub fn main() !void {
-    var gpa: std.heap.DebugAllocator(.{}) = .init;
-    const alloc = gpa.allocator();
-    defer {
-        const deinit_status = gpa.deinit();
-        if (deinit_status == .leak) @panic("TEST FAIL");
-    }
+pub fn main(init: std.process.Init) !void {
+    const socket_path = try socketPath(init.gpa, init.environ_map);
+    defer init.gpa.free(socket_path);
 
-    const socket_path = try socketPath(alloc);
-    defer alloc.free(socket_path);
-
-    const socket = try hw.ClientSocket.open(alloc, .{ .path = socket_path });
-    defer socket.deinit(alloc);
+    const socket = try hw.ClientSocket.open(init.gpa, init.io, .{ .path = socket_path });
+    defer socket.deinit(init.gpa);
 
     var impl = test_protocol.TestProtocolV1Impl.init(1);
-    try socket.addImplementation(alloc, types.client.ProtocolImplementation.from(&impl));
+    try socket.addImplementation(init.gpa, types.client.ProtocolImplementation.from(&impl));
 
-    try socket.waitForHandshake(alloc);
+    try socket.waitForHandshake(init.gpa);
 
     var protocol = impl.protocol();
     const SPEC = socket.getSpec(protocol.vtable.specName(protocol.ptr)) orelse {
@@ -70,18 +63,19 @@ pub fn main() !void {
 
     var client = Client{};
 
-    var obj = try socket.bindProtocol(alloc, protocol, TEST_PROTOCOL_VERSION);
-    defer obj.deinit(alloc);
+    var obj = try socket.bindProtocol(init.gpa, protocol, TEST_PROTOCOL_VERSION);
+    defer obj.deinit(init.gpa);
     var manager = try test_protocol.MyManagerV1Object.init(
-        alloc,
+        init.gpa,
         test_protocol.MyManagerV1Object.Listener.from(&client),
         &types.Object.from(obj),
     );
-    defer manager.deinit(alloc);
+    defer manager.deinit(init.gpa);
 
     std.debug.print("Bound!\n", .{});
 
-    const pipes = try posix.pipe();
+    var pipes: [2]posix.system.fd_t = undefined;
+    _ = posix.system.pipe(&pipes);
     defer {
         posix.close(pipes[0]);
         posix.close(pipes[1]);
@@ -91,23 +85,23 @@ pub fn main() !void {
 
     std.debug.print("Will send fd {}\n", .{pipes[0]});
 
-    try manager.sendSendMessage(alloc, "Hello!");
-    try manager.sendSendMessageFd(alloc, pipes[0]);
-    try manager.sendSendMessageArray(alloc, &.{ "Hello", "via", "array!" });
-    try manager.sendSendMessageArray(alloc, &.{});
-    try manager.sendSendMessageArrayUint(alloc, &.{ 69, 420, 2137 });
+    try manager.sendSendMessage(init.gpa, "Hello!");
+    try manager.sendSendMessageFd(init.gpa, pipes[0]);
+    try manager.sendSendMessageArray(init.gpa, &.{ "Hello", "via", "array!" });
+    try manager.sendSendMessageArray(init.gpa, &.{});
+    try manager.sendSendMessageArrayUint(init.gpa, &.{ 69, 420, 2137 });
 
-    try socket.roundtrip(alloc);
+    try socket.roundtrip(init.gpa);
 
-    var object_arg = manager.sendMakeObject(alloc).?;
-    defer object_arg.vtable.deinit(object_arg.ptr, alloc);
-    var object = try test_protocol.MyObjectV1Object.init(alloc, test_protocol.MyObjectV1Object.Listener.from(&client), &object_arg);
-    defer object.deinit(alloc);
+    var object_arg = manager.sendMakeObject(init.gpa).?;
+    defer object_arg.vtable.deinit(object_arg.ptr, init.gpa);
+    var object = try test_protocol.MyObjectV1Object.init(init.gpa, test_protocol.MyObjectV1Object.Listener.from(&client), &object_arg);
+    defer object.deinit(init.gpa);
 
-    try object.sendSendMessage(alloc, "Hello on object");
-    try object.sendSendEnum(alloc, .world);
+    try object.sendSendMessage(init.gpa, "Hello on object");
+    try object.sendSendEnum(init.gpa, .world);
 
     std.debug.print("Sent hello!\n", .{});
 
-    while (socket.dispatchEvents(alloc, true)) {} else |_| {}
+    while (socket.dispatchEvents(init.gpa, true)) {} else |_| {}
 }

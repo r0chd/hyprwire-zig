@@ -25,7 +25,7 @@
       devShells = forAllSystems (pkgs: {
         default = pkgs.mkShell {
           packages = builtins.attrValues {
-            inherit (zig.packages.${pkgs.stdenv.hostPlatform.system}) "0.15.2";
+            inherit (zig.packages.${pkgs.stdenv.hostPlatform.system}) "master";
             inherit (pkgs)
               zls
               pkg-config
