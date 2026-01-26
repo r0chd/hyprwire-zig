@@ -75,6 +75,7 @@ pub fn build(b: *Build) void {
 
     const mod_tests = b.addTest(.{
         .root_module = hyprwire,
+        .use_llvm = true,
     });
 
     const run_mod_tests = b.addRunArtifact(mod_tests);
@@ -83,8 +84,34 @@ pub fn build(b: *Build) void {
     test_step.dependOn(&run_mod_tests.step);
 
     buildScannerSnapshotTests(b, hyprwire, test_step);
-
     buildExamples(b, target, optimize, hyprwire);
+
+    // Collect all run steps into one ArrayList
+    var run_test_steps: std.ArrayList(*std.Build.Step.Run) = .empty;
+    run_test_steps.append(b.allocator, run_mod_tests) catch @panic("OOM");
+    const kcov_bin = b.findProgram(&.{"kcov"}, &.{}) catch "kcov";
+
+    const merge_step = std.Build.Step.Run.create(b, "merge coverage");
+    merge_step.addArgs(&.{ kcov_bin, "--merge" });
+    merge_step.rename_step_with_output_arg = false;
+    const merged_coverage_output = merge_step.addOutputFileArg(".");
+
+    for (run_test_steps.items) |run_step| {
+        run_step.setName(b.fmt("{s} (collect coverage)", .{run_step.step.name}));
+
+        const argv = run_step.argv.toOwnedSlice(b.allocator) catch @panic("OOM");
+        run_step.addArgs(&.{ kcov_bin, "--collect-only" });
+        run_step.addPrefixedDirectoryArg("--include-pattern=", b.path("src"));
+        merge_step.addDirectoryArg(run_step.addOutputFileArg(run_step.producer.?.name));
+        run_step.argv.appendSlice(b.allocator, argv) catch @panic("OOM");
+    }
+
+    const install_coverage = b.addInstallDirectory(.{
+        .source_dir = merged_coverage_output,
+        .install_dir = .{ .custom = "coverage" },
+        .install_subdir = "",
+    });
+    test_step.dependOn(&install_coverage.step);
 }
 
 fn buildScannerSnapshotTests(b: *Build, hyprwire: *Build.Module, test_step: *Build.Step) void {
