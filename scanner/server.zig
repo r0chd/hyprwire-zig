@@ -181,8 +181,8 @@ fn writeObjectStruct(writer: anytype, obj: Object, is_last: bool) !void {
             \\        self.object.vtable.setOnDeinit(self.object.ptr, @"fn");
             \\    }}
             \\
-            \\    pub fn @"error"(self: *Self, gpa: std.mem.Allocator, code: u32, message: [:0]const u8) void {{
-            \\        self.object.vtable.@"error"(self.object.ptr, gpa, code, message);
+            \\    pub fn @"error"(self: *Self, gpa: std.mem.Allocator, io: std.Io, code: u32, message: [:0]const u8) void {{
+            \\        self.object.vtable.@"error"(self.object.ptr, gpa, io, code, message);
             \\    }}
             \\
         , .{});
@@ -203,14 +203,14 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
     if (method.args.len == 0) {
         try writer.print(
             \\
-            \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator) !void {{
+            \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator, io: std.Io) !void {{
             \\        var buffer: [0]types.Arg = undefined;
             \\        var args = types.Args.init(&buffer, .{{}});
-            \\        _ = try self.object.vtable.call(self.object.ptr, gpa, {}, &args);
+            \\        _ = try self.object.vtable.call(self.object.ptr, gpa, io, {}, &args);
             \\    }}
         , .{ method.name_pascal, method.idx });
     } else {
-        try writer.print("\n    pub fn send{s}(self: *Self, gpa: std.mem.Allocator", .{method.name_pascal});
+        try writer.print("\n    pub fn send{s}(self: *Self, gpa: std.mem.Allocator, io: std.Io", .{method.name_pascal});
 
         for (method.args) |arg| {
             try writer.print(", {s}: {s}", .{ arg.name, arg.zig_send_type });
@@ -229,7 +229,7 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
 
         try writer.print(
             \\        }});
-            \\        _ = try self.object.vtable.call(self.object.ptr, gpa, {}, &args);
+            \\        _ = try self.object.vtable.call(self.object.ptr, gpa, io, {}, &args);
             \\    }}
             \\
         , .{method.idx});

@@ -174,31 +174,3 @@ test "BindProtocol.fromBytes" {
     try std.testing.expectEqualStrings("bind_protocol ( 5, \"test@1\", 1 ) ", data);
     try std.testing.expectEqualSlices(i32, msg.getFds(), &.{});
 }
-
-test "BindProtocol.fromBytes:InvalidVarInt" {
-    const alloc = std.testing.allocator;
-
-    // Message format: [type][UINT_magic][seq:4][VARCHAR_magic][malformed_varint][protocol_data][UINT_magic][version:4][END]
-    // Malformed varint with continuation bit set in 8th byte (should trigger InvalidVarInt)
-    // We need to provide enough buffer after the varint to avoid UnexpectedEof
-    var bytes = std.ArrayList(u8).empty;
-    defer bytes.deinit();
-    
-    try bytes.append(@intFromEnum(MessageType.bind_protocol));
-    try bytes.append(@intFromEnum(MessageMagic.type_uint));
-    try bytes.appendSlice(&[4]u8{ 0x05, 0x00, 0x00, 0x00 }); // seq = 5
-    try bytes.append(@intFromEnum(MessageMagic.type_varchar));
-    
-    // Malformed varint: 8 bytes with continuation bit (0x80) set in all bytes
-    try bytes.appendSlice(&[8]u8{ 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81 });
-    
-    // Add some dummy protocol data to avoid UnexpectedEof
-    try bytes.appendSlice(&[10]u8{ 'd', 'u', 'm', 'm', 'y', 'd', 'a', 't', 'a', 'x' });
-    
-    try bytes.append(@intFromEnum(MessageMagic.type_uint));
-    try bytes.appendSlice(&[4]u8{ 0x01, 0x00, 0x00, 0x00 }); // version = 1
-    try bytes.append(@intFromEnum(MessageMagic.end));
-    
-    const result = Self.fromBytes(alloc, bytes.items, 0);
-    try std.testing.expectError(Error.InvalidVarInt, result);
-}

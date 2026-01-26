@@ -2,6 +2,7 @@ const std = @import("std");
 const posix = std.posix;
 const fmt = std.fmt;
 const mem = std.mem;
+const Io = std.Io;
 
 const hw = @import("hyprwire");
 const types = hw.types;
@@ -46,12 +47,12 @@ pub fn main(init: std.process.Init) !void {
     defer init.gpa.free(socket_path);
 
     const socket = try hw.ClientSocket.open(init.gpa, init.io, .{ .path = socket_path });
-    defer socket.deinit(init.gpa);
+    defer socket.deinit(init.gpa, init.io);
 
     var impl = test_protocol.TestProtocolV1Impl.init(1);
     try socket.addImplementation(init.gpa, types.client.ProtocolImplementation.from(&impl));
 
-    try socket.waitForHandshake(init.gpa);
+    try socket.waitForHandshake(init.gpa, init.io);
 
     var protocol = impl.protocol();
     const SPEC = socket.getSpec(protocol.vtable.specName(protocol.ptr)) orelse {
@@ -63,7 +64,7 @@ pub fn main(init: std.process.Init) !void {
 
     var client = Client{};
 
-    var obj = try socket.bindProtocol(init.gpa, protocol, TEST_PROTOCOL_VERSION);
+    var obj = try socket.bindProtocol(init.gpa, init.io, protocol, TEST_PROTOCOL_VERSION);
     defer obj.deinit(init.gpa);
     var manager = try test_protocol.MyManagerV1Object.init(
         init.gpa,
@@ -81,27 +82,32 @@ pub fn main(init: std.process.Init) !void {
         posix.close(pipes[1]);
     }
 
-    _ = try posix.write(pipes[1], "pipe!");
+    var out: Io.File = .{ .handle = pipes[1] };
+    var buffer: [5]u8 = undefined;
+    var writer = out.writer(init.io, &buffer);
+    var iowriter = &writer.interface;
+    try iowriter.writeAll("pipe!");
+    try iowriter.flush();
 
     std.debug.print("Will send fd {}\n", .{pipes[0]});
 
-    try manager.sendSendMessage(init.gpa, "Hello!");
-    try manager.sendSendMessageFd(init.gpa, pipes[0]);
-    try manager.sendSendMessageArray(init.gpa, &.{ "Hello", "via", "array!" });
-    try manager.sendSendMessageArray(init.gpa, &.{});
-    try manager.sendSendMessageArrayUint(init.gpa, &.{ 69, 420, 2137 });
+    try manager.sendSendMessage(init.gpa, init.io, "Hello!");
+    try manager.sendSendMessageFd(init.gpa, init.io, pipes[0]);
+    try manager.sendSendMessageArray(init.gpa, init.io, &.{ "Hello", "via", "array!" });
+    try manager.sendSendMessageArray(init.gpa, init.io, &.{});
+    try manager.sendSendMessageArrayUint(init.gpa, init.io, &.{ 69, 420, 2137 });
 
-    try socket.roundtrip(init.gpa);
+    try socket.roundtrip(init.gpa, init.io);
 
-    var object_arg = manager.sendMakeObject(init.gpa).?;
+    var object_arg = manager.sendMakeObject(init.gpa, init.io).?;
     defer object_arg.vtable.deinit(object_arg.ptr, init.gpa);
     var object = try test_protocol.MyObjectV1Object.init(init.gpa, test_protocol.MyObjectV1Object.Listener.from(&client), &object_arg);
     defer object.deinit(init.gpa);
 
-    try object.sendSendMessage(init.gpa, "Hello on object");
-    try object.sendSendEnum(init.gpa, .world);
+    try object.sendSendMessage(init.gpa, init.io, "Hello on object");
+    try object.sendSendEnum(init.gpa, init.io, .world);
 
     std.debug.print("Sent hello!\n", .{});
 
-    while (socket.dispatchEvents(init.gpa, true)) {} else |_| {}
+    while (socket.dispatchEvents(init.gpa, init.io, true)) {} else |_| {}
 }

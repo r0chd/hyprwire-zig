@@ -2,6 +2,7 @@ const std = @import("std");
 const mem = std.mem;
 const posix = std.posix;
 const fmt = std.fmt;
+const Io = std.Io;
 
 const hw = @import("hyprwire");
 const test_protocol = hw.proto.test_protocol_v1.server;
@@ -12,6 +13,7 @@ const Server = struct {
     manager: ?*test_protocol.MyManagerV1Object = null,
     object: ?*test_protocol.MyObjectV1Object = null,
     object_handle: ?hw.types.Object = null,
+    io: Io,
 
     const Self = @This();
 
@@ -19,7 +21,7 @@ const Server = struct {
         std.debug.print("Object bound XD\n", .{});
 
         var manager = test_protocol.MyManagerV1Object.init(self.alloc, test_protocol.MyManagerV1Object.Listener.from(self), object) catch return;
-        manager.sendSendMessage(self.alloc, "Hello object") catch {};
+        manager.sendSendMessage(self.alloc, self.io, "Hello object") catch {};
 
         self.manager = manager;
     }
@@ -30,9 +32,14 @@ const Server = struct {
                 std.debug.print("Recvd message: {s}\n", .{message.message});
             },
             .send_message_fd => |message| {
-                var buf: [5]u8 = undefined;
-                _ = posix.read(message.message, &buf) catch {};
-                std.debug.print("Recvd fd {} with data: {s}\n", .{ message.message, buf });
+                var file = Io.File{ .handle = message.message };
+                var buffer: [5]u8 = undefined;
+                var reader = file.reader(self.io, &buffer);
+                var ioreader = &reader.interface;
+                var read_buffer: [5]u8 = undefined;
+                ioreader.readSliceAll(&read_buffer) catch return;
+
+                std.debug.print("Recvd fd {} with data: {s}\n", .{ message.message, read_buffer });
             },
             .send_message_array => |message| {
                 var str: std.ArrayList(u8) = .empty;
@@ -62,6 +69,7 @@ const Server = struct {
                 const manager = self.manager orelse return;
                 const server_object = self.socket.createObject(
                     self.alloc,
+                    self.io,
                     manager.getObject().vtable.getClient(manager.getObject().ptr),
                     @ptrCast(@alignCast(manager.getObject().ptr)),
                     "my_object_v1",
@@ -71,7 +79,7 @@ const Server = struct {
                 self.object_handle = hw.types.Object.from(server_object);
 
                 var object = test_protocol.MyObjectV1Object.init(self.alloc, test_protocol.MyObjectV1Object.Listener.from(self), &self.object_handle.?) catch return;
-                object.sendSendMessage(alloc, "Hello object") catch return;
+                object.sendSendMessage(alloc, self.io, "Hello object") catch return;
                 self.object = object;
             },
         }
@@ -88,7 +96,7 @@ const Server = struct {
 
                 std.debug.print("Erroring out the client!\n", .{});
 
-                obj.@"error"(alloc, @intFromEnum(message.message), "Important error occurred!");
+                obj.@"error"(alloc, self.io, @intFromEnum(message.message), "Important error occurred!");
             },
             .destroy => {},
         }
@@ -102,7 +110,7 @@ const Server = struct {
         if (self.object) |object| {
             object.deinit(self.alloc);
         }
-        self.socket.deinit(self.alloc);
+        self.socket.deinit(self.alloc, self.io);
     }
 };
 
@@ -115,13 +123,20 @@ pub fn main(init: std.process.Init) !void {
     const socket_path = try socketPath(init.gpa, init.environ_map);
     defer init.gpa.free(socket_path);
 
+    // https://codeberg.org/ziglang/zig/issues/30591
+    Io.Dir.cwd().deleteFile(init.io, socket_path) catch {};
+
     const socket = try hw.ServerSocket.open(init.gpa, init.io, socket_path);
-    var server = Server{ .alloc = init.gpa, .socket = socket };
+    var server = Server{
+        .alloc = init.gpa,
+        .socket = socket,
+        .io = init.io,
+    };
     defer server.deinit();
 
     const spec = test_protocol.TestProtocolV1Impl.init(1, test_protocol.TestProtocolV1Listener.from(&server));
     const pro = hw.types.server.ProtocolImplementation.from(&spec);
     try socket.addImplementation(init.gpa, pro);
 
-    while (socket.dispatchEvents(init.gpa, true) catch false) {}
+    while (socket.dispatchEvents(init.gpa, init.io, true) catch false) {}
 }

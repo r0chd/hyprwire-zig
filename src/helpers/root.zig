@@ -1,10 +1,12 @@
 const std = @import("std");
 const posix = std.posix;
 const mem = std.mem;
+const Io = std.Io;
 
 const MessageMagic = @import("hyprwire").MessageMagic;
 
 pub const FallbackAllocator = @import("FallbackAllocator.zig");
+pub const socket = @import("socket.zig");
 
 const c = @cImport({
     @cInclude("sys/socket.h");
@@ -61,11 +63,16 @@ pub const Fd = struct {
         return self.raw != -1;
     }
 
-    pub fn close(self: *Self) void {
+    pub fn close(self: *Self, io: Io) void {
         if (self.isValid() and !self.isClosed()) {
-            posix.close(self.raw);
+            var file = self.asFile();
+            file.close(io);
             self.raw = -1;
         }
+    }
+
+    pub fn asFile(self: *const Self) Io.File {
+        return Io.File{ .handle = self.raw };
     }
 };
 

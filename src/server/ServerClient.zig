@@ -1,26 +1,26 @@
-const c = @cImport(@cInclude("sys/socket.h"));
-
 const std = @import("std");
-const root = @import("../root.zig");
-const builtin = @import("builtin");
-const types = @import("../implementation/types.zig");
-const helpers = @import("helpers");
-const messages = @import("../message/messages/root.zig");
-
-const isTrace = helpers.isTrace;
 const posix = std.posix;
-const log = std.log.scoped(.hw);
 const mem = std.mem;
+const Io = std.Io;
+const builtin = @import("builtin");
 
-const Message = messages.Message;
+const helpers = @import("helpers");
+const isTrace = helpers.isTrace;
+const Fd = helpers.Fd;
+
+const types = @import("../implementation/types.zig");
 const WireObject = types.WireObject;
+const Object = types.Object;
+const messages = @import("../message/messages/root.zig");
+const Message = messages.Message;
+const root = @import("../root.zig");
+const steadyMillis = root.steadyMillis;
 const ServerObject = @import("ServerObject.zig");
 const ServerSocket = @import("ServerSocket.zig");
-const Object = types.Object;
 
-const Fd = helpers.Fd;
-const steadyMillis = root.steadyMillis;
+const c = @cImport(@cInclude("sys/socket.h"));
 
+const log = std.log.scoped(.hw);
 const Self = @This();
 
 fd: Fd,
@@ -43,7 +43,7 @@ pub fn init(raw_fd: i32) !Self {
     };
 }
 
-pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+pub fn deinit(self: *Self, gpa: mem.Allocator, io: Io) void {
     if (isTrace()) {
         log.debug("[{}] destroying client", .{self.fd.raw});
     }
@@ -52,7 +52,7 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
         gpa.destroy(object);
     }
     self.objects.deinit(gpa);
-    self.fd.close();
+    self.fd.close(io);
 }
 
 pub fn dispatchFirstPoll(self: *Self) void {
@@ -75,7 +75,7 @@ pub fn dispatchFirstPoll(self: *Self) void {
 
     var cred: Credential = undefined;
 
-    posix.getsockopt(
+    helpers.socket.getsockopt(
         self.fd.raw,
         posix.SOL.SOCKET,
         posix.SO.PEERCRED,
@@ -90,7 +90,8 @@ pub fn dispatchFirstPoll(self: *Self) void {
     self.pid = cred.pid;
 }
 
-pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void {
+pub fn sendMessage(self: *const Self, gpa: mem.Allocator, io: Io, message: Message) void {
+    _ = io;
     if (isTrace()) {
         const parsed = messages.parseData(message, gpa) catch |err| {
             log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
@@ -100,12 +101,12 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void
         log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
     }
 
-    var io: posix.iovec = .{
+    var iovec: posix.iovec = .{
         .base = @constCast(message.vtable.getData(message.ptr).ptr),
         .len = message.vtable.getLen(message.ptr),
     };
     var msg: c.msghdr = .{
-        .msg_iov = @ptrCast(&io),
+        .msg_iov = @ptrCast(&iovec),
         .msg_iovlen = 1,
         .msg_control = null,
         .msg_controllen = 0,
@@ -136,7 +137,7 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, message: Message) void
     _ = c.sendmsg(self.fd.raw, &msg, 0);
 }
 
-pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, object: []const u8, version: u32, seq: u32) ?*ServerObject {
+pub fn createObject(self: *Self, gpa: mem.Allocator, io: Io, protocol: []const u8, object: []const u8, version: u32, seq: u32) ?*ServerObject {
     if (self.server == null) return null;
 
     const obj = gpa.create(ServerObject) catch return null;
@@ -189,7 +190,7 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, protocol: []const u8, objec
 
     var ret = messages.NewObject.init(gpa, seq, obj.id) catch return null;
     defer ret.deinit(gpa);
-    self.sendMessage(gpa, Message.from(&ret));
+    self.sendMessage(gpa, io, Message.from(&ret));
 
     self.onBind(gpa, obj) catch return null;
 
@@ -227,10 +228,10 @@ pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
     }
 }
 
-pub fn onGeneric(self: *Self, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
+pub fn onGeneric(self: *Self, gpa: mem.Allocator, io: Io, msg: messages.GenericProtocolMessage) !void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
-            try types.called(WireObject.from(obj), gpa, msg.method, msg.data_span, msg.fds_list);
+            try types.called(WireObject.from(obj), gpa, io, msg.method, msg.data_span, msg.fds_list);
             break;
         }
     }

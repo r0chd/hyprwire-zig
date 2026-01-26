@@ -164,20 +164,20 @@ pub const MyManagerV1Object = struct {
         self.object.vtable.setOnDeinit(self.object.ptr, @"fn");
     }
 
-    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, message: [:0]const u8) !void {
+    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, io: std.Io, message: [:0]const u8) !void {
         var buffer: [1]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
+        _ = try self.object.vtable.call(self.object.ptr, gpa, io, 0, &args);
     }
 
-    pub fn sendRecvMessageArrayUint(self: *Self, gpa: std.mem.Allocator, message: []const u32) !void {
+    pub fn sendRecvMessageArrayUint(self: *Self, gpa: std.mem.Allocator, io: std.Io, message: []const u32) !void {
         var buffer: [1]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
+        _ = try self.object.vtable.call(self.object.ptr, gpa, io, 1, &args);
     }
 };
 
@@ -282,16 +282,16 @@ pub const MyObjectV1Object = struct {
         self.object.vtable.setOnDeinit(self.object.ptr, @"fn");
     }
 
-    pub fn @"error"(self: *Self, gpa: std.mem.Allocator, code: u32, message: [:0]const u8) void {
-        self.object.vtable.@"error"(self.object.ptr, gpa, code, message);
+    pub fn @"error"(self: *Self, gpa: std.mem.Allocator, io: std.Io, code: u32, message: [:0]const u8) void {
+        self.object.vtable.@"error"(self.object.ptr, gpa, io, code, message);
     }
 
-    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, message: [:0]const u8) !void {
+    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, io: std.Io, message: [:0]const u8) !void {
         var buffer: [1]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
+        _ = try self.object.vtable.call(self.object.ptr, gpa, io, 0, &args);
     }
 };
 

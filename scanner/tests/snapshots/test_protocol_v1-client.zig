@@ -82,42 +82,42 @@ pub const MyManagerV1Object = struct {
         gpa.destroy(self);
     }
 
-    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, @"message": [:0]const u8) !void {
+    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, io: std.Io, @"message": [:0]const u8) !void {
         var buffer: [1]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
+        _ = try self.object.vtable.call(self.object.ptr, gpa, io, 0, &args);
     }
 
-    pub fn sendSendMessageFd(self: *Self, gpa: std.mem.Allocator, @"message": i32) !void {
+    pub fn sendSendMessageFd(self: *Self, gpa: std.mem.Allocator, io: std.Io, @"message": i32) !void {
         var buffer: [1]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
+        _ = try self.object.vtable.call(self.object.ptr, gpa, io, 1, &args);
     }
 
-    pub fn sendSendMessageArray(self: *Self, gpa: std.mem.Allocator, @"message": []const [:0]const u8) !void {
+    pub fn sendSendMessageArray(self: *Self, gpa: std.mem.Allocator, io: std.Io, @"message": []const [:0]const u8) !void {
         var buffer: [1]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 2, &args);
+        _ = try self.object.vtable.call(self.object.ptr, gpa, io, 2, &args);
     }
 
-    pub fn sendSendMessageArrayUint(self: *Self, gpa: std.mem.Allocator, @"message": []const u32) !void {
+    pub fn sendSendMessageArrayUint(self: *Self, gpa: std.mem.Allocator, io: std.Io, @"message": []const u32) !void {
         var buffer: [1]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 3, &args);
+        _ = try self.object.vtable.call(self.object.ptr, gpa, io, 3, &args);
     }
 
-    pub fn sendMakeObject(self: *Self, gpa: std.mem.Allocator) ?types.Object {
+    pub fn sendMakeObject(self: *Self, gpa: std.mem.Allocator, io: std.Io) ?types.Object {
         var buffer: [0]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{});
-        const id = self.object.vtable.call(self.object.ptr, gpa, 4, &args) catch return null;
+        const id = self.object.vtable.call(self.object.ptr, gpa, io, 4, &args) catch return null;
         if (self.object.vtable.clientSock(self.object.ptr)) |sock| {
             return sock.objectForId(id);
         }
@@ -194,26 +194,26 @@ pub const MyObjectV1Object = struct {
         gpa.destroy(self);
     }
 
-    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, @"message": [:0]const u8) !void {
+    pub fn sendSendMessage(self: *Self, gpa: std.mem.Allocator, io: std.Io, @"message": [:0]const u8) !void {
         var buffer: [1]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 0, &args);
+        _ = try self.object.vtable.call(self.object.ptr, gpa, io, 0, &args);
     }
 
-    pub fn sendSendEnum(self: *Self, gpa: std.mem.Allocator, @"message": spec.MyEnum) !void {
+    pub fn sendSendEnum(self: *Self, gpa: std.mem.Allocator, io: std.Io, @"message": spec.MyEnum) !void {
         var buffer: [1]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 1, &args);
+        _ = try self.object.vtable.call(self.object.ptr, gpa, io, 1, &args);
     }
 
-    pub fn sendDestroy(self: *Self, gpa: std.mem.Allocator) !void {
+    pub fn sendDestroy(self: *Self, gpa: std.mem.Allocator, io: std.Io) !void {
         var buffer: [0]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{});
-        _ = try self.object.vtable.call(self.object.ptr, gpa, 2, &args);
+        _ = try self.object.vtable.call(self.object.ptr, gpa, io, 2, &args);
         self.object.destroy();
     }
 

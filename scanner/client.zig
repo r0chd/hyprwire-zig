@@ -199,10 +199,10 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
     if (method.returns_type.len > 0) {
         try writer.print(
             \\
-            \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator) ?types.Object {{
+            \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator, io: std.Io) ?types.Object {{
             \\        var buffer: [0]types.Arg = undefined;
             \\        var args = types.Args.init(&buffer, .{{}});
-            \\        const id = self.object.vtable.call(self.object.ptr, gpa, {}, &args) catch return null;
+            \\        const id = self.object.vtable.call(self.object.ptr, gpa, io, {}, &args) catch return null;
             \\        if (self.object.vtable.clientSock(self.object.ptr)) |sock| {{
             \\            return sock.objectForId(id);
             \\        }}
@@ -214,10 +214,10 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
     } else if (method.is_destructor) {
         try writer.print(
             \\
-            \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator) !void {{
+            \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator, io: std.Io) !void {{
             \\        var buffer: [0]types.Arg = undefined;
             \\        var args = types.Args.init(&buffer, .{{}});
-            \\        _ = try self.object.vtable.call(self.object.ptr, gpa, {}, &args);
+            \\        _ = try self.object.vtable.call(self.object.ptr, gpa, io, {}, &args);
             \\        self.object.destroy();
             \\    }}
             \\
@@ -225,15 +225,15 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
     } else if (method.args.len == 0) {
         try writer.print(
             \\
-            \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator) !void {{
+            \\    pub fn send{s}(self: *Self, gpa: std.mem.Allocator, io: std.Io) !void {{
             \\        var buffer: [0]types.Arg = undefined;
             \\        var args = types.Args.init(&buffer, .{{}});
-            \\        _ = try self.object.vtable.call(self.object.ptr, gpa, {}, &args);
+            \\        _ = try self.object.vtable.call(self.object.ptr, gpa, io, {}, &args);
             \\    }}
             \\
         , .{ method.name_pascal, method.idx });
     } else {
-        try writer.print("\n    pub fn send{s}(self: *Self, gpa: std.mem.Allocator", .{method.name_pascal});
+        try writer.print("\n    pub fn send{s}(self: *Self, gpa: std.mem.Allocator, io: std.Io", .{method.name_pascal});
 
         for (method.args) |arg| {
             try writer.print(", @\"{s}\": {s}", .{ arg.name, arg.zig_send_type });
@@ -247,7 +247,7 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
 
         try writer.print(
             \\        }});
-            \\        _ = try self.object.vtable.call(self.object.ptr, gpa, {}, &args);
+            \\        _ = try self.object.vtable.call(self.object.ptr, gpa, io, {}, &args);
             \\    }}
             \\
         , .{method.idx});

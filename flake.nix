@@ -2,6 +2,11 @@
   description = "wl-clipboard-zig";
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
+    zls = {
+      url = "github:zigtools/zls";
+      inputs.nixpkgs.follows = "nixpkgs";
+      inputs.zig-overlay.follows = "zig";
+    };
     zig = {
       url = "github:mitchellh/zig-overlay";
       inputs.nixpkgs.follows = "nixpkgs";
@@ -11,6 +16,7 @@
     {
       nixpkgs,
       zig,
+      zls,
       ...
     }:
     let
@@ -26,8 +32,8 @@
         default = pkgs.mkShell {
           packages = builtins.attrValues {
             inherit (zig.packages.${pkgs.stdenv.hostPlatform.system}) "master";
+            inherit (zls.packages.${pkgs.stdenv.hostPlatform.system}) default;
             inherit (pkgs)
-              zls
               pkg-config
               nixd
               nixfmt-rfc-style
