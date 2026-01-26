@@ -70,6 +70,7 @@ pub fn build(b: *Build) void {
     hyprwire.addImport("trait", trait_dep.module("trait"));
     hyprwire.addImport("protocols", protocols);
     hyprwire.addOptions("build_options", exe_options);
+    hyprwire.addImport("hyprwire", hyprwire);
 
     helpers.addImport("hyprwire", hyprwire);
 

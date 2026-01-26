@@ -5,6 +5,7 @@ const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const message_parser = @import("../MessageParser.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
 const Message = @import("root.zig").Message;
+const Error = @import("root.zig").Error;
 
 pub fn getFds(self: *const Self) []const i32 {
     _ = self;
@@ -30,7 +31,7 @@ message_type: MessageType = .handshake_protocols,
 
 const Self = @This();
 
-pub fn init(gpa: mem.Allocator, protocols: []const []const u8) !Self {
+pub fn init(gpa: mem.Allocator, protocols: []const []const u8) mem.Allocator.Error!Self {
     var data: std.ArrayList(u8) = .empty;
     errdefer data.deinit(gpa);
 
@@ -72,12 +73,12 @@ pub fn init(gpa: mem.Allocator, protocols: []const []const u8) !Self {
     };
 }
 
-pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
-    if (offset >= data.len) return error.OutOfRange;
+pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Allocator.Error || Error)!Self {
+    if (offset >= data.len) return Error.UnexpectedEof;
 
-    if (data[offset + 0] != @intFromEnum(MessageType.handshake_protocols)) return error.InvalidMessage;
-    if (data[offset + 1] != @intFromEnum(MessageMagic.type_array)) return error.InvalidMessage;
-    if (data[offset + 2] != @intFromEnum(MessageMagic.type_varchar)) return error.InvalidMessage;
+    if (data[offset + 0] != @intFromEnum(MessageType.handshake_protocols)) return Error.InvalidMessageType;
+    if (data[offset + 1] != @intFromEnum(MessageMagic.type_array)) return Error.InvalidFieldType;
+    if (data[offset + 2] != @intFromEnum(MessageMagic.type_varchar)) return Error.InvalidFieldType;
 
     var needle: usize = 3;
 
@@ -95,11 +96,11 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     }
 
     for (0..count) |_| {
-        if (offset + needle >= data.len) return error.OutOfRange;
+        if (offset + needle >= data.len) return Error.UnexpectedEof;
 
         const r = message_parser.parseVarInt(data, offset + needle);
 
-        if (offset + needle + r.@"1" + r.@"0" > data.len) return error.OutOfRange;
+        if (offset + needle + r.@"1" + r.@"0" > data.len) return Error.UnexpectedEof;
 
         const protocol_slice = data[offset + needle + r.@"1" .. offset + needle + r.@"1" + r.@"0"];
         const owned_protocol = try gpa.dupe(u8, protocol_slice);
@@ -108,7 +109,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
         needle += r.@"0" + r.@"1";
     }
 
-    if (data[offset + needle] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
+    if (data[offset + needle] != @intFromEnum(MessageMagic.end)) return Error.MalformedMessage;
 
     const len = needle + 1;
 

@@ -1,15 +1,14 @@
 const std = @import("std");
-const message_parser = @import("../MessageParser.zig");
-
 const mem = std.mem;
 const fmt = std.fmt;
 const meta = std.meta;
 const enums = std.enums;
 
-const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
-const MessageType = @import("../MessageType.zig").MessageType;
+const MessageMagic = @import("hyprwire").MessageMagic;
 const Trait = @import("trait").Trait;
 
+const message_parser = @import("../MessageParser.zig");
+const MessageType = @import("../MessageType.zig").MessageType;
 pub const BindProtocol = @import("BindProtocol.zig");
 pub const FatalProtocolError = @import("FatalProtocolError.zig");
 pub const GenericProtocolMessage = @import("GenericProtocolMessage.zig");
@@ -17,9 +16,19 @@ pub const HandshakeAck = @import("HandshakeAck.zig");
 pub const HandshakeBegin = @import("HandshakeBegin.zig");
 pub const HandshakeProtocols = @import("HandshakeProtocols.zig");
 pub const Hello = @import("Hello.zig");
+pub const NewObject = @import("NewObject.zig");
 pub const RoundtripDone = @import("RoundtripDone.zig");
 pub const RoundtripRequest = @import("RoundtripRequest.zig");
-pub const NewObject = @import("NewObject.zig");
+
+pub const Error = error{
+    UnexpectedEof,
+    InvalidMessageType,
+    InvalidFieldType,
+    InvalidVarInt,
+    InvalidProtocolLength,
+    InvalidVersion,
+    MalformedMessage,
+};
 
 pub const Message = Trait(.{
     .getFds = fn () []const i32,
@@ -28,7 +37,11 @@ pub const Message = Trait(.{
     .getMessageType = fn () MessageType,
 }, null);
 
-fn formatPrimitiveType(gpa: mem.Allocator, s: []const u8, @"type": MessageMagic) !std.meta.Tuple(&.{ [:0]const u8, usize }) {
+fn formatPrimitiveType(
+    gpa: mem.Allocator,
+    s: []const u8,
+    @"type": MessageMagic,
+) mem.Allocator.Error!std.meta.Tuple(&.{ [:0]const u8, usize }) {
     switch (@"type") {
         .type_uint => {
             const value = mem.readVarInt(u32, s[0..4], .little);
@@ -61,7 +74,7 @@ fn formatPrimitiveType(gpa: mem.Allocator, s: []const u8, @"type": MessageMagic)
     }
 }
 
-pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
+pub fn parseData(message: Message, gpa: mem.Allocator) (std.Io.Writer.Error || mem.Allocator.Error || Error)![]const u8 {
     var result: std.Io.Writer.Allocating = .init(gpa);
     defer result.deinit();
 
@@ -74,7 +87,7 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
         const magic_byte = message_data[needle];
         needle += 1;
 
-        const magic = enums.fromInt(MessageMagic, magic_byte) orelse return error.InvalidMessage;
+        const magic = enums.fromInt(MessageMagic, magic_byte) orelse return Error.MalformedMessage;
         switch (magic) {
             .end => {
                 break;
@@ -123,7 +136,7 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
             .type_array => {
                 if (!first) _ = try result.writer.write(", ");
                 first = false;
-                const this_type = enums.fromInt(MessageMagic, message_data[needle]) orelse return error.InvalidMessage;
+                const this_type = enums.fromInt(MessageMagic, message_data[needle]) orelse return Error.MalformedMessage;
                 needle += 1;
                 const els, const int_len = message_parser.parseVarInt(message_data, needle);
                 _ = try result.writer.write("{ ");
@@ -154,7 +167,7 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
                 first = false;
                 _ = try result.writer.write("<fd>");
             },
-            else => return error.InvalidMessage,
+            else => return Error.MalformedMessage,
         }
     }
 
@@ -164,4 +177,39 @@ pub fn parseData(message: Message, gpa: mem.Allocator) ![]const u8 {
 
 test {
     std.testing.refAllDecls(@This());
+}
+
+test "parseData integer types" {
+    const alloc = std.testing.allocator;
+
+    const bytes_data = [_]u8{
+        @intFromEnum(MessageType.generic_protocol_message),
+        @intFromEnum(MessageMagic.type_seq),
+        0x01,                                0x00, 0x00, 0x00, // object = 1
+        @intFromEnum(MessageMagic.type_int),
+        0x01,                                0x00, 0x00, 0x00, // object = 1
+        @intFromEnum(MessageMagic.type_f32),
+        0x01,                           0x00, 0x00, 0x00, // object = 1
+        @intFromEnum(MessageMagic.end),
+    };
+    var message = try GenericProtocolMessage.init(alloc, &bytes_data, &.{});
+    defer message.deinit(alloc);
+    const data = try parseData(Message.from(&message), alloc);
+    defer alloc.free(data);
+}
+
+test "parseData varchar" {
+    const alloc = std.testing.allocator;
+
+    const bytes_data = [_]u8{
+        @intFromEnum(MessageType.generic_protocol_message),
+        @intFromEnum(MessageMagic.type_varchar),
+        @intFromEnum(MessageMagic.end),
+    };
+    var message = try GenericProtocolMessage.init(alloc, &bytes_data, &.{});
+    defer message.deinit(alloc);
+    const data = try parseData(Message.from(&message), alloc);
+    defer alloc.free(data);
+
+    try std.testing.expectEqualStrings("generic_protocol_message ( \"\" ) ", data);
 }

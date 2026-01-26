@@ -3,7 +3,9 @@ const mem = std.mem;
 
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../MessageType.zig").MessageType;
-const Message = @import("root.zig").Message;
+const root = @import("root.zig");
+const Message = root.Message;
+const Error = root.Error;
 
 data: []const u8,
 len: usize,
@@ -29,8 +31,8 @@ pub fn init() Self {
     };
 }
 
-pub fn fromBytes(data: []const u8, offset: usize) !Self {
-    if (offset + 7 > data.len) return error.OutOfRange;
+pub fn fromBytes(data: []const u8, offset: usize) Error!Self {
+    if (offset + 7 > data.len) return Error.UnexpectedEof;
 
     const expected = [_]u8{
         @intFromEnum(MessageType.sup),
@@ -42,7 +44,7 @@ pub fn fromBytes(data: []const u8, offset: usize) !Self {
         @intFromEnum(MessageMagic.end),
     };
 
-    if (!mem.eql(u8, &expected, data[offset .. offset + 7])) return error.InvalidMessage;
+    if (!mem.eql(u8, &expected, data[offset .. offset + 7])) return Error.MalformedMessage;
 
     return .{
         .data = data[offset .. offset + 7],

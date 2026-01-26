@@ -4,7 +4,9 @@ const mem = std.mem;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const message_parser = @import("../MessageParser.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
-const Message = @import("root.zig").Message;
+const root = @import("root.zig");
+const Message = root.Message;
+const Error = root.Error;
 
 pub fn getFds(self: *const Self) []const i32 {
     _ = self;
@@ -32,7 +34,7 @@ protocol: []const u8,
 
 const Self = @This();
 
-pub fn init(gpa: mem.Allocator, protocol: []const u8, seq: u32, version: u32) !Self {
+pub fn init(gpa: mem.Allocator, protocol: []const u8, seq: u32, version: u32) mem.Allocator.Error!Self {
     var data: std.ArrayList(u8) = .empty;
     errdefer data.deinit(gpa);
 
@@ -64,19 +66,23 @@ pub fn init(gpa: mem.Allocator, protocol: []const u8, seq: u32, version: u32) !S
     };
 }
 
-pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
-    if (offset >= data.len) return error.OutOfRange;
-    if (data[offset] != @intFromEnum(MessageType.bind_protocol)) return error.InvalidMessage;
+pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Allocator.Error || Error)!Self {
+    if (offset >= data.len) return Error.UnexpectedEof;
+    if (data[offset] != @intFromEnum(MessageType.bind_protocol)) return Error.InvalidMessageType;
 
     var needle = offset + 1;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
+    if (needle >= data.len) return Error.UnexpectedEof;
+    if (data[needle] != @intFromEnum(MessageMagic.type_uint)) return Error.InvalidFieldType;
+
     needle += 1;
-    if (needle + 4 > data.len) return error.OutOfRange;
+    if (needle + 4 > data.len) return Error.UnexpectedEof;
     const seq = mem.readInt(u32, data[needle..][0..4], .little);
     needle += 4;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_varchar)) return error.InvalidMessage;
+    if (needle >= data.len) return Error.UnexpectedEof;
+    if (data[needle] != @intFromEnum(MessageMagic.type_varchar)) return Error.InvalidFieldType;
+
     needle += 1;
 
     var protocol_len: usize = 0;
@@ -85,23 +91,27 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
         const byte = data[needle + var_int_len];
         protocol_len |= @as(usize, byte & 0x7F) << @intCast(var_int_len * 7);
         if ((byte & 0x80) == 0) break;
-        if (var_int_len >= 8) return error.InvalidMessage;
+        if (var_int_len >= 8) return Error.InvalidVarInt;
     }
     var_int_len += 1;
     needle += var_int_len;
 
-    if (needle + protocol_len > data.len) return error.OutOfRange;
+    if (needle + protocol_len > data.len) return Error.UnexpectedEof;
     const protocol_slice = data[needle .. needle + protocol_len];
     needle += protocol_len;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
+    if (needle >= data.len) return Error.UnexpectedEof;
+    if (data[needle] != @intFromEnum(MessageMagic.type_uint)) return Error.InvalidFieldType;
+
     needle += 1;
-    if (needle + 4 > data.len) return error.OutOfRange;
+    if (needle + 4 > data.len) return Error.UnexpectedEof;
     const version = mem.readInt(u32, data[needle..][0..4], .little);
-    if (version == 0) return error.InvalidMessage;
+    if (version == 0) return Error.InvalidVersion;
     needle += 4;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
+    if (needle >= data.len) return Error.UnexpectedEof;
+    if (data[needle] != @intFromEnum(MessageMagic.end)) return Error.InvalidFieldType;
+
     needle += 1;
 
     const owned = try gpa.dupe(u8, data[offset .. offset + needle - offset]);
@@ -132,6 +142,7 @@ test "BindProtocol.init" {
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("bind_protocol ( 5, \"test@1\", 1 ) ", data);
+    try std.testing.expectEqualSlices(i32, msg.getFds(), &.{});
 }
 
 test "BindProtocol.fromBytes" {
@@ -155,9 +166,39 @@ test "BindProtocol.fromBytes" {
     };
     var msg = try Self.fromBytes(alloc, &bytes, 0);
     defer msg.deinit(alloc);
+    try std.testing.expectEqual(msg.getLen(), bytes.len);
 
     const data = try messages.parseData(Message.from(&msg), alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("bind_protocol ( 5, \"test@1\", 1 ) ", data);
+    try std.testing.expectEqualSlices(i32, msg.getFds(), &.{});
+}
+
+test "BindProtocol.fromBytes:InvalidVarInt" {
+    const alloc = std.testing.allocator;
+
+    // Message format: [type][UINT_magic][seq:4][VARCHAR_magic][malformed_varint][protocol_data][UINT_magic][version:4][END]
+    // Malformed varint with continuation bit set in 8th byte (should trigger InvalidVarInt)
+    // We need to provide enough buffer after the varint to avoid UnexpectedEof
+    var bytes = std.ArrayList(u8).empty;
+    defer bytes.deinit();
+    
+    try bytes.append(@intFromEnum(MessageType.bind_protocol));
+    try bytes.append(@intFromEnum(MessageMagic.type_uint));
+    try bytes.appendSlice(&[4]u8{ 0x05, 0x00, 0x00, 0x00 }); // seq = 5
+    try bytes.append(@intFromEnum(MessageMagic.type_varchar));
+    
+    // Malformed varint: 8 bytes with continuation bit (0x80) set in all bytes
+    try bytes.appendSlice(&[8]u8{ 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81, 0x81 });
+    
+    // Add some dummy protocol data to avoid UnexpectedEof
+    try bytes.appendSlice(&[10]u8{ 'd', 'u', 'm', 'm', 'y', 'd', 'a', 't', 'a', 'x' });
+    
+    try bytes.append(@intFromEnum(MessageMagic.type_uint));
+    try bytes.appendSlice(&[4]u8{ 0x01, 0x00, 0x00, 0x00 }); // version = 1
+    try bytes.append(@intFromEnum(MessageMagic.end));
+    
+    const result = Self.fromBytes(alloc, bytes.items, 0);
+    try std.testing.expectError(Error.InvalidVarInt, result);
 }

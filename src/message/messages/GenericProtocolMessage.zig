@@ -3,7 +3,9 @@ const mem = std.mem;
 
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../MessageType.zig").MessageType;
-const Message = @import("root.zig").Message;
+const root = @import("root.zig");
+const Message = root.Message;
+const Error = root.Error;
 
 pub fn getFds(self: *const Self) []const i32 {
     return self.fds_list;
@@ -31,7 +33,7 @@ message_type: MessageType = .generic_protocol_message,
 
 const Self = @This();
 
-pub fn init(gpa: mem.Allocator, data: []const u8, fds_list: []const i32) !Self {
+pub fn init(gpa: mem.Allocator, data: []const u8, fds_list: []const i32) mem.Allocator.Error!Self {
     const data_copy = try gpa.dupe(u8, data);
     const fds_copy = try gpa.dupe(i32, fds_list);
 
@@ -44,21 +46,23 @@ pub fn init(gpa: mem.Allocator, data: []const u8, fds_list: []const i32) !Self {
     };
 }
 
-pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(i32), offset: usize) !Self {
-    if (offset >= data.len) return error.OutOfRange;
-    if (data[offset] != @intFromEnum(MessageType.generic_protocol_message)) return error.InvalidMessage;
+pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(i32), offset: usize) (mem.Allocator.Error || Error)!Self {
+    if (offset >= data.len) return Error.UnexpectedEof;
+    if (data[offset] != @intFromEnum(MessageType.generic_protocol_message)) return Error.InvalidMessageType;
 
     var needle = offset + 1;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_object)) return error.InvalidMessage;
+    if (needle >= data.len) return Error.UnexpectedEof;
+    if (data[needle] != @intFromEnum(MessageMagic.type_object)) return Error.InvalidFieldType;
     needle += 1;
-    if (needle + 4 > data.len) return error.OutOfRange;
+    if (needle + 4 > data.len) return Error.UnexpectedEof;
     const object_id = mem.readInt(u32, data[needle..][0..4], .little);
     needle += 4;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
+    if (needle >= data.len) return Error.UnexpectedEof;
+    if (data[needle] != @intFromEnum(MessageMagic.type_uint)) return Error.InvalidFieldType;
     needle += 1;
-    if (needle + 4 > data.len) return error.OutOfRange;
+    if (needle + 4 > data.len) return Error.UnexpectedEof;
     const method_id = mem.readInt(u32, data[needle..][0..4], .little);
     needle += 4;
 
@@ -85,13 +89,13 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
                     data_needle += 1;
                     if ((byte & 0x80) == 0) break;
                     shift += 7;
-                    if (shift >= 64) return error.InvalidMessage;
+                    if (shift >= 64) return Error.MalformedMessage;
                 }
-                if (data_needle + str_len > data.len) return error.OutOfRange;
+                if (data_needle + str_len > data.len) return Error.UnexpectedEof;
                 data_needle += str_len;
             },
             .type_array => {
-                if (data_needle >= data.len) return error.OutOfRange;
+                if (data_needle >= data.len) return Error.UnexpectedEof;
                 const arr_type: MessageMagic = @enumFromInt(data[data_needle]);
                 data_needle += 1;
 
@@ -103,7 +107,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
                     data_needle += 1;
                     if ((byte & 0x80) == 0) break;
                     arr_shift += 7;
-                    if (arr_shift >= 64) return error.InvalidMessage;
+                    if (arr_shift >= 64) return Error.MalformedMessage;
                 }
 
                 switch (arr_type) {
@@ -120,32 +124,32 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
                                 data_needle += 1;
                                 if ((byte & 0x80) == 0) break;
                                 str_shift += 7;
-                                if (str_shift >= 64) return error.InvalidMessage;
+                                if (str_shift >= 64) return Error.MalformedMessage;
                             }
-                            if (data_needle + str_len2 > data.len) return error.OutOfRange;
+                            if (data_needle + str_len2 > data.len) return Error.UnexpectedEof;
                             data_needle += str_len2;
                         }
                     },
                     .type_fd => {
-                        if (fds_list.items.len == 0) return error.InvalidMessage;
+                        if (fds_list.items.len == 0) return Error.MalformedMessage;
                         try fds_consumed.append(gpa, fds_list.items[0]);
                         _ = fds_list.orderedRemove(0);
                     },
-                    else => return error.InvalidMessage,
+                    else => return Error.InvalidFieldType,
                 }
             },
             .type_fd => {
-                if (fds_list.items.len == 0) return error.InvalidMessage;
+                if (fds_list.items.len == 0) return Error.MalformedMessage;
                 try fds_consumed.append(gpa, fds_list.items[0]);
                 _ = fds_list.orderedRemove(0);
             },
             else => {
-                return error.InvalidMessage;
+                return Error.InvalidFieldType;
             },
         }
     }
 
-    if (data_needle >= data.len or data[data_needle] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
+    if (data_needle >= data.len or data[data_needle] != @intFromEnum(MessageMagic.end)) return Error.MalformedMessage;
     data_needle += 1;
 
     const message_len = data_needle - offset;

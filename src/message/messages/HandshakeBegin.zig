@@ -5,6 +5,7 @@ const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const message_parser = @import("../MessageParser.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
 const Message = @import("root.zig").Message;
+const Error = @import("root.zig").Error;
 
 pub fn getFds(self: *const Self) []const i32 {
     _ = self;
@@ -30,7 +31,7 @@ message_type: MessageType = .handshake_begin,
 
 const Self = @This();
 
-pub fn init(gpa: mem.Allocator, versions: []const u32) !Self {
+pub fn init(gpa: mem.Allocator, versions: []const u32) mem.Allocator.Error!Self {
     var data: std.ArrayList(u8) = .empty;
     errdefer data.deinit(gpa);
 
@@ -64,16 +65,16 @@ pub fn init(gpa: mem.Allocator, versions: []const u32) !Self {
     };
 }
 
-pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
-    if (offset >= data.len) return error.OutOfRange;
-    if (data[offset] != @intFromEnum(MessageType.handshake_begin)) return error.InvalidMessage;
+pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Allocator.Error || Error)!Self {
+    if (offset >= data.len) return Error.UnexpectedEof;
+    if (data[offset] != @intFromEnum(MessageType.handshake_begin)) return Error.InvalidMessageType;
 
     var needle = offset + 1;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_array)) return error.InvalidMessage;
+    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_array)) return Error.InvalidFieldType;
     needle += 1;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
+    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return Error.InvalidFieldType;
     needle += 1;
 
     const parse_result = message_parser.parseVarInt(data, needle);
@@ -81,7 +82,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
     const var_int_len = parse_result[1];
     needle += var_int_len;
 
-    if (needle + (arr_len * 4) > data.len) return error.OutOfRange;
+    if (needle + (arr_len * 4) > data.len) return Error.UnexpectedEof;
 
     const versions = try gpa.alloc(u32, arr_len);
     errdefer gpa.free(versions);
@@ -92,7 +93,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
 
     needle += arr_len * 4;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
+    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.end)) return Error.MalformedMessage;
     needle += 1;
 
     const message_len = needle - offset;

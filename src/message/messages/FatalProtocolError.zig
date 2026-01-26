@@ -4,6 +4,7 @@ const mem = std.mem;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../MessageType.zig").MessageType;
 const Message = @import("root.zig").Message;
+const Error = @import("root.zig").Error;
 
 pub fn getFds(self: *const Self) []const i32 {
     _ = self;
@@ -76,7 +77,7 @@ pub fn initBuffer(buffer: []u8, object_id: u32, error_id: u32, error_msg: []cons
     };
 }
 
-pub fn init(gpa: mem.Allocator, object_id: u32, error_id: u32, error_msg: []const u8) !Self {
+pub fn init(gpa: mem.Allocator, object_id: u32, error_id: u32, error_msg: []const u8) mem.Allocator.Error!Self {
     var varint_len: usize = 1;
     var msg_len = error_msg.len;
     while (msg_len > 0x7F) {
@@ -122,25 +123,25 @@ pub fn init(gpa: mem.Allocator, object_id: u32, error_id: u32, error_msg: []cons
     };
 }
 
-pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
-    if (offset >= data.len) return error.OutOfRange;
-    if (data[offset] != @intFromEnum(MessageType.fatal_protocol_error)) return error.InvalidMessage;
+pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Allocator.Error || Error)!Self {
+    if (offset >= data.len) return Error.UnexpectedEof;
+    if (data[offset] != @intFromEnum(MessageType.fatal_protocol_error)) return Error.InvalidMessageType;
 
     var needle = offset + 1;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
+    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return Error.InvalidFieldType;
     needle += 1;
-    if (needle + 4 > data.len) return error.OutOfRange;
+    if (needle + 4 > data.len) return Error.UnexpectedEof;
     const object_id = mem.readInt(u32, data[needle..][0..4], .little);
     needle += 4;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return error.InvalidMessage;
+    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_uint)) return Error.InvalidFieldType;
     needle += 1;
-    if (needle + 4 > data.len) return error.OutOfRange;
+    if (needle + 4 > data.len) return Error.UnexpectedEof;
     const error_id = mem.readInt(u32, data[needle..][0..4], .little);
     needle += 4;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_varchar)) return error.InvalidMessage;
+    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.type_varchar)) return Error.InvalidFieldType;
     needle += 1;
 
     var msg_len: usize = 0;
@@ -151,14 +152,14 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) !Self {
         needle += 1;
         if ((byte & 0x80) == 0) break;
         shift += 7;
-        if (shift >= 64) return error.InvalidMessage;
+        if (shift >= 64) return Error.InvalidVarInt;
     }
 
-    if (needle + msg_len > data.len) return error.OutOfRange;
+    if (needle + msg_len > data.len) return Error.UnexpectedEof;
     const error_msg = data[needle..][0..msg_len];
     needle += msg_len;
 
-    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.end)) return error.InvalidMessage;
+    if (needle >= data.len or data[needle] != @intFromEnum(MessageMagic.end)) return Error.MalformedMessage;
     needle += 1;
 
     return Self{

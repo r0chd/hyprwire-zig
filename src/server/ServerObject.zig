@@ -107,11 +107,7 @@ pub fn setOnDeinit(self: *Self, cb: *const fn () void) void {
 
 pub fn @"error"(self: *Self, gpa: mem.Allocator, id: u32, message: [:0]const u8) void {
     // TODO:
-    // I'd like to avoid having to propagate errors for OBVIOUS reasons
-    // so allocating a big buffer instead seems like a more reasonable idea
-    // while I don't think anyone will overflow this buffer, it'd be still nice to:
-    // 1. turn it into a ring buffer (but that's after zig 0.16)
-    // 2. make it configurable SOMEHOW
+    // Figure out memory management that won't error
     var buffer: [1024]u8 = undefined;
     var msg = FatalErrorMessage.initBuffer(&buffer, self.id, id, message);
     if (self.client) |client| {
