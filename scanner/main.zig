@@ -169,6 +169,7 @@ pub fn main(init: std.process.Init) !void {
             var buffer: [1024]u8 = undefined;
             var writer = client_file.writer(init.io, &buffer);
             try writer.interface.writeAll(client_src);
+            try writer.interface.writeByte('\n');
         }
 
         var server_file = try std.Io.Dir.cwd().createFile(init.io, server_path, .{ .truncate = true });
@@ -177,6 +178,7 @@ pub fn main(init: std.process.Init) !void {
             var buffer: [1024]u8 = undefined;
             var writer = server_file.writer(init.io, &buffer);
             try writer.interface.writeAll(server_src);
+            try writer.interface.writeByte('\n');
         }
 
         var spec_file = try std.Io.Dir.cwd().createFile(init.io, spec_path, .{ .truncate = true });
@@ -185,6 +187,7 @@ pub fn main(init: std.process.Init) !void {
             var buffer: [1024]u8 = undefined;
             var writer = spec_file.writer(init.io, &buffer);
             try writer.interface.writeAll(spec_src);
+            try writer.interface.writeByte('\n');
         }
 
         try writeWrapper(alloc, init.io, cli.outpath, base_name);

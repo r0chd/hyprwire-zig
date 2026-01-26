@@ -305,5 +305,6 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
         \\        return impls;
         \\    }}
         \\}};
+        \\
     , .{});
 }

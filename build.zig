@@ -82,37 +82,15 @@ pub fn build(b: *Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_mod_tests.step);
 
-    buildScannerSnapshotTests(b, test_step);
+    buildScannerSnapshotTests(b, hyprwire, test_step);
 
     buildExamples(b, target, optimize, hyprwire);
 }
 
-fn buildScannerSnapshotTests(b: *Build, test_step: *Build.Step) void {
-    const scanner_exe = b.addExecutable(.{
-        .name = "hyprwire-scanner-test",
-        .root_module = b.createModule(.{
-            .root_source_file = b.path("scanner/main.zig"),
-            .target = b.graph.host,
-        }),
-    });
-
-    const xml_dep = b.dependency("xml", .{
-        .target = b.graph.host,
-    });
-    scanner_exe.root_module.addImport("xml", xml_dep.module("xml"));
-
-    const test_input = b.path("scanner/tests/protocol-v1.xml");
-
-    const scanner_output_path = "/tmp/scanner-test-output";
-
-    const mkdir = b.addSystemCommand(&.{ "mkdir", "-p", scanner_output_path });
-
-    const run_scanner = b.addRunArtifact(scanner_exe);
-    run_scanner.addArg("-i");
-    run_scanner.addFileArg(test_input);
-    run_scanner.addArg("-o");
-    run_scanner.addArg(scanner_output_path);
-    run_scanner.step.dependOn(&mkdir.step);
+fn buildScannerSnapshotTests(b: *Build, hyprwire: *Build.Module, test_step: *Build.Step) void {
+    const scanner = Scanner.init(b, hyprwire);
+    scanner.addCustomProtocol(b.path("./scanner/tests/protocol-v1.xml"));
+    scanner.generate("test_protocol_v1", 1);
 
     const snapshot_files = [_][]const u8{
         "test_protocol_v1-client.zig",
@@ -121,18 +99,18 @@ fn buildScannerSnapshotTests(b: *Build, test_step: *Build.Step) void {
     };
 
     for (snapshot_files) |filename| {
-        const generated_file = b.fmt("{s}/{s}", .{ scanner_output_path, filename });
+        const generated_file = scanner.output_dir.path(b, filename);
         const snapshot_file = b.path(b.fmt("scanner/tests/snapshots/{s}", .{filename}));
 
         const compare = b.addSystemCommand(&.{
             "diff",
             "-u",
             "--color=always",
-            snapshot_file.getPath(b),
-            generated_file,
         });
+        compare.addFileArg(snapshot_file);
+        compare.addFileArg(generated_file);
 
-        compare.step.dependOn(&run_scanner.step);
+        compare.step.dependOn(&scanner.run.step);
         test_step.dependOn(&compare.step);
     }
 }

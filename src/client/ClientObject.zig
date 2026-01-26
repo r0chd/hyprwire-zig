@@ -317,8 +317,10 @@ pub fn getVersion(self: *Self) u32 {
 
 test {
     const alloc = std.testing.allocator;
+    var threaded: std.Io.Threaded = .init_single_threaded;
+    const io = threaded.io();
     {
-        const client = try ClientSocket.open(alloc, .{ .fd = 1 });
+        const client = try ClientSocket.open(alloc, io, .{ .fd = 1 });
         defer client.deinit(alloc);
         var self = Self.init(client);
 
