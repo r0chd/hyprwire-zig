@@ -120,7 +120,7 @@ pub fn @"error"(self: *Self, gpa: mem.Allocator, io: Io, id: u32, message: [:0]c
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     if (isTrace()) {
-        const fd = if (self.client) |client| client.fd.raw else -1;
+        const fd = if (self.client) |client| client.stream.socket.handle else -1;
         log.debug("[{}] destroying object {}", .{ fd, self.id });
     }
 

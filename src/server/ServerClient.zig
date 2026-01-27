@@ -23,7 +23,7 @@ const c = @cImport(@cInclude("sys/socket.h"));
 const log = std.log.scoped(.hw);
 const Self = @This();
 
-fd: Fd,
+stream: Io.net.Stream,
 pid: i32 = -1,
 first_poll_done: bool = false,
 version: u32 = 0,
@@ -35,24 +35,26 @@ server: ?*ServerSocket = null,
 self: ?*Self = null,
 
 pub fn init(raw_fd: i32) !Self {
-    var fd = Fd{ .raw = raw_fd };
-    try fd.setFlags(posix.FD_CLOEXEC);
+    const stream = std.Io.net.Stream{ .socket = .{
+        .handle = raw_fd,
+        .address = .{ .ip4 = .loopback(0) },
+    } };
 
     return .{
-        .fd = fd,
+        .stream = stream,
     };
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator, io: Io) void {
     if (isTrace()) {
-        log.debug("[{}] destroying client", .{self.fd.raw});
+        log.debug("[{}] destroying client", .{self.stream.socket.handle});
     }
     for (self.objects.items) |object| {
         object.deinit(gpa);
         gpa.destroy(object);
     }
     self.objects.deinit(gpa);
-    self.fd.close(io);
+    self.stream.close(io);
 }
 
 pub fn dispatchFirstPoll(self: *Self) void {
@@ -76,7 +78,7 @@ pub fn dispatchFirstPoll(self: *Self) void {
     var cred: Credential = undefined;
 
     helpers.socket.getsockopt(
-        self.fd.raw,
+        self.stream.socket.handle,
         posix.SOL.SOCKET,
         posix.SO.PEERCRED,
         std.mem.asBytes(&cred),
@@ -94,11 +96,11 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, io: Io, message: Messa
     _ = io;
     if (isTrace()) {
         const parsed = messages.parseData(message, gpa) catch |err| {
-            log.debug("[{} @ {}] -> parse error: {}", .{ self.fd.raw, steadyMillis(), err });
+            log.debug("[{} @ {}] -> parse error: {}", .{ self.stream.socket.handle, steadyMillis(), err });
             return;
         };
         defer gpa.free(parsed);
-        log.debug("[{} @ {}] -> {s}", .{ self.fd.raw, steadyMillis(), parsed });
+        log.debug("[{} @ {}] -> {s}", .{ self.stream.socket.handle, steadyMillis(), parsed });
     }
 
     var iovec: posix.iovec = .{
@@ -134,10 +136,18 @@ pub fn sendMessage(self: *const Self, gpa: mem.Allocator, io: Io, message: Messa
         }
     }
 
-    _ = c.sendmsg(self.fd.raw, &msg, 0);
+    _ = c.sendmsg(self.stream.socket.handle, &msg, 0);
 }
 
-pub fn createObject(self: *Self, gpa: mem.Allocator, io: Io, protocol: []const u8, object: []const u8, version: u32, seq: u32) ?*ServerObject {
+pub fn createObject(
+    self: *Self,
+    gpa: mem.Allocator,
+    io: Io,
+    protocol: []const u8,
+    object: []const u8,
+    version: u32,
+    seq: u32,
+) ?*ServerObject {
     if (self.server == null) return null;
 
     const obj = gpa.create(ServerObject) catch return null;
@@ -164,13 +174,13 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, io: Io, protocol: []const u
         protocol_name = protocol_spec.vtable.specName(protocol_spec.ptr);
 
         if (found_spec == null) {
-            log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd.raw, steadyMillis() });
+            log.err("[{} @ {}] Error: createObject has no spec", .{ self.stream.socket.handle, steadyMillis() });
             self.@"error" = true;
             return null;
         }
 
         if (protocol_spec.vtable.specVer(protocol_spec.ptr) < version) {
-            log.err("[{} @ {}] Error: createObject for protocol {s} object {s} for version {}, but we have only {}", .{ self.fd.raw, steadyMillis(), protocol_name, object, version, protocol_spec.vtable.specVer(protocol_spec.ptr) });
+            log.err("[{} @ {}] Error: createObject for protocol {s} object {s} for version {}, but we have only {}", .{ self.stream.socket.handle, steadyMillis(), protocol_name, object, version, protocol_spec.vtable.specVer(protocol_spec.ptr) });
             self.@"error" = true;
             return null;
         }
@@ -179,7 +189,7 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, io: Io, protocol: []const u
     }
 
     if (found_spec == null) {
-        log.err("[{} @ {}] Error: createObject has no spec", .{ self.fd.raw, steadyMillis() });
+        log.err("[{} @ {}] Error: createObject has no spec", .{ self.stream.socket.handle, steadyMillis() });
         self.@"error" = true;
         return null;
     }

@@ -81,7 +81,7 @@ fn handleServerMessage(gpa: mem.Allocator, io: Io, data: *SocketRawParsedMessage
     }
 
     if (isTrace()) {
-        log.debug("[{} @ {}] -- handleMessage: Finished read", .{ client.fd.raw, steadyMillis() });
+        log.debug("[{} @ {}] -- handleMessage: Finished read", .{ client.stream.socket.handle, steadyMillis() });
     }
 
     return;
@@ -92,17 +92,17 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
         switch (message_type) {
             .sup => {
                 var hello_msg = messages.Hello.fromBytes(raw.data.items, off) catch |err| {
-                    log.debug("client at fd {} core protocol error: malformed message recvd (sup)", .{client.fd.raw});
+                    log.debug("client at fd {} core protocol error: malformed message recvd (sup)", .{client.stream.socket.handle});
                     return err;
                 };
 
                 if (isTrace()) {
                     const parsed = messages.parseData(Message.from(&hello_msg), gpa) catch |err| {
-                        log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
+                        log.debug("[{} @ {}] -> parse error: {s}", .{ client.stream.socket.handle, steadyMillis(), @errorName(err) });
                         return hello_msg.getLen();
                     };
                     defer gpa.free(parsed);
-                    log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
+                    log.debug("[{} @ {}] <- {s}", .{ client.stream.socket.handle, steadyMillis(), parsed });
                 }
 
                 client.dispatchFirstPoll();
@@ -114,7 +114,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
             },
             .handshake_ack => {
                 var msg = messages.HandshakeAck.fromBytes(gpa, raw.data.items, off) catch |err| {
-                    log.debug("client at fd {} core protocol error: malformed message recvd (handshake_ack)", .{client.fd.raw});
+                    log.debug("client at fd {} core protocol error: malformed message recvd (handshake_ack)", .{client.stream.socket.handle});
                     return err;
                 };
                 defer msg.deinit(gpa);
@@ -122,11 +122,11 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
 
                 if (isTrace()) {
                     const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
-                        log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
+                        log.debug("[{} @ {}] -> parse error: {s}", .{ client.stream.socket.handle, steadyMillis(), @errorName(err) });
                         return error.ParseError;
                     };
                     defer gpa.free(parsed);
-                    log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
+                    log.debug("[{} @ {}] <- {s}", .{ client.stream.socket.handle, steadyMillis(), parsed });
                 }
 
                 var protocol_names: std.ArrayList([:0]const u8) = try .initCapacity(gpa, client.server.?.impls.items.len);
@@ -148,18 +148,18 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
             },
             .bind_protocol => {
                 var msg = messages.BindProtocol.fromBytes(gpa, raw.data.items, off) catch |err| {
-                    log.debug("client at fd {} core protocol error: malformed message recvd (bind_protocol)", .{client.fd.raw});
+                    log.debug("client at fd {} core protocol error: malformed message recvd (bind_protocol)", .{client.stream.socket.handle});
                     return err;
                 };
                 defer msg.deinit(gpa);
 
                 if (isTrace()) {
                     const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
-                        log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
+                        log.debug("[{} @ {}] -> parse error: {s}", .{ client.stream.socket.handle, steadyMillis(), @errorName(err) });
                         return error.ParseError;
                     };
                     defer gpa.free(parsed);
-                    log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
+                    log.debug("[{} @ {}] <- {s}", .{ client.stream.socket.handle, steadyMillis(), parsed });
                 }
 
                 _ = client.createObject(gpa, io, msg.protocol, "", msg.version, msg.seq);
@@ -168,18 +168,18 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
             },
             .generic_protocol_message => {
                 var msg = messages.GenericProtocolMessage.fromBytes(gpa, raw.data.items, &raw.fds, off) catch |err| {
-                    log.debug("client at fd {} core protocol error: malformed message recvd (generic_protocol_message)", .{client.fd.raw});
+                    log.debug("client at fd {} core protocol error: malformed message recvd (generic_protocol_message)", .{client.stream.socket.handle});
                     return err;
                 };
                 defer msg.deinit(gpa);
 
                 if (isTrace()) {
                     const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
-                        log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
+                        log.debug("[{} @ {}] -> parse error: {s}", .{ client.stream.socket.handle, steadyMillis(), @errorName(err) });
                         return error.ParseError;
                     };
                     defer gpa.free(parsed);
-                    log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
+                    log.debug("[{} @ {}] <- {s}", .{ client.stream.socket.handle, steadyMillis(), parsed });
                 }
 
                 try client.onGeneric(gpa, io, msg);
@@ -187,18 +187,18 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
             },
             .roundtrip_request => {
                 var msg = messages.RoundtripRequest.fromBytes(gpa, raw.data.items, off) catch |err| {
-                    log.debug("client at fd {} core protocol error: malformed message recvd (roundtrip_request)", .{client.fd.raw});
+                    log.debug("client at fd {} core protocol error: malformed message recvd (roundtrip_request)", .{client.stream.socket.handle});
                     return err;
                 };
                 defer msg.deinit(gpa);
 
                 if (isTrace()) {
                     const parsed = messages.parseData(Message.from(&msg), gpa) catch |err| {
-                        log.debug("[{} @ {}] -> parse error: {s}", .{ client.fd.raw, steadyMillis(), @errorName(err) });
+                        log.debug("[{} @ {}] -> parse error: {s}", .{ client.stream.socket.handle, steadyMillis(), @errorName(err) });
                         return error.ParseError;
                     };
                     defer gpa.free(parsed);
-                    log.debug("[{} @ {}] <- {s}", .{ client.fd.raw, steadyMillis(), parsed });
+                    log.debug("[{} @ {}] <- {s}", .{ client.stream.socket.handle, steadyMillis(), parsed });
                 }
 
                 client.scheduled_roundtrip_seq = msg.seq;
@@ -212,14 +212,14 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
             .handshake_protocols,
             => |tag| {
                 client.@"error" = true;
-                log.debug("client at fd {} core protocol error: invalid message recvd {s}", .{ client.fd.raw, @tagName(tag) });
+                log.debug("client at fd {} core protocol error: invalid message recvd {s}", .{ client.stream.socket.handle, @tagName(tag) });
                 return 0;
             },
             .invalid => {},
         }
     }
 
-    log.debug("client at fd {} core protocol error: malformed message recvd (invalid type code)", .{client.fd.raw});
+    log.debug("client at fd {} core protocol error: malformed message recvd (invalid type code)", .{client.stream.socket.handle});
     client.@"error" = true;
 
     return 0;

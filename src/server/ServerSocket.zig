@@ -225,7 +225,7 @@ pub fn removeClient(self: *Self, gpa: mem.Allocator, io: Io, fd: Fd) bool {
     var i: usize = self.clients.items.len;
     while (i > 0) : (i -= 1) {
         const client = self.clients.items[i];
-        if (client.fd == fd) {
+        if (client.stream == fd) {
             var c = self.clients.swapRemove(i);
             c.deinit(gpa, io);
             gpa.destroy(c);
@@ -268,7 +268,7 @@ pub fn recheckPollFds(self: *Self, gpa: mem.Allocator) !void {
 
     for (self.clients.items) |client| {
         try self.pollfds.append(gpa, .{
-            .fd = client.fd.raw,
+            .fd = client.stream.socket.handle,
             .events = posix.POLL.IN,
             .revents = 0,
         });
@@ -320,13 +320,19 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator, io: Io) !boo
             self.clients.items[i - self.internalFds()].@"error" = true;
             needs_poll_recheck = true;
             if (isTrace()) {
-                log.debug("[{} @ {}] Dropping client (hangup)", .{ self.clients.items[i - self.internalFds()].fd.raw, steadyMillis() });
+                log.debug(
+                    "[{} @ {}] Dropping client (hangup)",
+                    .{ self.clients.items[i - self.internalFds()].stream.socket.handle, steadyMillis() },
+                );
             }
             continue;
         }
 
         if (isTrace() and self.clients.items[i - self.internalFds()].@"error") {
-            log.debug("[{} @ {}] Dropping client (protocol error)", .{ self.clients.items[i - self.internalFds()].fd.raw, steadyMillis() });
+            log.debug(
+                "[{} @ {}] Dropping client (protocol error)",
+                .{ self.clients.items[i - self.internalFds()].stream.socket.handle, steadyMillis() },
+            );
         }
     }
 
@@ -348,7 +354,7 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator, io: Io) !boo
 
 pub fn dispatchClient(self: *Self, gpa: mem.Allocator, io: Io, client: *ServerClient) !void {
     _ = self;
-    var data = try SocketRawParsedMessage.fromFd(gpa, client.fd.raw);
+    var data = try SocketRawParsedMessage.fromFd(gpa, client.stream.socket.handle);
     defer data.deinit(gpa);
     if (data.bad) {
         var fatal_msg = FatalError.init(gpa, 0, 0, "fatal: invalid message on wire") catch |err| {
@@ -423,7 +429,7 @@ fn threadCallback(self: *Self, gpa: mem.Allocator, io: std.Io) void {
 
         for (self.clients.items) |client| {
             pollfds.append(.{
-                .fd = client.fd.raw,
+                .fd = client.stream.socket.handle,
                 .events = posix.POLL.IN,
             }) catch {
                 self.poll_mtx.unlock();
