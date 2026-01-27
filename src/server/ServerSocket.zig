@@ -133,7 +133,7 @@ pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: ProtocolServerIm
 pub fn dispatchPending(self: *Self, io: Io, gpa: mem.Allocator) !bool {
     if (self.pollfds.items.len == 0) return false;
     _ = try posix.poll(self.pollfds.items, 0);
-    if (self.dispatchNewConnections(gpa))
+    if (self.dispatchNewConnections(io, gpa))
         return self.dispatchPending(io, gpa);
 
     return self.dispatchExistingConnections(io, gpa);
@@ -162,7 +162,7 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !boo
     return true;
 }
 
-pub fn clearFd(io: Io, fd: Fd) void {
+fn clearFd(io: Io, fd: Fd) void {
     var buf: [128]u8 = undefined;
     var fds = [_]posix.pollfd{.{ .fd = fd.raw, .events = posix.POLL.IN, .revents = 0 }};
 
@@ -182,18 +182,22 @@ pub fn clearFd(io: Io, fd: Fd) void {
     }
 }
 
-pub fn clearEventFd(self: *Self, io: Io) void {
+fn clearEventFd(self: *const Self, io: Io) void {
     if (self.export_fd) |fd| {
         clearFd(io, fd);
     }
 }
 
-pub fn clearWakeupFd(self: *Self, io: Io) void {
+fn clearWakeupFd(self: *const Self, io: Io) void {
     clearFd(io, self.wakeup_fd);
 }
 
 pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, fd: Fd) !*ServerClient {
-    const x = try ServerClient.init(fd);
+    const stream = std.Io.net.Stream{ .socket = .{
+        .handle = fd,
+        .address = .{ .ip4 = .loopback(0) },
+    } };
+    const x = try ServerClient{ .stream = stream };
 
     const client = try gpa.create(ServerClient);
     errdefer gpa.destroy(client);
@@ -274,22 +278,19 @@ pub fn recheckPollFds(self: *Self, gpa: mem.Allocator) !void {
     }
 }
 
-pub fn dispatchNewConnections(self: *Self, gpa: mem.Allocator) bool {
-    const server = self.server orelse return false;
+pub fn dispatchNewConnections(self: *Self, io: Io, gpa: mem.Allocator) bool {
+    var server = self.server orelse return false;
 
     if (self.is_empty_listener) return false;
 
     if ((self.pollfds.items[0].revents & posix.POLL.IN) == 0) return false;
 
-    const client_fd = helpers.socket.accept(server.socket.handle, null, null, 0) catch return false;
+    const stream = server.accept(io) catch return false;
     const x = gpa.create(ServerClient) catch {
-        posix.close(client_fd);
+        stream.close(io);
         return false;
     };
-    x.* = ServerClient.init(client_fd) catch {
-        posix.close(client_fd);
-        return false;
-    };
+    x.* = .{ .stream = stream };
     x.server = self;
     x.self = x;
 

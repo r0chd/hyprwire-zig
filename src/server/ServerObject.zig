@@ -308,7 +308,11 @@ test {
     const alloc = std.testing.allocator;
     const io = std.testing.io;
     {
-        var client = try ServerClient.init(1);
+        const stream = std.Io.net.Stream{ .socket = .{
+            .handle = 1,
+            .address = .{ .ip4 = .loopback(0) },
+        } };
+        var client = ServerClient{ .stream = stream };
         var self = Self.init(&client);
 
         self.@"error"(io, alloc, 1, "test");

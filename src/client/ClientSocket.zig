@@ -125,7 +125,7 @@ pub fn waitForHandshake(self: *Self, io: Io, gpa: mem.Allocator) !void {
     }
 }
 
-pub fn isHandshakeDone(self: *Self) bool {
+pub fn isHandshakeDone(self: *const Self) bool {
     return self.handshake_done;
 }
 
@@ -219,7 +219,7 @@ pub fn waitForObject(self: *Self, io: Io, gpa: mem.Allocator, x: *ClientObject) 
     self.waiting_on_object = null;
 }
 
-pub fn shouldEndReading(self: *Self) bool {
+pub fn shouldEndReading(self: *const Self) bool {
     if (self.waiting_on_object) |waiting| {
         return waiting.id != 0;
     }
@@ -246,7 +246,6 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
 
     if (self.pending_socket_data.items.len > 0) {
         const datas = try self.pending_socket_data.toOwnedSlice(gpa);
-        self.pending_socket_data = .{}; // clear backing pointer to avoid reuse after freeing datas
         defer {
             for (datas) |*data| data.deinit(gpa);
             gpa.free(datas);
@@ -297,7 +296,7 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
     }
 }
 
-pub fn onGeneric(self: *Self, io: Io, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
+pub fn onGeneric(self: *const Self, io: Io, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
             try types.called(
@@ -313,7 +312,7 @@ pub fn onGeneric(self: *Self, io: Io, gpa: mem.Allocator, msg: messages.GenericP
     }
 }
 
-pub fn objectForId(self: *Self, id: u32) ?Object {
+pub fn objectForId(self: *const Self, id: u32) ?Object {
     for (self.objects.items) |object| {
         if (object.id == id) return Object.from(object);
     }
@@ -321,7 +320,7 @@ pub fn objectForId(self: *Self, id: u32) ?Object {
     return null;
 }
 
-pub fn sendMessage(self: *Self, io: Io, gpa: mem.Allocator, message: Message) !void {
+pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: Message) !void {
     _ = io;
     if (isTrace()) {
         const parsed = messages.parseData(message, gpa) catch |err| {
@@ -365,7 +364,7 @@ pub fn sendMessage(self: *Self, io: Io, gpa: mem.Allocator, message: Message) !v
     _ = c.sendmsg(self.stream.socket.handle, &msg, 0);
 }
 
-pub fn extractLoopFD(self: *Self) i32 {
+pub fn extractLoopFD(self: *const Self) i32 {
     return self.stream.socket.handle;
 }
 

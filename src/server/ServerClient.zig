@@ -32,17 +32,6 @@ objects: std.ArrayList(*ServerObject) = .empty,
 server: ?*ServerSocket = null,
 self: ?*Self = null,
 
-pub fn init(raw_fd: i32) !Self {
-    const stream = std.Io.net.Stream{ .socket = .{
-        .handle = raw_fd,
-        .address = .{ .ip4 = .loopback(0) },
-    } };
-
-    return .{
-        .stream = stream,
-    };
-}
-
 pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
     if (isTrace()) {
         log.debug("[{}] destroying client", .{self.stream.socket.handle});

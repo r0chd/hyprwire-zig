@@ -6,14 +6,14 @@ s2c_methods: []const Method,
 
 const Self = @This();
 
-pub fn objectName(self: *Self) []const u8 {
+pub fn objectName(self: *const Self) []const u8 {
     return self.object_name;
 }
 
-pub fn c2s(self: *Self) []const Method {
+pub fn c2s(self: *const Self) []const Method {
     return self.c2s_methods;
 }
 
-pub fn s2c(self: *Self) []const Method {
+pub fn s2c(self: *const Self) []const Method {
     return self.s2c_methods;
 }
