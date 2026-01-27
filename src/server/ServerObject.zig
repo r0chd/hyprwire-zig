@@ -2,7 +2,6 @@ const std = @import("std");
 const fmt = std.fmt;
 const enums = std.enums;
 const mem = std.mem;
-const meta = std.meta;
 
 const helpers = @import("helpers");
 const isTrace = helpers.isTrace;
@@ -65,9 +64,9 @@ pub fn errd(self: *Self) void {
     }
 }
 
-pub fn sendMessage(self: *Self, gpa: mem.Allocator, io: Io, message: Message) !void {
+pub fn sendMessage(self: *Self, io: Io, gpa: mem.Allocator, message: Message) !void {
     if (self.client) |client| {
-        client.sendMessage(gpa, io, message);
+        client.sendMessage(io, gpa, message);
     }
 }
 
@@ -106,13 +105,13 @@ pub fn setOnDeinit(self: *Self, cb: *const fn () void) void {
     self.on_deinit = cb;
 }
 
-pub fn @"error"(self: *Self, gpa: mem.Allocator, io: Io, id: u32, message: [:0]const u8) void {
+pub fn @"error"(self: *Self, io: Io, gpa: mem.Allocator, id: u32, message: [:0]const u8) void {
     // TODO:
     // Figure out memory management that won't error
     var buffer: [1024]u8 = undefined;
     var msg = FatalErrorMessage.initBuffer(&buffer, self.id, id, message);
     if (self.client) |client| {
-        client.sendMessage(gpa, io, Message.from(&msg));
+        client.sendMessage(io, gpa, Message.from(&msg));
     }
 
     self.errd();
@@ -131,13 +130,13 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     }
 }
 
-pub fn call(self: *Self, gpa: mem.Allocator, io: Io, id: u32, args: *types.Args) !u32 {
+pub fn call(self: *Self, io: Io, gpa: mem.Allocator, id: u32, args: *types.Args) !u32 {
     const methods = self.methodsOut();
     if (methods.len <= id) {
         const msg = try fmt.allocPrintSentinel(gpa, "core protocol error: invalid method {} for object {}", .{ id, self.id }, 0);
         defer gpa.free(msg);
         log.debug("core protocol error: {s}", .{msg});
-        self.@"error"(gpa, io, id, msg);
+        self.@"error"(io, gpa, id, msg);
         return error.InvalidMethod;
     }
 
@@ -148,7 +147,7 @@ pub fn call(self: *Self, gpa: mem.Allocator, io: Io, id: u32, args: *types.Args)
         const msg = try fmt.allocPrintSentinel(gpa, "invalid method spec {} for object {} -> server cannot call returnsType methods", .{ id, self.id }, 0);
         defer gpa.free(msg);
         log.debug("core protocol error: {s}", .{msg});
-        self.@"error"(gpa, io, id, msg);
+        self.@"error"(io, gpa, id, msg);
         return error.InvalidMethod;
     }
 
@@ -281,7 +280,7 @@ pub fn call(self: *Self, gpa: mem.Allocator, io: Io, id: u32, args: *types.Args)
 
     var msg = try messages.GenericProtocolMessage.init(gpa, data.items, fds.items);
     defer msg.deinit(gpa);
-    try self.sendMessage(gpa, io, Message.from(&msg));
+    try self.sendMessage(io, gpa, Message.from(&msg));
 
     return 0;
 }
@@ -312,7 +311,7 @@ test {
         var client = try ServerClient.init(1);
         var self = Self.init(&client);
 
-        self.@"error"(alloc, io, 1, "test");
+        self.@"error"(io, alloc, 1, "test");
         const obj = Object.from(&self);
         _ = obj;
 
@@ -328,7 +327,7 @@ test {
         _ = methods_out;
 
         var hello = messages.Hello.init();
-        try self.sendMessage(alloc, io, Message.from(&hello));
+        try self.sendMessage(io, alloc, Message.from(&hello));
         _ = self.server();
     }
 }

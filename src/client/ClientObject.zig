@@ -2,13 +2,11 @@ const std = @import("std");
 const enums = std.enums;
 const fmt = std.fmt;
 const mem = std.mem;
-const meta = std.meta;
 const Io = std.Io;
 
 const helpers = @import("helpers");
 const isTrace = helpers.isTrace;
 
-const Object = @import("../implementation/Object.zig").Object;
 const types = @import("../implementation/types.zig");
 const Method = types.Method;
 const message_parser = @import("../message/MessageParser.zig");
@@ -87,7 +85,7 @@ pub fn errd(self: *Self) void {
     }
 }
 
-pub fn @"error"(self: *Self, gpa: mem.Allocator, io: Io, id: u32, message: [:0]const u8) void {
+pub fn @"error"(self: *Self, io: Io, gpa: mem.Allocator, id: u32, message: [:0]const u8) void {
     _ = self;
     _ = io;
     _ = gpa;
@@ -95,9 +93,9 @@ pub fn @"error"(self: *Self, gpa: mem.Allocator, io: Io, id: u32, message: [:0]c
     _ = message;
 }
 
-pub fn sendMessage(self: *Self, gpa: mem.Allocator, io: Io, message: Message) !void {
+pub fn sendMessage(self: *Self, io: Io, gpa: mem.Allocator, message: Message) !void {
     if (self.client) |client| {
-        try client.sendMessage(gpa, io, message);
+        try client.sendMessage(io, gpa, message);
     }
 }
 
@@ -117,13 +115,13 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     }
 }
 
-pub fn call(self: *Self, gpa: mem.Allocator, io: Io, id: u32, args: *types.Args) !u32 {
+pub fn call(self: *Self, io: Io, gpa: mem.Allocator, id: u32, args: *types.Args) !u32 {
     const methods = self.methodsOut();
     if (methods.len <= id) {
         const msg = try fmt.allocPrintSentinel(gpa, "core protocol error: invalid method {} for object {}", .{ id, self.id }, 0);
         defer gpa.free(msg);
         log.debug("core protocol error: {s}", .{msg});
-        self.@"error"(gpa, io, id, msg);
+        self.@"error"(io, gpa, id, msg);
         return error.InvalidMethod;
     }
 
@@ -134,7 +132,7 @@ pub fn call(self: *Self, gpa: mem.Allocator, io: Io, id: u32, args: *types.Args)
         const msg = try fmt.allocPrintSentinel(gpa, "invalid method spec {} for object {} -> server cannot call returnsType methods", .{ id, self.id }, 0);
         defer gpa.free(msg);
         log.debug("core protocol error: {s}", .{msg});
-        self.@"error"(gpa, io, id, msg);
+        self.@"error"(io, gpa, id, msg);
         return error.InvalidMethod;
     }
 
@@ -283,13 +281,13 @@ pub fn call(self: *Self, gpa: mem.Allocator, io: Io, id: u32, args: *types.Args)
 
     var msg = try messages.GenericProtocolMessage.init(gpa, data.items, fds.items);
     defer msg.deinit(gpa);
-    try self.sendMessage(gpa, io, Message.from(&msg));
+    try self.sendMessage(io, gpa, Message.from(&msg));
 
     if (wait_on_seq != 0) {
         if (self.client) |client| {
             const obj = client.makeObject(gpa, self.protocol_name, method.returns_type, wait_on_seq);
             if (obj) |o| {
-                try client.waitForObject(gpa, io, o);
+                try client.waitForObject(io, gpa, o);
                 return o.id;
             }
         }

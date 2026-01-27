@@ -1,7 +1,6 @@
 const std = @import("std");
 const mem = std.mem;
 const fmt = std.fmt;
-const meta = std.meta;
 const enums = std.enums;
 
 const MessageMagic = @import("hyprwire").MessageMagic;

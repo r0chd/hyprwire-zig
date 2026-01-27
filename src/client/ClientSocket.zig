@@ -2,11 +2,9 @@ const std = @import("std");
 const Io = std.Io;
 const mem = std.mem;
 const posix = std.posix;
-const fs = std.fs;
 const fmt = std.fmt;
 
 const helpers = @import("helpers");
-const Fd = helpers.Fd;
 const isTrace = helpers.isTrace;
 
 const types = @import("../implementation/types.zig");
@@ -18,7 +16,7 @@ const message_parser = @import("../message/MessageParser.zig");
 const messages = @import("../message/messages/root.zig");
 const Message = messages.Message;
 const steadyMillis = @import("../root.zig").steadyMillis;
-const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
+const SocketRawParsedMessage = @import("../socket/SocketRawParsedMessage.zig");
 const ClientObject = @import("ClientObject.zig");
 const ServerSpec = @import("ServerSpec.zig");
 
@@ -42,7 +40,7 @@ waiting_on_object: ?*ClientObject = null,
 
 const Self = @This();
 
-pub fn open(gpa: mem.Allocator, io: std.Io, source: union(enum) { fd: i32, path: [:0]const u8 }) !*Self {
+pub fn open(io: std.Io, gpa: mem.Allocator, source: union(enum) { fd: i32, path: [:0]const u8 }) !*Self {
     const sock = try gpa.create(Self);
     errdefer gpa.destroy(sock);
     sock.* = .{
@@ -51,14 +49,14 @@ pub fn open(gpa: mem.Allocator, io: std.Io, source: union(enum) { fd: i32, path:
     };
 
     switch (source) {
-        .fd => |fd| try sock.attemptFromFd(gpa, io, fd),
-        .path => |path| try sock.attempt(gpa, io, path),
+        .fd => |fd| try sock.attemptFromFd(io, gpa, fd),
+        .path => |path| try sock.attempt(io, gpa, path),
     }
 
     return sock;
 }
 
-pub fn deinit(self: *Self, gpa: mem.Allocator, io: Io) void {
+pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
     self.impls.deinit(gpa);
     self.pollfds.deinit(gpa);
     self.stream.close(io);
@@ -77,7 +75,7 @@ pub fn deinit(self: *Self, gpa: mem.Allocator, io: Io) void {
     gpa.destroy(self);
 }
 
-pub fn attempt(self: *Self, gpa: mem.Allocator, io: std.Io, path: [:0]const u8) !void {
+pub fn attempt(self: *Self, io: std.Io, gpa: mem.Allocator, path: [:0]const u8) !void {
     var address = try Io.net.UnixAddress.init(path);
     var stream = try address.connect(io);
 
@@ -90,10 +88,10 @@ pub fn attempt(self: *Self, gpa: mem.Allocator, io: std.Io, path: [:0]const u8) 
     self.stream = stream;
 
     var message = messages.Hello.init();
-    try self.sendMessage(gpa, io, Message.from(&message));
+    try self.sendMessage(io, gpa, Message.from(&message));
 }
 
-pub fn attemptFromFd(self: *Self, gpa: mem.Allocator, io: Io, raw_fd: i32) !void {
+pub fn attemptFromFd(self: *Self, io: Io, gpa: mem.Allocator, raw_fd: i32) !void {
     const stream = std.Io.net.Stream{ .socket = .{
         .handle = raw_fd,
         .address = .{ .ip4 = .loopback(0) },
@@ -108,18 +106,18 @@ pub fn attemptFromFd(self: *Self, gpa: mem.Allocator, io: Io, raw_fd: i32) !void
     self.stream = stream;
 
     var message = messages.Hello.init();
-    try self.sendMessage(gpa, io, Message.from(&message));
+    try self.sendMessage(io, gpa, Message.from(&message));
 }
 
 pub fn addImplementation(self: *Self, gpa: mem.Allocator, x: ProtocolImplementation) !void {
     try self.impls.append(gpa, x);
 }
 
-pub fn waitForHandshake(self: *Self, gpa: mem.Allocator, io: Io) !void {
+pub fn waitForHandshake(self: *Self, io: Io, gpa: mem.Allocator) !void {
     self.handshake_begin = try std.time.Instant.now();
 
     while (!self.@"error" and !self.handshake_done) {
-        try self.dispatchEvents(gpa, io, true);
+        try self.dispatchEvents(io, gpa, true);
     }
 
     if (self.@"error") {
@@ -148,7 +146,13 @@ pub fn onSeq(self: *Self, seq: u32, id: u32) void {
     }
 }
 
-pub fn bindProtocol(self: *Self, gpa: mem.Allocator, io: Io, spec: ProtocolSpec, version: u32) !*ClientObject {
+pub fn bindProtocol(
+    self: *Self,
+    io: Io,
+    gpa: mem.Allocator,
+    spec: ProtocolSpec,
+    version: u32,
+) !*ClientObject {
     if (version > spec.vtable.specVer(spec.ptr)) {
         log.debug("version {} is larger than current spec ver of {}", .{ version, spec.vtable.specVer(spec.ptr) });
         self.disconnectOnError(io);
@@ -168,9 +172,9 @@ pub fn bindProtocol(self: *Self, gpa: mem.Allocator, io: Io, spec: ProtocolSpec,
     const spec_name = spec.vtable.specName(spec.ptr);
     var bind_message = try messages.BindProtocol.init(gpa, spec_name, object.seq, version);
     defer bind_message.deinit(gpa);
-    try self.sendMessage(gpa, io, Message.from(&bind_message));
+    try self.sendMessage(io, gpa, Message.from(&bind_message));
 
-    try self.waitForObject(gpa, io, object);
+    try self.waitForObject(io, gpa, object);
 
     return object;
 }
@@ -207,10 +211,10 @@ pub fn makeObject(self: *Self, gpa: mem.Allocator, protocol_name: []const u8, ob
     return object;
 }
 
-pub fn waitForObject(self: *Self, gpa: mem.Allocator, io: Io, x: *ClientObject) !void {
+pub fn waitForObject(self: *Self, io: Io, gpa: mem.Allocator, x: *ClientObject) !void {
     self.waiting_on_object = x;
     while (x.id == 0 and !self.@"error") {
-        try self.dispatchEvents(gpa, io, true);
+        try self.dispatchEvents(io, gpa, true);
     }
     self.waiting_on_object = null;
 }
@@ -223,7 +227,7 @@ pub fn shouldEndReading(self: *Self) bool {
     return false;
 }
 
-pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, io: Io, block: bool) !void {
+pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !void {
     if (self.@"error") return error.ConnectionClosed;
 
     if (!self.handshake_done) {
@@ -248,7 +252,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, io: Io, block: bool) !voi
             gpa.free(datas);
         }
         for (datas) |*data| {
-            message_parser.handleMessage(gpa, io, data, .{ .client = self }) catch {
+            message_parser.handleMessage(io, gpa, data, .{ .client = self }) catch {
                 log.debug("fatal: failed to handle message on wire", .{});
                 self.disconnectOnError(io);
                 return error.FailedToHandleMessage;
@@ -269,7 +273,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, io: Io, block: bool) !voi
 
     // dispatch
 
-    var data = try SocketRawParsedMessage.fromFd(gpa, self.stream.socket.handle);
+    var data = try SocketRawParsedMessage.readFromSocket(io, gpa, self.stream.socket);
     defer data.deinit(gpa);
     if (data.bad) {
         log.debug("fatal: received malformed message from server", .{});
@@ -282,7 +286,7 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, io: Io, block: bool) !voi
         return error.ConnectionClosed;
     }
 
-    message_parser.handleMessage(gpa, io, &data, .{ .client = self }) catch {
+    message_parser.handleMessage(io, gpa, &data, .{ .client = self }) catch {
         log.debug("fatal: failed to handle message on wire", .{});
         self.disconnectOnError(io);
         return error.FailedToHandleMessage;
@@ -293,13 +297,13 @@ pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, io: Io, block: bool) !voi
     }
 }
 
-pub fn onGeneric(self: *Self, gpa: mem.Allocator, io: Io, msg: messages.GenericProtocolMessage) !void {
+pub fn onGeneric(self: *Self, io: Io, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
             try types.called(
                 WireObject.from(obj),
-                gpa,
                 io,
+                gpa,
                 msg.method,
                 msg.data_span,
                 msg.fds_list,
@@ -317,7 +321,7 @@ pub fn objectForId(self: *Self, id: u32) ?Object {
     return null;
 }
 
-pub fn sendMessage(self: *Self, gpa: mem.Allocator, io: Io, message: Message) !void {
+pub fn sendMessage(self: *Self, io: Io, gpa: mem.Allocator, message: Message) !void {
     _ = io;
     if (isTrace()) {
         const parsed = messages.parseData(message, gpa) catch |err| {
@@ -365,7 +369,7 @@ pub fn extractLoopFD(self: *Self) i32 {
     return self.stream.socket.handle;
 }
 
-pub fn serverSpecs(self: *Self, gpa: mem.Allocator, io: Io, specs: []const []const u8) void {
+pub fn serverSpecs(self: *Self, io: Io, gpa: mem.Allocator, specs: []const []const u8) void {
     self.serverSpecsInner(gpa, specs) catch |err| {
         log.debug("fatal: failed to parse server specs: {}", .{err});
         self.disconnectOnError(io);
@@ -388,15 +392,15 @@ pub fn disconnectOnError(self: *Self, io: Io) void {
     self.stream.close(io);
 }
 
-pub fn roundtrip(self: *Self, gpa: mem.Allocator, io: Io) !void {
+pub fn roundtrip(self: *Self, io: Io, gpa: mem.Allocator) !void {
     if (self.@"error") return;
 
     const next_seq = self.last_ackd_roundtrip_seq + 1;
     var message = try messages.RoundtripRequest.init(gpa, next_seq);
     defer message.deinit(gpa);
-    try self.sendMessage(gpa, io, Message.from(&message));
+    try self.sendMessage(io, gpa, Message.from(&message));
 
     while (self.last_ackd_roundtrip_seq < next_seq) {
-        self.dispatchEvents(gpa, io, true) catch break;
+        self.dispatchEvents(io, gpa, true) catch break;
     }
 }

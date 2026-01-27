@@ -8,8 +8,6 @@ const mem = std.mem;
 const process = std.process;
 const ascii = std.ascii;
 const fmt = std.fmt;
-const heap = std.heap;
-const fs = std.fs;
 
 const Document = Scanner.Document;
 

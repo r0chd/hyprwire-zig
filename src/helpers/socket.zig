@@ -2,14 +2,6 @@ const std = @import("std");
 const builtin = @import("builtin");
 const posix = std.posix;
 
-pub fn socket(domain: u32, socket_type: u32, protocol: u32) !posix.socket_t {
-    const rc = posix.system.socket(domain, socket_type, protocol);
-    switch (posix.errno(rc)) {
-        .SUCCESS => return @intCast(rc),
-        else => return error.SocketCreationFailure,
-    }
-}
-
 pub const GetSockOptError = error{
     /// The calling process does not have the appropriate privileges.
     AccessDenied,

@@ -1,11 +1,10 @@
 const std = @import("std");
 const mem = std.mem;
 const posix = std.posix;
-const fs = std.fs;
+const Io = std.Io;
 
 const helpers = @import("helpers");
 const Fd = helpers.Fd;
-const Io = std.Io;
 const isTrace = helpers.isTrace;
 
 const types = @import("../implementation/types.zig");
@@ -16,7 +15,7 @@ const Message = @import("../message/messages/root.zig").Message;
 const RoundtripDone = @import("../message/messages/RoundtripDone.zig");
 const root = @import("../root.zig");
 const steadyMillis = root.steadyMillis;
-const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
+const SocketRawParsedMessage = @import("../socket/SocketRawParsedMessage.zig");
 const ServerClient = @import("ServerClient.zig");
 const ServerObject = @import("ServerObject.zig");
 
@@ -41,12 +40,12 @@ export_poll_mtx_locked: bool = false,
 is_empty_listener: bool = false,
 path: ?[:0]const u8 = null,
 
-pub fn open(gpa: mem.Allocator, io: std.Io, path: ?[:0]const u8) !*Self {
+pub fn open(io: std.Io, gpa: mem.Allocator, path: ?[:0]const u8) !*Self {
     const socket = try gpa.create(Self);
     errdefer gpa.destroy(socket);
 
     socket.* = try Self.init();
-    errdefer socket.deinit(gpa, io);
+    errdefer socket.deinit(io, gpa);
 
     if (path) |p| {
         try socket.attempt(io, p);
@@ -73,9 +72,9 @@ fn init() !Self {
     };
 }
 
-pub fn deinit(self: *Self, gpa: mem.Allocator, io: Io) void {
+pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
     for (self.clients.items) |client| {
-        client.deinit(gpa, io);
+        client.deinit(io, gpa);
         gpa.destroy(client);
     }
     self.clients.deinit(gpa);
@@ -131,26 +130,26 @@ pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: ProtocolServerIm
     try self.impls.append(gpa, impl);
 }
 
-pub fn dispatchPending(self: *Self, gpa: mem.Allocator, io: Io) !bool {
+pub fn dispatchPending(self: *Self, io: Io, gpa: mem.Allocator) !bool {
     if (self.pollfds.items.len == 0) return false;
     _ = try posix.poll(self.pollfds.items, 0);
     if (self.dispatchNewConnections(gpa))
-        return self.dispatchPending(gpa, io);
+        return self.dispatchPending(io, gpa);
 
-    return self.dispatchExistingConnections(gpa, io);
+    return self.dispatchExistingConnections(io, gpa);
 }
 
-pub fn dispatchEvents(self: *Self, gpa: mem.Allocator, io: Io, block: bool) !bool {
+pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !bool {
     self.poll_mtx.lock();
 
-    while (try self.dispatchPending(gpa, io)) {}
+    while (try self.dispatchPending(io, gpa)) {}
 
     self.clearEventFd(io);
     self.clearWakeupFd(io);
 
     if (block) {
         _ = try posix.poll(self.pollfds.items, -1);
-        while (try self.dispatchPending(gpa, io)) {}
+        while (try self.dispatchPending(io, gpa)) {}
     }
 
     self.poll_mtx.unlock();
@@ -193,7 +192,7 @@ pub fn clearWakeupFd(self: *Self, io: Io) void {
     clearFd(io, self.wakeup_fd);
 }
 
-pub fn addClient(self: *Self, gpa: mem.Allocator, io: std.Io, fd: Fd) !*ServerClient {
+pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, fd: Fd) !*ServerClient {
     const x = try ServerClient.init(fd);
 
     const client = try gpa.create(ServerClient);
@@ -219,7 +218,7 @@ pub fn addClient(self: *Self, gpa: mem.Allocator, io: std.Io, fd: Fd) !*ServerCl
     return client;
 }
 
-pub fn removeClient(self: *Self, gpa: mem.Allocator, io: Io, fd: Fd) bool {
+pub fn removeClient(self: *Self, io: Io, gpa: mem.Allocator, fd: Fd) bool {
     var removed: u32 = 0;
 
     var i: usize = self.clients.items.len;
@@ -227,7 +226,7 @@ pub fn removeClient(self: *Self, gpa: mem.Allocator, io: Io, fd: Fd) bool {
         const client = self.clients.items[i];
         if (client.stream == fd) {
             var c = self.clients.swapRemove(i);
-            c.deinit(gpa, io);
+            c.deinit(io, gpa);
             gpa.destroy(c);
             removed += 1;
         }
@@ -304,7 +303,7 @@ pub fn dispatchNewConnections(self: *Self, gpa: mem.Allocator) bool {
     return true;
 }
 
-pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator, io: Io) !bool {
+pub fn dispatchExistingConnections(self: *Self, io: Io, gpa: mem.Allocator) !bool {
     var had_any = false;
     var needs_poll_recheck = false;
 
@@ -312,7 +311,7 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator, io: Io) !boo
     while (i < self.pollfds.items.len) : (i += 1) {
         if ((self.pollfds.items[i].revents & posix.POLL.IN) == 0) continue;
 
-        try self.dispatchClient(gpa, io, self.clients.items[i - self.internalFds()]);
+        try self.dispatchClient(io, gpa, self.clients.items[i - self.internalFds()]);
 
         had_any = true;
 
@@ -342,7 +341,7 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator, io: Io) !boo
             const client = self.clients.items[i - 1];
             if (client.@"error") {
                 var c = self.clients.swapRemove(i - 1);
-                c.deinit(gpa, io);
+                c.deinit(io, gpa);
                 gpa.destroy(c);
             }
         }
@@ -352,9 +351,9 @@ pub fn dispatchExistingConnections(self: *Self, gpa: mem.Allocator, io: Io) !boo
     return had_any;
 }
 
-pub fn dispatchClient(self: *Self, gpa: mem.Allocator, io: Io, client: *ServerClient) !void {
+pub fn dispatchClient(self: *Self, io: Io, gpa: mem.Allocator, client: *ServerClient) !void {
     _ = self;
-    var data = try SocketRawParsedMessage.fromFd(gpa, client.stream.socket.handle);
+    var data = try SocketRawParsedMessage.readFromSocket(io, gpa, client.stream.socket);
     defer data.deinit(gpa);
     if (data.bad) {
         var fatal_msg = FatalError.init(gpa, 0, 0, "fatal: invalid message on wire") catch |err| {
@@ -363,16 +362,16 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, io: Io, client: *ServerCl
             return;
         };
         defer fatal_msg.deinit(gpa);
-        client.sendMessage(gpa, io, Message.from(&fatal_msg));
+        client.sendMessage(io, gpa, Message.from(&fatal_msg));
         client.@"error" = true;
         return;
     }
 
     if (data.data.items.len == 0) return;
 
-    message_parser.handleMessage(gpa, io, &data, .{ .server = client }) catch {
+    message_parser.handleMessage(io, gpa, &data, .{ .server = client }) catch {
         var fatal_msg = try FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire");
-        client.sendMessage(gpa, io, Message.from(&fatal_msg));
+        client.sendMessage(io, gpa, Message.from(&fatal_msg));
         client.@"error" = true;
         return;
     };
@@ -380,12 +379,12 @@ pub fn dispatchClient(self: *Self, gpa: mem.Allocator, io: Io, client: *ServerCl
     if (client.scheduled_roundtrip_seq > 0) {
         var roundtrip_done = try RoundtripDone.init(gpa, client.scheduled_roundtrip_seq);
         defer roundtrip_done.deinit(gpa);
-        client.sendMessage(gpa, io, Message.from(&roundtrip_done));
+        client.sendMessage(io, gpa, Message.from(&roundtrip_done));
         client.scheduled_roundtrip_seq = 0;
     }
 }
 
-fn threadCallback(self: *Self, gpa: mem.Allocator, io: std.Io) void {
+fn threadCallback(self: *Self, io: std.Io, gpa: mem.Allocator) void {
     while (self.thread_can_poll) {
         self.export_poll_mtx.lock(); // wait for dispatch to unlock
         self.export_poll_mtx_locked = true;
@@ -448,8 +447,8 @@ fn threadCallback(self: *Self, gpa: mem.Allocator, io: std.Io) void {
             var buffer: [1]u8 = undefined;
             var writer = file.writer(io, &buffer);
             var iowriter = &writer.interface;
-            try iowriter.writeAll("x");
-            try iowriter.flush();
+            iowriter.writeAll("x") catch return;
+            iowriter.flush() catch return;
         }
     }
 }
@@ -498,7 +497,7 @@ pub fn extractLoopFD(self: *Self, gpa: mem.Allocator) !i32 {
     return export_fd.raw;
 }
 
-pub fn createObject(self: *Self, gpa: mem.Allocator, io: Io, client: ?*ServerClient, reference: ?*ServerObject, object: []const u8, seq: u32) ?*ServerObject {
+pub fn createObject(self: *Self, io: Io, gpa: mem.Allocator, client: ?*ServerClient, reference: ?*ServerObject, object: []const u8, seq: u32) ?*ServerObject {
     _ = self;
     if (client == null or reference == null) {
         return null;
@@ -509,7 +508,7 @@ pub fn createObject(self: *Self, gpa: mem.Allocator, io: Io, client: ?*ServerCli
             const protocol_name = ref.protocol_name;
             const version = ref.version;
 
-            return c.createObject(gpa, io, protocol_name, object, version, seq);
+            return c.createObject(io, gpa, protocol_name, object, version, seq);
         }
     }
 

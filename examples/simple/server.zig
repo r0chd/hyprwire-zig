@@ -1,6 +1,5 @@
 const std = @import("std");
 const mem = std.mem;
-const posix = std.posix;
 const fmt = std.fmt;
 const Io = std.Io;
 
@@ -21,7 +20,7 @@ const Server = struct {
         std.debug.print("Object bound XD\n", .{});
 
         var manager = test_protocol.MyManagerV1Object.init(self.alloc, test_protocol.MyManagerV1Object.Listener.from(self), object) catch return;
-        manager.sendSendMessage(self.alloc, self.io, "Hello object") catch {};
+        manager.sendSendMessage(self.io, self.alloc, "Hello object") catch {};
 
         self.manager = manager;
     }
@@ -68,8 +67,8 @@ const Server = struct {
             .make_object => |seq| {
                 const manager = self.manager orelse return;
                 const server_object = self.socket.createObject(
-                    self.alloc,
                     self.io,
+                    self.alloc,
                     manager.getObject().vtable.getClient(manager.getObject().ptr),
                     @ptrCast(@alignCast(manager.getObject().ptr)),
                     "my_object_v1",
@@ -79,7 +78,7 @@ const Server = struct {
                 self.object_handle = hw.types.Object.from(server_object);
 
                 var object = test_protocol.MyObjectV1Object.init(self.alloc, test_protocol.MyObjectV1Object.Listener.from(self), &self.object_handle.?) catch return;
-                object.sendSendMessage(alloc, self.io, "Hello object") catch return;
+                object.sendSendMessage(self.io, alloc, "Hello object") catch return;
                 self.object = object;
             },
         }
@@ -96,7 +95,7 @@ const Server = struct {
 
                 std.debug.print("Erroring out the client!\n", .{});
 
-                obj.@"error"(alloc, self.io, @intFromEnum(message.message), "Important error occurred!");
+                obj.@"error"(self.io, alloc, @intFromEnum(message.message), "Important error occurred!");
             },
             .destroy => {},
         }
@@ -110,7 +109,7 @@ const Server = struct {
         if (self.object) |object| {
             object.deinit(self.alloc);
         }
-        self.socket.deinit(self.alloc, self.io);
+        self.socket.deinit(self.io, self.alloc);
     }
 };
 
@@ -120,23 +119,26 @@ fn socketPath(alloc: mem.Allocator, environ: *std.process.Environ.Map) ![:0]u8 {
 }
 
 pub fn main(init: std.process.Init) !void {
-    const socket_path = try socketPath(init.gpa, init.environ_map);
-    defer init.gpa.free(socket_path);
+    const gpa = init.gpa;
+    const io = init.io;
+
+    const socket_path = try socketPath(gpa, init.environ_map);
+    defer gpa.free(socket_path);
 
     // https://codeberg.org/ziglang/zig/issues/30591
-    Io.Dir.cwd().deleteFile(init.io, socket_path) catch {};
+    Io.Dir.cwd().deleteFile(io, socket_path) catch {};
 
-    const socket = try hw.ServerSocket.open(init.gpa, init.io, socket_path);
+    const socket = try hw.ServerSocket.open(io, gpa, socket_path);
     var server = Server{
-        .alloc = init.gpa,
+        .alloc = gpa,
         .socket = socket,
-        .io = init.io,
+        .io = io,
     };
     defer server.deinit();
 
     const spec = test_protocol.TestProtocolV1Impl.init(1, test_protocol.TestProtocolV1Listener.from(&server));
     const pro = hw.types.server.ProtocolImplementation.from(&spec);
-    try socket.addImplementation(init.gpa, pro);
+    try socket.addImplementation(gpa, pro);
 
-    while (socket.dispatchEvents(init.gpa, init.io, true) catch false) {}
+    while (socket.dispatchEvents(io, gpa, true) catch false) {}
 }

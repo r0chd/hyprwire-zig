@@ -9,16 +9,17 @@ const protocol_version = build_options.protocol_version;
 
 const helpers = @import("helpers");
 const isTrace = helpers.isTrace;
+const steadyMillis = @import("hyprwire").steadyMillis;
 
 const ClientSocket = @import("../client/ClientSocket.zig");
-const steadyMillis = @import("../root.zig").steadyMillis;
 const ServerClient = @import("../server/ServerClient.zig");
-const SocketRawParsedMessage = @import("../socket/socket_helpers.zig").SocketRawParsedMessage;
+const SocketRawParsedMessage = @import("../socket/SocketRawParsedMessage.zig");
 const messages = @import("./messages/root.zig");
 const Message = messages.Message;
 const MessageType = @import("MessageType.zig").MessageType;
 
 const log = std.log.scoped(.hw);
+
 pub const MessageParsingResult = error{
     ParseError,
     Incomplete,
@@ -26,21 +27,21 @@ pub const MessageParsingResult = error{
 };
 
 pub fn handleMessage(
-    gpa: mem.Allocator,
     io: Io,
+    gpa: mem.Allocator,
     data: *SocketRawParsedMessage,
     role: union(enum) { client: *ClientSocket, server: *ServerClient },
 ) MessageParsingResult!void {
     return switch (role) {
-        .client => |client| handleClientMessage(gpa, io, data, client),
-        .server => |client| handleServerMessage(gpa, io, data, client),
+        .client => |client| handleClientMessage(io, gpa, data, client),
+        .server => |client| handleServerMessage(io, gpa, data, client),
     };
 }
 
-fn handleClientMessage(gpa: mem.Allocator, io: Io, data: *SocketRawParsedMessage, client: *ClientSocket) MessageParsingResult!void {
+fn handleClientMessage(io: Io, gpa: mem.Allocator, data: *SocketRawParsedMessage, client: *ClientSocket) MessageParsingResult!void {
     var needle: usize = 0;
     while (needle < data.data.items.len) {
-        const ret = parseSingleMessageClient(gpa, io, data, needle, client) catch return error.ParseError;
+        const ret = parseSingleMessageClient(io, gpa, data, needle, client) catch return error.ParseError;
         if (ret == 0) return error.ParseError;
 
         needle += ret;
@@ -67,10 +68,10 @@ fn handleClientMessage(gpa: mem.Allocator, io: Io, data: *SocketRawParsedMessage
     return;
 }
 
-fn handleServerMessage(gpa: mem.Allocator, io: Io, data: *SocketRawParsedMessage, client: *ServerClient) MessageParsingResult!void {
+fn handleServerMessage(io: Io, gpa: mem.Allocator, data: *SocketRawParsedMessage, client: *ServerClient) MessageParsingResult!void {
     var needle: usize = 0;
     while (needle < data.data.items.len and !client.@"error") {
-        const ret = parseSingleMessageServer(gpa, io, data, needle, client) catch return error.ParseError;
+        const ret = parseSingleMessageServer(io, gpa, data, needle, client) catch return error.ParseError;
         if (ret == 0) return error.ParseError;
 
         needle += ret;
@@ -87,7 +88,7 @@ fn handleServerMessage(gpa: mem.Allocator, io: Io, data: *SocketRawParsedMessage
     return;
 }
 
-pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParsedMessage, off: usize, client: *ServerClient) !usize {
+pub fn parseSingleMessageServer(io: Io, gpa: mem.Allocator, raw: *SocketRawParsedMessage, off: usize, client: *ServerClient) !usize {
     if (enums.fromInt(MessageType, raw.data.items[off])) |message_type| {
         switch (message_type) {
             .sup => {
@@ -109,7 +110,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
                 const versions = [_]u32{1};
                 var msg = try messages.HandshakeBegin.init(gpa, &versions);
                 defer msg.deinit(gpa);
-                client.sendMessage(gpa, io, Message.from(&msg));
+                client.sendMessage(io, gpa, Message.from(&msg));
                 return hello_msg.getLen();
             },
             .handshake_ack => {
@@ -142,7 +143,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
                 }
                 var message = try messages.HandshakeProtocols.init(gpa, protocol_names.items);
                 defer message.deinit(gpa);
-                client.sendMessage(gpa, io, Message.from(&message));
+                client.sendMessage(io, gpa, Message.from(&message));
 
                 return msg.getLen();
             },
@@ -162,7 +163,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
                     log.debug("[{} @ {}] <- {s}", .{ client.stream.socket.handle, steadyMillis(), parsed });
                 }
 
-                _ = client.createObject(gpa, io, msg.protocol, "", msg.version, msg.seq);
+                _ = client.createObject(io, gpa, msg.protocol, "", msg.version, msg.seq);
 
                 return msg.getLen();
             },
@@ -182,7 +183,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
                     log.debug("[{} @ {}] <- {s}", .{ client.stream.socket.handle, steadyMillis(), parsed });
                 }
 
-                try client.onGeneric(gpa, io, msg);
+                try client.onGeneric(io, gpa, msg);
                 return msg.getLen();
             },
             .roundtrip_request => {
@@ -225,7 +226,7 @@ pub fn parseSingleMessageServer(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
     return 0;
 }
 
-pub fn parseSingleMessageClient(gpa: mem.Allocator, io: Io, raw: *SocketRawParsedMessage, off: usize, client: *ClientSocket) !usize {
+pub fn parseSingleMessageClient(io: Io, gpa: mem.Allocator, raw: *SocketRawParsedMessage, off: usize, client: *ClientSocket) !usize {
     if (enums.fromInt(MessageType, raw.data.items[off])) |message_type| {
         switch (message_type) {
             .handshake_begin => {
@@ -260,7 +261,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
 
                 var ack_msg = try messages.HandshakeAck.init(gpa, protocol_version);
                 defer ack_msg.deinit(gpa);
-                try client.sendMessage(gpa, io, Message.from(&ack_msg));
+                try client.sendMessage(io, gpa, Message.from(&ack_msg));
 
                 return msg.getLen();
             },
@@ -300,7 +301,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
                     log.debug("[{} @ {}] <- {s}", .{ client.stream.socket.handle, steadyMillis(), parsed });
                 }
 
-                client.serverSpecs(gpa, io, msg.protocols);
+                client.serverSpecs(io, gpa, msg.protocols);
 
                 return msg.getLen();
             },
@@ -340,7 +341,7 @@ pub fn parseSingleMessageClient(gpa: mem.Allocator, io: Io, raw: *SocketRawParse
                     log.debug("[{} @ {}] <- {s}", .{ client.stream.socket.handle, steadyMillis(), parsed });
                 }
 
-                try client.onGeneric(gpa, io, msg);
+                try client.onGeneric(io, gpa, msg);
 
                 return msg.getLen();
             },
