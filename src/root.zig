@@ -26,6 +26,15 @@ pub fn steadyMillis() f32 {
     }
 }
 
+test "steadyMillis" {
+    const io = std.testing.io;
+
+    try std.testing.expectEqual(0, steadyMillis());
+    try std.Io.sleep(io, .fromSeconds(2), .real);
+    const millis = steadyMillis();
+    try std.testing.expect(millis > 2000 and millis < 2500);
+}
+
 test {
     std.testing.refAllDecls(@This());
 }

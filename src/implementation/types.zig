@@ -1,13 +1,14 @@
-const Trait = @import("trait").Trait;
 const std = @import("std");
-
 const mem = std.mem;
 
-pub const WireObject = @import("WireObject.zig").WireObject;
-pub const Object = @import("Object.zig").Object;
-pub const server = @import("server_impl.zig");
+const Trait = @import("trait").Trait;
+
 pub const client = @import("client_impl.zig");
-pub const called = @import("WireObject.zig").called;
+pub const Object = @import("object.zig").Object;
+pub const server = @import("server_impl.zig");
+const wire_object = @import("wire_object.zig");
+pub const WireObject = wire_object.WireObject;
+pub const called = wire_object.called;
 
 pub const Method = struct {
     idx: u32 = 0,

@@ -2,16 +2,16 @@ const std = @import("std");
 const fmt = std.fmt;
 const enums = std.enums;
 const mem = std.mem;
+const Io = std.Io;
 
 const helpers = @import("helpers");
 const isTrace = helpers.isTrace;
 
-const Io = std.Io;
 const ClientSocket = @import("../client/ClientSocket.zig");
-const Object = @import("../implementation/Object.zig").Object;
+const Object = @import("../implementation/object.zig").Object;
 const types = @import("../implementation/types.zig");
 const Method = types.Method;
-const WireObject = @import("../implementation/WireObject.zig").WireObject;
+const WireObject = @import("../implementation/wire_object.zig").WireObject;
 const message_parser = @import("../message/MessageParser.zig");
 const FatalErrorMessage = @import("../message/messages/FatalProtocolError.zig");
 const messages = @import("../message/messages/root.zig");

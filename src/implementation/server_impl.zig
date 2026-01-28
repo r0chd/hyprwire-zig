@@ -3,7 +3,7 @@ const mem = std.mem;
 
 const Trait = @import("trait").Trait;
 
-const Object = @import("Object.zig").Object;
+const Object = @import("object.zig").Object;
 const ProtocolSpec = @import("types.zig").ProtocolSpec;
 
 pub const ObjectImplementation = struct {

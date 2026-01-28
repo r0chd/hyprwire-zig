@@ -15,6 +15,7 @@ const root = @import("../root.zig");
 const steadyMillis = root.steadyMillis;
 const ServerObject = @import("ServerObject.zig");
 const ServerSocket = @import("ServerSocket.zig");
+const wire_object = @import("../implementation/wire_object.zig");
 
 const c = @cImport(@cInclude("sys/socket.h"));
 
@@ -216,7 +217,7 @@ pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
     }
 }
 
-pub fn onGeneric(self: *Self, io: Io, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
+pub fn onGeneric(self: *Self, io: Io, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) (wire_object.Error || mem.Allocator.Error)!void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
             try types.called(WireObject.from(obj), io, gpa, msg.method, msg.data_span, msg.fds_list);
