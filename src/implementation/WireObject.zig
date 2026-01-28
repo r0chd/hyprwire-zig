@@ -124,6 +124,7 @@ pub fn called(self: WireObject, io: std.Io, gpa: mem.Allocator, id: u32, data: [
                             arr_message_len += str_len + str_len_len;
                         }
                     },
+                    .type_fd => {},
                     else => {
                         const msg = "failed demarshaling array message";
                         log.debug("core protocol error: {s}", .{msg});
@@ -260,6 +261,28 @@ pub fn called(self: WireObject, io: std.Io, gpa: mem.Allocator, id: u32, data: [
                             data_ptr[j] = @ptrCast(owned_str.ptr);
 
                             arr_message_len += strlen_len + str_len;
+                        }
+                    },
+                    .type_fd => {
+                        const data_ptr = try arena.allocator().alloc(i32, if (arr_len == 0) 1 else arr_len);
+                        const data_slot = try arena.allocator().create([*]i32);
+                        data_slot.* = data_ptr.ptr;
+                        const size_slot = try arena.allocator().create(u32);
+                        size_slot.* = @intCast(arr_len);
+
+                        try avalues.append(arena.allocator(), @ptrCast(data_slot));
+                        try avalues.append(arena.allocator(), @ptrCast(size_slot));
+                        try other_buffers.append(arena.allocator(), @ptrCast(data_ptr.ptr));
+
+                        for (0..arr_len) |j| {
+                            if (fd_no >= fds.len) {
+                                const msg = "failed demarshaling array message";
+                                log.debug("core protocol error: {s}", .{msg});
+                                self.vtable.@"error"(self.ptr, io, arena.allocator(), self.vtable.getId(self.ptr), msg);
+                                return;
+                            }
+                            data_ptr[j] = fds[fd_no];
+                            fd_no += 1;
                         }
                     },
                     else => {

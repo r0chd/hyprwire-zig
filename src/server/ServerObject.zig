@@ -259,10 +259,12 @@ pub fn call(self: *Self, io: Io, gpa: mem.Allocator, id: u32, args: *types.Args)
                         }
                     },
                     .type_fd => {
-                        const fd = (args.next() orelse return error.InvalidMessage).get(i32) orelse return error.InvalidMessage;
-                        try fds.append(gpa, fd);
+                        const fd_list = (args.next() orelse return error.InvalidMessage).get([]const i32) orelse return error.InvalidMessage;
+                        for (fd_list) |fd| {
+                            try fds.append(gpa, fd);
+                        }
                         var len_buf: [10]u8 = undefined;
-                        try data.appendSlice(gpa, message_parser.encodeVarInt(1, &len_buf));
+                        try data.appendSlice(gpa, message_parser.encodeVarInt(fd_list.len, &len_buf));
                     },
                     else => return error.InvalidMessage,
                 }

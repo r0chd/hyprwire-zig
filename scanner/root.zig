@@ -127,14 +127,18 @@ pub fn writeMethodHandler(writer: anytype, obj: Object, method: Method, idx: usi
 
     for (method.args) |arg| {
         if (arg.is_array) {
-            try writer.print(", {s}: {s}, {s}_len: u32", .{ arg.name, arg.zig_server_event_type, arg.name });
-        } else if (mem.eql(u8, arg.type_str, "enum")) {
-            try writer.print(", value: i32", .{});
-        } else if (mem.eql(u8, arg.type_str, "fd")) {
-            try writer.print(", fd: i32", .{});
+            if (mem.eql(u8, arg.type_str, "fd")) {
+                try writer.print(", {s}: [*]const i32, {s}_len: u32", .{ arg.name, arg.name });
+            } else {
+                try writer.print(", {s}: {s}, {s}_len: u32", .{ arg.name, arg.zig_server_event_type, arg.name });
+            }
+        } else if (mem.eql(u8, arg.type_str, "enum") or
+            mem.eql(u8, arg.type_str, "fd"))
+        {
+            try writer.print(", {s}: i32", .{arg.name});
         } else {
             if (method.returns_type.len > 0) {
-                try writer.print(", seq: u32", .{});
+                try writer.print(", {s}: u32", .{arg.name});
             } else {
                 try writer.print(", {s}: {s}", .{ arg.name, arg.zig_server_event_type });
             }
@@ -197,22 +201,27 @@ pub fn writeMethodHandler(writer: anytype, obj: Object, method: Method, idx: usi
                         \\
                         \\            .@"{s}" = fallback_allocator.allocator().dupe(u32, {s}[0..{s}_len]) catch @panic("OOM"),
                     , .{ arg.name, arg.name, arg.name });
+                } else if (mem.eql(u8, arg.base_type, "fd")) {
+                    try writer.print(
+                        \\
+                        \\            .@"{s}" = fallback_allocator.allocator().dupe(i32, {s}[0..{s}_len]) catch @panic("OOM"),
+                    , .{ arg.name, arg.name, arg.name });
                 }
             } else if (mem.eql(u8, arg.type_str, "enum")) {
                 try writer.print(
                     \\
-                    \\            .@"{s}" = @enumFromInt(value),
-                , .{arg.name});
+                    \\            .@"{s}" = @enumFromInt({s}),
+                , .{ arg.name, arg.name });
             } else if (mem.eql(u8, arg.type_str, "fd")) {
                 try writer.print(
                     \\
-                    \\            .@"{s}" = fd,
-                , .{arg.name});
+                    \\            .@"{s}" = {s},
+                , .{ arg.name, arg.name });
             } else if (method.returns_type.len > 0) {
                 try writer.print(
                     \\
-                    \\            .seq = seq,
-                , .{});
+                    \\            .{s} = {s},
+                , .{ arg.name, arg.name });
             } else {
                 try writer.print(
                     \\

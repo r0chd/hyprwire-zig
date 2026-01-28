@@ -96,6 +96,7 @@ pub fn main(init: std.process.Init) !void {
 
     try manager.sendSendMessage(io, gpa, "Hello!");
     try manager.sendSendMessageFd(io, gpa, pipes[0]);
+    try manager.sendSendMessageArrayFd(io, gpa, &.{pipes[0]});
     try manager.sendSendMessageArray(io, gpa, &.{ "Hello", "via", "array!" });
     try manager.sendSendMessageArray(io, gpa, &.{});
     try manager.sendSendMessageArrayUint(io, gpa, &.{ 69, 420, 2137 });

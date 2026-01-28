@@ -19,15 +19,14 @@ pub fn generateServerCodeForGlobal(gpa: mem.Allocator, doc: *const Document, glo
     }
 
     if (mem.eql(u8, global_iface, protocol.name)) {
-        return generateServerCode(gpa, protocol, null);
+        return generateServerCode(protocol, null);
     }
 
     const selected = try protocol.computeReachableSet(gpa, global_iface, requested_version);
-    return generateServerCode(gpa, protocol, selected);
+    return generateServerCode(protocol, selected);
 }
 
-fn generateServerCode(gpa: mem.Allocator, protocol: Protocol, selected: ?ObjectSet) ![]const u8 {
-    _ = gpa;
+fn generateServerCode(protocol: Protocol, selected: ?ObjectSet) ![]const u8 {
     var output: std.Io.Writer.Allocating = .init(std.heap.page_allocator);
     const writer = &output.writer;
 

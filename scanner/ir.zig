@@ -1,6 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 
+const fmt = std.fmt;
 const root = @import("root.zig");
 const Document = root.Document;
 const Node = root.Node;
@@ -238,10 +239,10 @@ pub const Arg = struct {
             .interface = interface,
             .is_array = is_array,
             .base_type = base_type,
-            .zig_event_type = try computeEventArgType(type_str, base_type, interface, is_array, gpa),
-            .zig_send_type = try computeSendArgType(type_str, base_type, is_array, interface, gpa),
-            .zig_server_event_type = try computeServerEventArgType(type_str, base_type, is_array),
-            .zig_server_struct_type = try computeServerStructType(type_str, base_type, interface, is_array, gpa),
+            .zig_event_type = try computeEventArgType(gpa, base_type, interface, is_array),
+            .zig_send_type = try computeSendArgType(gpa, base_type, is_array, interface),
+            .zig_server_event_type = try computeServerEventArgType(gpa, base_type, is_array),
+            .zig_server_struct_type = try computeServerStructType(gpa, base_type, interface, is_array),
         };
     }
 };
@@ -338,103 +339,72 @@ fn parseType(type_str: []const u8, gpa: mem.Allocator) ![]const u8 {
     }
 }
 
-fn computeEventArgType(type_str: []const u8, base_type: []const u8, interface: []const u8, is_array: bool, gpa: mem.Allocator) ![]const u8 {
-    if (is_array) {
-        if (mem.eql(u8, base_type, "uint")) {
-            return "[]const u32";
-        } else if (mem.eql(u8, base_type, "varchar")) {
-            return "[][*:0]const u8";
-        }
-    }
-
-    if (mem.eql(u8, type_str, "varchar")) {
-        return "[*:0]const u8";
-    } else if (mem.eql(u8, type_str, "uint")) {
-        return "u32";
-    } else if (mem.eql(u8, type_str, "int")) {
-        return "i32";
-    } else if (mem.eql(u8, type_str, "fd")) {
-        return "i32";
-    } else if (mem.eql(u8, type_str, "enum")) {
+fn computeEventArgType(gpa: mem.Allocator, base_type: []const u8, interface: []const u8, is_array: bool) ![]const u8 {
+    const arr = if (is_array) "[]const " else "";
+    if (mem.eql(u8, base_type, "varchar")) {
+        return fmt.allocPrint(gpa, "{s}[*:0]const u8", .{arr});
+    } else if (mem.eql(u8, base_type, "uint")) {
+        return fmt.allocPrint(gpa, "{s}u32", .{arr});
+    } else if (mem.eql(u8, base_type, "int") or
+        mem.eql(u8, base_type, "fd"))
+    {
+        return fmt.allocPrint(gpa, "{s}i32", .{arr});
+    } else if (mem.eql(u8, base_type, "enum")) {
         const enum_pascal = try toPascalCase(interface, gpa);
-        return try std.fmt.allocPrint(gpa, "spec.{s}", .{enum_pascal});
+        return fmt.allocPrint(gpa, "{s}spec.{s}", .{ arr, enum_pascal });
     }
 
-    return "void";
+    unreachable;
 }
 
-fn computeSendArgType(type_str: []const u8, base_type: []const u8, is_array: bool, interface: []const u8, gpa: mem.Allocator) ![]const u8 {
-    if (is_array) {
-        if (mem.eql(u8, base_type, "uint")) {
-            return "[]const u32";
-        } else if (mem.eql(u8, base_type, "varchar")) {
-            return "[]const [:0]const u8";
-        }
-    }
-
-    if (mem.eql(u8, type_str, "varchar")) {
-        return "[:0]const u8";
-    } else if (mem.eql(u8, type_str, "uint")) {
-        return "u32";
-    } else if (mem.eql(u8, type_str, "int")) {
-        return "i32";
-    } else if (mem.eql(u8, type_str, "fd")) {
-        return "i32";
-    } else if (mem.eql(u8, type_str, "enum")) {
+fn computeServerStructType(gpa: mem.Allocator, base_type: []const u8, interface: []const u8, is_array: bool) ![]const u8 {
+    const arr = if (is_array) "[]const " else "";
+    if (mem.eql(u8, base_type, "varchar")) {
+        return fmt.allocPrint(gpa, "{s}[*:0]const u8", .{arr});
+    } else if (mem.eql(u8, base_type, "uint")) {
+        return fmt.allocPrint(gpa, "{s}u32", .{arr});
+    } else if (mem.eql(u8, base_type, "int") or (mem.eql(u8, base_type, "fd"))) {
+        return fmt.allocPrint(gpa, "{s}i32", .{arr});
+    } else if (mem.eql(u8, base_type, "enum")) {
         const enum_pascal = try toPascalCase(interface, gpa);
-        return try std.fmt.allocPrint(gpa, "spec.{s}", .{enum_pascal});
+        return fmt.allocPrint(gpa, "{s}spec.{s}", .{ arr, enum_pascal });
     }
 
-    return "void";
+    unreachable;
 }
 
-fn computeServerEventArgType(type_str: []const u8, base_type: []const u8, is_array: bool) ![]const u8 {
-    if (is_array) {
-        if (mem.eql(u8, base_type, "uint")) {
-            return "[*]const u32";
-        } else if (mem.eql(u8, base_type, "varchar")) {
-            return "[*]const [*:0]const u8";
-        }
+fn computeSendArgType(gpa: mem.Allocator, base_type: []const u8, is_array: bool, interface: []const u8) ![]const u8 {
+    const arr = if (is_array) "[]const " else "";
+    if (mem.eql(u8, base_type, "varchar")) {
+        return fmt.allocPrint(gpa, "{s}[:0]const u8", .{arr});
+    } else if (mem.eql(u8, base_type, "uint")) {
+        return fmt.allocPrint(gpa, "{s}u32", .{arr});
+    } else if (mem.eql(u8, base_type, "int") or
+        mem.eql(u8, base_type, "fd"))
+    {
+        return fmt.allocPrint(gpa, "{s}i32", .{arr});
+    } else if (mem.eql(u8, base_type, "enum")) {
+        const enum_pascal = try toPascalCase(interface, gpa);
+        return fmt.allocPrint(gpa, "{s}spec.{s}", .{ arr, enum_pascal });
     }
 
-    if (mem.eql(u8, type_str, "varchar")) {
-        return "[*:0]const u8";
-    } else if (mem.eql(u8, type_str, "uint")) {
-        return "u32";
-    } else if (mem.eql(u8, type_str, "int")) {
-        return "i32";
-    } else if (mem.eql(u8, type_str, "fd")) {
-        return "i32";
-    } else if (mem.eql(u8, type_str, "enum")) {
-        return "i32";
-    }
-
-    return "void";
+    unreachable;
 }
 
-fn computeServerStructType(type_str: []const u8, base_type: []const u8, interface: []const u8, is_array: bool, gpa: mem.Allocator) ![]const u8 {
-    if (is_array) {
-        if (mem.eql(u8, base_type, "uint")) {
-            return "[]const u32";
-        } else if (mem.eql(u8, base_type, "varchar")) {
-            return "[][*:0]const u8";
-        }
+fn computeServerEventArgType(gpa: mem.Allocator, base_type: []const u8, is_array: bool) ![]const u8 {
+    const arr = if (is_array) "[*]const " else "";
+    if (mem.eql(u8, base_type, "varchar")) {
+        return fmt.allocPrint(gpa, "{s}[*:0]const u8", .{arr});
+    } else if (mem.eql(u8, base_type, "uint")) {
+        return fmt.allocPrint(gpa, "{s}u32", .{arr});
+    } else if (mem.eql(u8, base_type, "int") or
+        mem.eql(u8, base_type, "fd") or
+        mem.eql(u8, base_type, "enum"))
+    {
+        return fmt.allocPrint(gpa, "{s}i32", .{arr});
     }
 
-    if (mem.eql(u8, type_str, "varchar")) {
-        return "[*:0]const u8";
-    } else if (mem.eql(u8, type_str, "uint")) {
-        return "u32";
-    } else if (mem.eql(u8, type_str, "int")) {
-        return "i32";
-    } else if (mem.eql(u8, type_str, "fd")) {
-        return "i32";
-    } else if (mem.eql(u8, type_str, "enum")) {
-        const enum_pascal = try toPascalCase(interface, gpa);
-        return try std.fmt.allocPrint(gpa, "spec.{s}", .{enum_pascal});
-    }
-
-    return "void";
+    unreachable;
 }
 
 pub fn toPascalCase(name: []const u8, gpa: mem.Allocator) ![]const u8 {

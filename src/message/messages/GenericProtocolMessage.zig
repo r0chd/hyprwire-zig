@@ -96,7 +96,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
                         }
                     },
                     .type_fd => {
-                        for (0..arr_message_len - 1) |_| {
+                        for (0..arr_len) |_| {
                             if (fds_list.items.len == 0) return Error.MalformedMessage;
                             try fds_consumed.append(gpa, fds_list.items[0]);
                             _ = fds_list.swapRemove(0);

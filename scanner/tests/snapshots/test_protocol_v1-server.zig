@@ -24,7 +24,7 @@ fn myManagerV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) vo
     );
 }
 
-fn myManagerV1_method1(r: *types.Object, fd: i32) callconv(.c) void {
+fn myManagerV1_method1(r: *types.Object, message: i32) callconv(.c) void {
     const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     defer _ = object.arena.reset(.retain_capacity);
     var buffer: [32_768]u8 = undefined;
@@ -38,7 +38,7 @@ fn myManagerV1_method1(r: *types.Object, fd: i32) callconv(.c) void {
         object.listener.ptr,
         fallback_allocator.allocator(),
         .{ .@"send_message_fd" = .{
-            .@"message" = fd,
+            .@"message" = message,
         } },
     );
 }
@@ -109,7 +109,7 @@ pub const MyManagerV1Object = struct {
             @"message": i32,
         },
         @"send_message_array": struct {
-            @"message": [][*:0]const u8,
+            @"message": []const [*:0]const u8,
         },
         @"send_message_array_uint": struct {
             @"message": []const u32,
@@ -200,7 +200,7 @@ fn myObjectV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) voi
     );
 }
 
-fn myObjectV1_method1(r: *types.Object, value: i32) callconv(.c) void {
+fn myObjectV1_method1(r: *types.Object, message: i32) callconv(.c) void {
     const object: *MyObjectV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
     defer _ = object.arena.reset(.retain_capacity);
     var buffer: [32_768]u8 = undefined;
@@ -214,7 +214,7 @@ fn myObjectV1_method1(r: *types.Object, value: i32) callconv(.c) void {
         object.listener.ptr,
         fallback_allocator.allocator(),
         .{ .@"send_enum" = .{
-            .@"message" = @enumFromInt(value),
+            .@"message" = @enumFromInt(message),
         } },
     );
 }
