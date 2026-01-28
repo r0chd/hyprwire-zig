@@ -403,3 +403,7 @@ pub fn roundtrip(self: *Self, io: Io, gpa: mem.Allocator) !void {
         self.dispatchEvents(io, gpa, true) catch break;
     }
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

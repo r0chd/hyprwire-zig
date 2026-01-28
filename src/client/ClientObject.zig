@@ -316,3 +316,7 @@ pub fn getListeners(self: *Self) []*anyopaque {
 pub fn getVersion(self: *Self) u32 {
     return self.version;
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

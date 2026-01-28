@@ -185,3 +185,7 @@ fn writeProtocolSpec(writer: anytype, protocol: Protocol, selected: ?ObjectSet) 
 
     try writer.print("}};\n", .{});
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

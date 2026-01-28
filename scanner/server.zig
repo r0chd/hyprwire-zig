@@ -315,3 +315,7 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
         \\
     , .{});
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

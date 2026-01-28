@@ -446,3 +446,7 @@ pub fn toCamelCase(name: []const u8, gpa: mem.Allocator) ![]const u8 {
 
     return try result.toOwnedSlice(gpa);
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

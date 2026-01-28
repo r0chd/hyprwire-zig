@@ -51,3 +51,7 @@ fn remap(ctx: *anyopaque, memory: []u8, alignment: std.mem.Alignment, new_len: u
     }
     return null;
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

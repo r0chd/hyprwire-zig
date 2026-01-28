@@ -337,3 +337,7 @@ test {
         _ = self.server();
     }
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

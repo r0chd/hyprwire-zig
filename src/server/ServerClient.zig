@@ -228,3 +228,7 @@ pub fn onGeneric(self: *Self, io: Io, gpa: mem.Allocator, msg: messages.GenericP
 pub fn getPid(self: *const Self) i32 {
     return self.pid;
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

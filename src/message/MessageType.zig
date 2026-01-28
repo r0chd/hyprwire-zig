@@ -41,3 +41,8 @@ pub const MessageType = enum(u8) {
     ///  Params: uint -> object handle ID, uint -> method ID, data...
     generic_protocol_message = 100,
 };
+
+test {
+    const std = @import("std");
+    std.testing.refAllDecls(@This());
+}

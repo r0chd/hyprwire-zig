@@ -81,3 +81,7 @@ pub fn accept(
     }
     return accepted_sock;
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

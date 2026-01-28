@@ -442,3 +442,7 @@ test "parseVarInt/encodeVarInt" {
         try testing.expectEqual(encoded.len, encoded_len);
     }
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

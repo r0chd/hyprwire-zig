@@ -318,3 +318,7 @@ pub fn called(self: WireObject, io: std.Io, gpa: mem.Allocator, id: u32, data: [
     const listener = self.vtable.getListeners(self.ptr)[id];
     c.ffi_call(&cif, @ptrCast(listener), null, avalues.items.ptr);
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

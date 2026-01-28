@@ -85,3 +85,7 @@ pub fn ffiTypeFrom(magic: MessageMagic) *c.ffi_type {
         else => unreachable,
     };
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

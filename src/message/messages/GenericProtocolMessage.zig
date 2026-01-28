@@ -350,3 +350,46 @@ test "GenericProtocolMessage.fromBytes - Error.MalformedMessage" {
     const msg = Self.fromBytes(alloc, &bytes, &fds_list, 0);
     try std.testing.expectError(Error.MalformedMessage, msg);
 }
+
+test "GenericProtocolMessage.fromBytes - Missing MessageMagic.type_object" {
+    const alloc = std.testing.allocator;
+
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.generic_protocol_message),
+        @intFromEnum(MessageMagic.type_uint),
+        0x02,                           0x00, 0x00, 0x00, // method = 2
+        @intFromEnum(MessageMagic.end),
+    };
+    var fds_list: std.ArrayList(i32) = .empty;
+    const msg = Self.fromBytes(alloc, &bytes, &fds_list, 0);
+    try std.testing.expectError(Error.InvalidFieldType, msg);
+}
+
+test "GenericProtocolMessage.fromBytes - Missing MessageMagic.type_uint" {
+    const alloc = std.testing.allocator;
+
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.generic_protocol_message),
+        @intFromEnum(MessageMagic.type_object),
+        0x01,                           0x00, 0x00, 0x00, // object = 1
+        @intFromEnum(MessageMagic.end),
+    };
+    var fds_list: std.ArrayList(i32) = .empty;
+    const msg = Self.fromBytes(alloc, &bytes, &fds_list, 0);
+    try std.testing.expectError(Error.InvalidFieldType, msg);
+}
+
+test "GenericProtocolMessage.fromBytes - MessageType.generic_protocol_message" {
+    const alloc = std.testing.allocator;
+
+    const bytes = [_]u8{
+        @intFromEnum(MessageMagic.type_object),
+        0x01,                                 0x00, 0x00, 0x00, // object = 1
+        @intFromEnum(MessageMagic.type_uint),
+        0x02,                           0x00, 0x00, 0x00, // method = 2
+        @intFromEnum(MessageMagic.end),
+    };
+    var fds_list: std.ArrayList(i32) = .empty;
+    const msg = Self.fromBytes(alloc, &bytes, &fds_list, 0);
+    try std.testing.expectError(Error.InvalidMessageType, msg);
+}

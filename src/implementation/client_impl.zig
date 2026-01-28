@@ -13,3 +13,7 @@ pub const ProtocolImplementation = Trait(.{
     .protocol = fn () ProtocolSpec,
     .implementation = fn (mem.Allocator) anyerror![]*ObjectImplementation,
 }, null);
+
+test {
+    std.testing.refAllDecls(@This());
+}

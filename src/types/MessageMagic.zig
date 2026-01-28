@@ -23,3 +23,8 @@ pub const MessageMagic = enum(u8) {
     /// FD has size 0. It's passed via control.
     type_fd = 0x40,
 };
+
+test {
+    const std = @import("std");
+    std.testing.refAllDecls(@This());
+}

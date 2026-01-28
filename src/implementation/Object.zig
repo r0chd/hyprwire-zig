@@ -20,3 +20,7 @@ pub const Object = Trait(.{
     .setOnDeinit = fn (*const fn () void) void,
     .getClient = fn () ?*ServerClient,
 }, null);
+
+test {
+    std.testing.refAllDecls(@This());
+}

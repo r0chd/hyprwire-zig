@@ -33,3 +33,7 @@ pub fn objects(self: *const Self) []const ProtocolObjectSpec {
     _ = self;
     return &.{};
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

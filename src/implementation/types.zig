@@ -151,3 +151,7 @@ pub const Arg = union(enum) {
         };
     }
 };
+
+test {
+    std.testing.refAllDecls(@This());
+}

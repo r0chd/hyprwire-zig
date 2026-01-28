@@ -145,3 +145,7 @@ pub fn main(init: std.process.Init) !void {
 
     while (socket.dispatchEvents(io, gpa, true) catch false) {}
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}

@@ -17,3 +17,7 @@ pub fn c2s(self: *const Self) []const Method {
 pub fn s2c(self: *const Self) []const Method {
     return self.s2c_methods;
 }
+
+test {
+    std.testing.refAllDecls(@This());
+}
