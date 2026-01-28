@@ -81,8 +81,8 @@ pub fn main(init: std.process.Init) !void {
     var pipes: [2]posix.system.fd_t = undefined;
     _ = posix.system.pipe(&pipes);
     defer {
-        posix.close(pipes[0]);
-        posix.close(pipes[1]);
+        _ = posix.system.close(pipes[0]);
+        _ = posix.system.close(pipes[1]);
     }
 
     var out: Io.File = .{ .handle = pipes[1] };
