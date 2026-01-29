@@ -121,4 +121,75 @@ test "NewObject.fromBytes" {
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("new_object ( 3, 2 ) ", data);
+    try std.testing.expectEqual(msg.getLen(), 12);
+    try std.testing.expectEqualSlices(i32, msg.getFds(), &.{});
+}
+
+test "NewObject errors" {
+    const alloc = std.testing.allocator;
+    const testing = std.testing;
+
+    {
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.bind_protocol),
+            @intFromEnum(MessageMagic.type_uint),
+            0x03,                                 0x00, 0x00, 0x00, // id = 3
+            @intFromEnum(MessageMagic.type_uint),
+            0x02,                           0x00, 0x00, 0x00, // seq = 2
+            @intFromEnum(MessageMagic.end),
+        };
+        const msg = Self.fromBytes(alloc, &bytes, 0);
+        try testing.expectError(Error.InvalidMessageType, msg);
+    }
+
+    {
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.new_object),
+            @intFromEnum(MessageMagic.type_int),
+            0x03,                                 0x00, 0x00, 0x00, // id = 3
+            @intFromEnum(MessageMagic.type_uint),
+            0x02,                           0x00, 0x00, 0x00, // seq = 2
+            @intFromEnum(MessageMagic.end),
+        };
+        const msg = Self.fromBytes(alloc, &bytes, 0);
+        try testing.expectError(Error.InvalidFieldType, msg);
+    }
+
+    {
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.new_object),
+            @intFromEnum(MessageMagic.type_uint),
+            0x03,                                0x00, 0x00, 0x00, // id = 3
+            @intFromEnum(MessageMagic.type_int),
+            0x02,                           0x00, 0x00, 0x00, // seq = 2
+            @intFromEnum(MessageMagic.end),
+        };
+        const msg = Self.fromBytes(alloc, &bytes, 0);
+        try testing.expectError(Error.InvalidFieldType, msg);
+    }
+
+    {
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.new_object),
+            @intFromEnum(MessageMagic.type_uint),
+            0x03,                                 0x00, 0x00, 0x00, // id = 3
+            @intFromEnum(MessageMagic.type_uint),
+            0x02,                                 0x00, 0x00, 0x00, // seq = 2
+            @intFromEnum(MessageMagic.type_uint),
+        };
+        const msg = Self.fromBytes(alloc, &bytes, 0);
+        try testing.expectError(Error.MalformedMessage, msg);
+    }
+
+    {
+        const bytes = [_]u8{
+            @intFromEnum(MessageType.new_object),
+            @intFromEnum(MessageMagic.type_uint),
+            0x03,                                 0x00, 0x00, 0x00, // id = 3
+            @intFromEnum(MessageMagic.type_uint),
+            0x02, 0x00, 0x00, 0x00, // seq = 2
+        };
+        const msg = Self.fromBytes(alloc, &bytes, 0);
+        try testing.expectError(Error.UnexpectedEof, msg);
+    }
 }

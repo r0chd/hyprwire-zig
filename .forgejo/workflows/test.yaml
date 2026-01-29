@@ -1,0 +1,31 @@
+name: Zig Tests
+
+on:
+  pull_request:
+  push:
+    branches:
+      - master
+
+jobs:
+  test:
+    name: Test
+    runs-on: docker
+    container:
+      image: nixos/nix:2.22.1
+    steps:
+      - name: Install Node.js for Actions
+        run: |
+          nix-channel --update
+          nix-env -iA nixpkgs.nodejs
+          
+      - name: Checkout code
+        uses: https://code.forgejo.org/actions/checkout@v4
+        
+      - name: Enable flakes
+        run: |
+          mkdir -p /etc/nix
+          echo "experimental-features = nix-command flakes" >> /etc/nix/nix.conf
+          
+      - name: Run tests
+        run: |
+          nix develop .#ci --command zig build test -Dcoverage=true

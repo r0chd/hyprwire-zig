@@ -420,6 +420,8 @@ pub fn parseVarInt(data: []const u8, offset: usize) std.meta.Tuple(&.{ usize, us
 }
 
 fn parseVarIntSpan(data: []const u8) meta.Tuple(&.{ usize, usize }) {
+    if (data.len == 0) return .{ 0, 0 };
+
     var rolling: usize = 0;
     var i: usize = 0;
     const len = data.len;
@@ -450,7 +452,7 @@ pub fn encodeVarInt(num: usize, buffer: []u8) []const u8 {
     return buffer[0..i];
 }
 
-test "parseVarInt/encodeVarInt" {
+test "parseVarInt/encodeVarInt - basic functionality" {
     const testing = std.testing;
 
     var initial: usize = 1;
@@ -461,6 +463,128 @@ test "parseVarInt/encodeVarInt" {
         const parsed, const encoded_len = parseVarInt(encoded, 0);
         try testing.expectEqual(parsed, initial);
         try testing.expectEqual(encoded.len, encoded_len);
+    }
+}
+
+test "parseVarInt/encodeVarInt - edge cases" {
+    const testing = std.testing;
+
+    {
+        var buffer: [10]u8 = undefined;
+        const encoded = encodeVarInt(0, &buffer);
+        try testing.expectEqual(encoded.len, 1);
+        try testing.expectEqual(encoded[0], 0x00);
+
+        const parsed, const len = parseVarInt(encoded, 0);
+        try testing.expectEqual(parsed, 0);
+        try testing.expectEqual(len, 1);
+    }
+
+    {
+        var buffer: [10]u8 = undefined;
+        const encoded = encodeVarInt(127, &buffer);
+        try testing.expectEqual(encoded.len, 1);
+        try testing.expectEqual(encoded[0], 0x7F);
+
+        const parsed, const len = parseVarInt(encoded, 0);
+        try testing.expectEqual(parsed, 127);
+        try testing.expectEqual(len, 1);
+    }
+
+    {
+        var buffer: [10]u8 = undefined;
+        const encoded = encodeVarInt(128, &buffer);
+        try testing.expectEqual(encoded.len, 2);
+        try testing.expectEqual(encoded[0], 0x80);
+        try testing.expectEqual(encoded[1], 0x01);
+
+        const parsed, const len = parseVarInt(encoded, 0);
+        try testing.expectEqual(parsed, 128);
+        try testing.expectEqual(len, 2);
+    }
+
+    const test_values = [_]usize{
+        0,     1,       42,      127,                  128,                      255,
+        256,   16383,   16384,   32767,                32768,                    65535,
+        65536, 2097151, 2097152, std.math.maxInt(u24), std.math.maxInt(u32) - 1, std.math.maxInt(u32),
+    };
+
+    for (test_values) |value| {
+        var buffer: [10]u8 = undefined;
+        const encoded = encodeVarInt(value, &buffer);
+        const parsed, const len = parseVarInt(encoded, 0);
+
+        try testing.expectEqual(parsed, value);
+        try testing.expectEqual(len, encoded.len);
+    }
+}
+
+test "parseVarInt/encodeVarInt - maximum values" {
+    const testing = std.testing;
+
+    const max_value = std.math.maxInt(usize);
+    var buffer: [10]u8 = undefined;
+    const encoded = encodeVarInt(max_value, &buffer);
+
+    const parsed, const len = parseVarInt(encoded, 0);
+    try testing.expectEqual(parsed, max_value);
+    try testing.expectEqual(len, encoded.len);
+}
+
+test "parseVarInt - malformed input" {
+    const testing = std.testing;
+
+    {
+        const data: []const u8 = &[_]u8{};
+        const result = parseVarInt(data, 0);
+        try testing.expectEqual(result.@"0", 0);
+        try testing.expectEqual(result.@"1", 0);
+    }
+
+    {
+        const data = [_]u8{0x80};
+        const result = parseVarInt(&data, 0);
+        try testing.expectEqual(result.@"0", 0);
+        try testing.expectEqual(result.@"1", 1);
+    }
+
+    {
+        var buffer: [10]u8 = undefined;
+        const prefix = [_]u8{ 0xFF, 0xFF };
+        const value: usize = 42;
+        const encoded = encodeVarInt(value, &buffer);
+
+        var combined: [12]u8 = undefined;
+        combined[0] = prefix[0];
+        combined[1] = prefix[1];
+        for (encoded, 0..) |byte, i| {
+            combined[2 + i] = byte;
+        }
+
+        const parsed, const len = parseVarInt(&combined, 2);
+        try testing.expectEqual(parsed, value);
+        try testing.expectEqual(len, encoded.len);
+    }
+}
+
+test "parseVarInt/encodeVarInt - roundtrip consistency" {
+    const testing = std.testing;
+
+    const test_values = [_]usize{
+        0,         1,         42,        127,       128,       255,        256,        511,        512,        1023,       1024,
+        2047,      2048,      4095,      4096,      8191,      8192,       16383,      16384,      32767,      32768,      65535,
+        65536,     131071,    131072,    262143,    262144,    524287,     524288,     1048575,    1048576,    2097151,    2097152,
+        4194303,   4194304,   8388607,   8388608,   16777215,  16777216,   33554431,   33554432,   67108863,   67108864,   134217727,
+        134217728, 268435455, 268435456, 536870911, 536870912, 1073741823, 1073741824, 2147483647, 2147483648, 4294967295,
+    };
+
+    for (test_values) |value| {
+        var buffer: [10]u8 = undefined;
+        const encoded = encodeVarInt(value, &buffer);
+        const parsed, const len = parseVarInt(encoded, 0);
+
+        try testing.expectEqual(parsed, value);
+        try testing.expectEqual(len, encoded.len);
     }
 }
 

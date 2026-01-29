@@ -59,10 +59,8 @@ pub fn open(io: std.Io, gpa: mem.Allocator, path: ?[:0]const u8) !*Self {
 }
 
 fn init() !Self {
-    var wake_pipes: [2]i32 = undefined;
-    var exit_pipes: [2]i32 = undefined;
-    _ = posix.system.pipe2(&wake_pipes, .{ .CLOEXEC = true });
-    _ = posix.system.pipe2(&exit_pipes, .{ .CLOEXEC = true });
+    var wake_pipes = try Io.Threaded.pipe2(.{ .CLOEXEC = true });
+    var exit_pipes = try Io.Threaded.pipe2(.{ .CLOEXEC = true });
 
     return .{
         .wakeup_fd = Fd{ .raw = wake_pipes[0] },
@@ -463,25 +461,23 @@ pub fn extractLoopFD(self: *Self, io: Io, gpa: mem.Allocator) !i32 {
         }
     }
 
-    var export_pipes: [2]i32 = undefined;
-    _ = posix.system.pipe2(&export_pipes, .{ .CLOEXEC = true });
+    var export_pipes = try Io.Threaded.pipe2(.{ .CLOEXEC = true });
     self.export_fd = Fd{ .raw = export_pipes[0] };
+    self.export_write_fd = Fd{ .raw = export_pipes[1] };
     errdefer {
         if (self.export_fd) |*fd| fd.close(io);
         self.export_fd = null;
-    }
-    self.export_write_fd = Fd{ .raw = export_pipes[1] };
-    errdefer {
         if (self.export_write_fd) |*fd| fd.close(io);
         self.export_write_fd = null;
     }
 
-    var exit_pipes: [2]i32 = undefined;
-    _ = posix.system.pipe2(&exit_pipes, .{ .CLOEXEC = true });
+    var exit_pipes = try Io.Threaded.pipe2(.{ .CLOEXEC = true });
     self.exit_fd = Fd{ .raw = exit_pipes[0] };
-    errdefer self.exit_fd.close(io);
     self.exit_write_fd = Fd{ .raw = exit_pipes[1] };
-    errdefer self.exit_write_fd.close(io);
+    errdefer {
+        self.exit_fd.close(io);
+        self.exit_write_fd.close(io);
+    }
 
     self.thread_can_poll = true;
     errdefer self.thread_can_poll = false;

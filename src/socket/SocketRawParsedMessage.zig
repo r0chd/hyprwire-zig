@@ -88,8 +88,7 @@ test "SocketRawParsedMessage.fromFd receives payload and fd" {
     try std.testing.expectEqual(@as(c_int, 0), c.socketpair(posix.AF.UNIX, posix.SOCK.STREAM, 0, &sockets));
     defer for (sockets) |s| posix.close(s);
 
-    var pipe_fds: [2]posix.fd_t = undefined;
-    _ = posix.system.pipe(&pipe_fds);
+    var pipe_fds = try Io.Threaded.pipe2(.{});
     defer {
         for (pipe_fds) |fd| posix.close(fd);
     }

@@ -36,11 +36,20 @@
             inherit (pkgs)
               pkg-config
               nixd
-              nixfmt-rfc-style
+              nixfmt
               valgrind
               zig-zlint
               libffi
+              ;
+          };
+        };
+        ci = pkgs.mkShell {
+          packages = builtins.attrValues {
+            inherit (zig.packages.${pkgs.stdenv.hostPlatform.system}) "master";
+            inherit (pkgs)
+              pkg-config
               kcov
+              libffi
               ;
           };
         };

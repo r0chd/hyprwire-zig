@@ -78,8 +78,7 @@ pub fn main(init: std.process.Init) !void {
 
     std.debug.print("Bound!\n", .{});
 
-    var pipes: [2]posix.system.fd_t = undefined;
-    _ = posix.system.pipe(&pipes);
+    var pipes = try Io.Threaded.pipe2(.{});
     defer {
         _ = posix.system.close(pipes[0]);
         _ = posix.system.close(pipes[1]);

@@ -145,6 +145,8 @@ test "HandshakeProtocols.init" {
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("handshake_protocols ( { \"test@1\", \"test@2\" } ) ", data);
+    try std.testing.expectEqualSlices(i32, msg.getFds(), &.{});
+    try std.testing.expectEqual(msg.getLen(), 19);
 }
 
 test "HandshakeProtocols.fromBytes" {
@@ -155,15 +157,15 @@ test "HandshakeProtocols.fromBytes" {
     // Array length = 1 (0x01)
     // String: "test@12" (7 bytes, varint = 0x07)
     const bytes = [_]u8{
-        4,
-        33,
-        32,
+        @intFromEnum(MessageType.handshake_protocols),
+        @intFromEnum(MessageMagic.type_array),
+        @intFromEnum(MessageMagic.type_varchar),
         0x02, // array length = 2
         0x06, // string length = 6
         't', 'e', 's', 't', '@', '1', // "test@1"
         0x06, // string length = 6
-        't', 'e', 's', 't', '@', '2', // "test@2"
-        0,
+        't',                            'e', 's', 't', '@', '2', // "test@2"
+        @intFromEnum(MessageMagic.end),
     };
 
     var msg = try Self.fromBytes(alloc, &bytes, 0);
@@ -173,4 +175,26 @@ test "HandshakeProtocols.fromBytes" {
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("handshake_protocols ( { \"test@1\", \"test@2\" } ) ", data);
+}
+
+test "HandshakeProtocols errors" {
+    const alloc = std.testing.allocator;
+
+    // Message format: [type][ARRAY_magic][VARCHAR_magic][varint_arr_len][varint_str_len][str]...[END]
+    // Array length = 1 (0x01)
+    // String: "test@12" (7 bytes, varint = 0x07)
+    const bytes = [_]u8{
+        @intFromEnum(MessageType.handshake_protocols),
+        @intFromEnum(MessageMagic.type_array),
+        @intFromEnum(MessageMagic.type_varchar),
+        0x02, // array length = 2
+        0x06, // string length = 6
+        't', 'e', 's', 't', '@', '1', // "test@1"
+        0x06, // string length = 6
+        't', 'e', 's', 't', '@', '2', // "test@2"
+        1,
+    };
+
+    const msg = Self.fromBytes(alloc, &bytes, 0);
+    try std.testing.expectError(@as(anyerror, Error.MalformedMessage), msg);
 }
