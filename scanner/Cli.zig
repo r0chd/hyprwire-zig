@@ -63,7 +63,3 @@ pub fn init(gpa: mem.Allocator, args: std.process.Args) !Self {
         .protocols = try protocols.toOwnedSlice(gpa),
     };
 }
-
-test {
-    std.testing.refAllDecls(@This());
-}

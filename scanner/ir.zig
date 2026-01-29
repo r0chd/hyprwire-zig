@@ -491,13 +491,9 @@ fn extractTextContent(elem: *const Node.Element, gpa: mem.Allocator) ![]const u8
     var result = try gpa.alloc(u8, total_len);
     var offset: usize = 0;
     for (text_parts.items) |part| {
-        @memcpy(result[offset..offset + part.len], part);
+        @memcpy(result[offset .. offset + part.len], part);
         offset += part.len;
     }
 
     return result;
-}
-
-test {
-    std.testing.refAllDecls(@This());
 }

@@ -160,7 +160,6 @@ fn buildExamples(b: *Build, target: Build.ResolvedTarget, optimize: std.builtin.
             .optimize = optimize,
         }),
     });
-    client.step.dependOn(&scanner.run.step);
     b.installArtifact(client);
 
     const server = b.addExecutable(.{
@@ -172,11 +171,12 @@ fn buildExamples(b: *Build, target: Build.ResolvedTarget, optimize: std.builtin.
             .optimize = optimize,
         }),
     });
-    server.step.dependOn(&scanner.run.step);
     b.installArtifact(server);
 
     const examples_step = b.step("examples", "Build all examples");
     examples_step.dependOn(b.getInstallStep());
+    server.step.dependOn(examples_step);
+    client.step.dependOn(examples_step);
 }
 
 pub const Scanner = struct {
