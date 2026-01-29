@@ -34,7 +34,7 @@ pub fn build(b: *Build) !void {
         .optimize = optimize,
     });
 
-    const scanner = Scanner.create(b, hyprwire);
+    const scanner = Scanner.init(b, hyprwire.module("hyprwire));
     scanner.addCustomProtocol(b.path("protocol/protocol-v1.xml"));
 
     // Pass the maximum version implemented by your hyprwire server or client.
