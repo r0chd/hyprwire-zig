@@ -1,3 +1,10 @@
+// Generated with hyprwire-scanner 0.2.1. Made with pure malice and hatred by r0chd.
+// test_protocol_v1
+
+// This protocol's author copyright notice is:
+//
+// I eat paint
+
 const std = @import("std");
 
 const hyprwire = @import("hyprwire");
@@ -130,11 +137,11 @@ pub const TestProtocolV1ProtocolSpec = struct {
         return "test_protocol_v1";
     }
 
-    pub fn specVer(_: *Self) u32 {
+    pub fn specVer(_: *const Self) u32 {
         return 1;
     }
 
-    pub fn objects(_: *Self) []const types.ProtocolObjectSpec {
+    pub fn objects(_: *const Self) []const types.ProtocolObjectSpec {
         return protocol_objects[0..];
     }
 

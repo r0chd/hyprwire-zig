@@ -198,7 +198,9 @@ pub const Scanner = struct {
         });
 
         const xml = hyprwire.import_table.get("xml").?;
+        const build_options = hyprwire.import_table.get("build_options").?;
         exe.root_module.addImport("xml", xml);
+        exe.root_module.addImport("build_options", build_options);
 
         const run = b.addRunArtifact(exe);
         run.addArg("-o");

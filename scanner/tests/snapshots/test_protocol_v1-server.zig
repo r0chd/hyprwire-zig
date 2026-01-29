@@ -1,3 +1,10 @@
+// Generated with hyprwire-scanner 0.2.1. Made with pure malice and hatred by r0chd.
+// test_protocol_v1
+
+// This protocol's author copyright notice is:
+//
+// I eat paint
+
 const std = @import("std");
 
 const hyprwire = @import("hyprwire");
@@ -304,7 +311,6 @@ pub const TestProtocolV1Impl = struct {
     listener: TestProtocolV1Listener,
 
     const Self = @This();
-
     pub fn init(
         version: u32,
         listener: TestProtocolV1Listener,

@@ -1,6 +1,11 @@
 const std = @import("std");
 const mem = std.mem;
 const xml = @import("xml");
+const build_options = @import("build_options");
+const version = build_options.version;
+
+/// Scanner signature - easily editable for customization
+pub const SCANNER_SIGNATURE = "Generated with hyprwire-scanner " ++ version ++ ". Made with pure malice and hatred by r0chd.";
 
 pub const ir = @import("ir.zig");
 const Object = ir.Object;

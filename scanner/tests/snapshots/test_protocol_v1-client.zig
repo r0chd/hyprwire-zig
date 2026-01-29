@@ -1,10 +1,16 @@
+// Generated with hyprwire-scanner 0.2.1. Made with pure malice and hatred by r0chd.
+// test_protocol_v1
+
+// This protocol's author copyright notice is:
+//
+// I eat paint
+
 const std = @import("std");
 
 const hyprwire = @import("hyprwire");
 const types = hyprwire.types;
 const client = types.client;
 const spec = hyprwire.proto.test_protocol_v1.spec;
-
 
 fn myManagerV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) void {
     const object: *MyManagerV1Object = @ptrCast(@alignCast(r.vtable.getData(r.ptr)));
@@ -238,7 +244,6 @@ pub const TestProtocolV1Impl = struct {
     version: u32,
 
     const Self = @This();
-
     pub fn init(version: u32) Self {
         return .{ .version = version };
     }

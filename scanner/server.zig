@@ -1,15 +1,19 @@
 const std = @import("std");
 const mem = std.mem;
+const fmt = std.fmt;
+const xml = @import("xml");
+const Scanner = @import("./root.zig");
+const SCANNER_SIGNATURE = Scanner.SCANNER_SIGNATURE;
+const Document = Scanner.Document;
+const MessageMagic = Scanner.MessageMagic;
+const GenerateError = Scanner.GenerateError;
+const writeMethodHandler = Scanner.writeMethodHandler;
 
 const ir = @import("ir.zig");
 const Protocol = ir.Protocol;
 const Object = ir.Object;
 const Method = ir.Method;
 const ObjectSet = ir.ObjectSet;
-const root = @import("root.zig");
-const Document = root.Document;
-const GenerateError = root.GenerateError;
-const writeMethodHandler = root.writeMethodHandler;
 
 pub fn generateServerCodeForGlobal(gpa: mem.Allocator, doc: *const Document, global_iface: []const u8, requested_version: u32) ![]const u8 {
     const protocol = try Protocol.fromDocument(doc, gpa);
@@ -19,17 +23,18 @@ pub fn generateServerCodeForGlobal(gpa: mem.Allocator, doc: *const Document, glo
     }
 
     if (mem.eql(u8, global_iface, protocol.name)) {
-        return generateServerCode(protocol, null);
+        return generateServerCode(gpa, protocol, null);
     }
 
     const selected = try protocol.computeReachableSet(gpa, global_iface, requested_version);
-    return generateServerCode(protocol, selected);
+    return generateServerCode(gpa, protocol, selected);
 }
 
-fn generateServerCode(protocol: Protocol, selected: ?ObjectSet) ![]const u8 {
-    var output: std.Io.Writer.Allocating = .init(std.heap.page_allocator);
+fn generateServerCode(gpa: mem.Allocator, protocol: Protocol, selected: ?ObjectSet) ![]const u8 {
+    var output: std.Io.Writer.Allocating = .init(gpa);
     const writer = &output.writer;
 
+    try writeCopyrightHeader(writer, protocol);
     try writeHeader(writer, protocol);
 
     var obj_count: usize = 0;
@@ -53,6 +58,21 @@ fn generateServerCode(protocol: Protocol, selected: ?ObjectSet) ![]const u8 {
     try writeProtocolImpl(writer, protocol, selected, obj_count);
 
     return output.toOwnedSlice();
+}
+
+fn writeCopyrightHeader(writer: anytype, protocol: Protocol) !void {
+    try writer.print("// {s}\n", .{SCANNER_SIGNATURE});
+    try writer.print("// {s}\n\n", .{protocol.name});
+
+    if (protocol.copyright) |copyright| {
+        try writer.print(
+            \\// This protocol's author copyright notice is:
+            \\//
+            \\// {s}
+            \\
+            \\
+        , .{copyright});
+    }
 }
 
 fn writeHeader(writer: anytype, protocol: Protocol) !void {
@@ -247,6 +267,9 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
         \\
         \\    const Self = @This();
         \\
+    , .{ protocol.name_pascal, protocol.name_pascal, protocol.name_pascal });
+
+    try writer.print(
         \\    pub fn init(
         \\        version: u32,
         \\        listener: {s}Listener,
@@ -269,7 +292,7 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
         \\        errdefer gpa.free(impls);
         \\
         \\
-    , .{ protocol.name_pascal, protocol.name_pascal, protocol.name_pascal, protocol.name_pascal, protocol.name_pascal, obj_count });
+    , .{ protocol.name_pascal, protocol.name_pascal, obj_count });
 
     var idx: usize = 0;
     for (protocol.objects) |obj| {

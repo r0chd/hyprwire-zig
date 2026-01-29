@@ -1,10 +1,12 @@
 const std = @import("std");
 const mem = std.mem;
-
-const root = @import("root.zig");
-const Document = root.Document;
-const MessageMagic = root.MessageMagic;
-const GenerateError = root.GenerateError;
+const fmt = std.fmt;
+const xml = @import("xml");
+const Scanner = @import("./root.zig");
+const SCANNER_SIGNATURE = Scanner.SCANNER_SIGNATURE;
+const Document = Scanner.Document;
+const MessageMagic = Scanner.MessageMagic;
+const GenerateError = Scanner.GenerateError;
 
 const ir = @import("ir.zig");
 const Protocol = ir.Protocol;
@@ -31,12 +33,28 @@ fn generateSpecCode(gpa: mem.Allocator, protocol: Protocol, selected: ?ObjectSet
     var output: std.Io.Writer.Allocating = .init(gpa);
     const writer = &output.writer;
 
+    try writeCopyrightHeader(writer, protocol);
     try writeHeader(writer);
     try writeEnums(writer, protocol);
     try writeObjectSpecs(writer, gpa, protocol, selected);
     try writeProtocolSpec(writer, protocol, selected);
 
     return try output.toOwnedSlice();
+}
+
+fn writeCopyrightHeader(writer: anytype, protocol: Protocol) !void {
+    try writer.print("// {s}\n", .{SCANNER_SIGNATURE});
+    try writer.print("// {s}\n\n", .{protocol.name});
+
+    if (protocol.copyright) |copyright| {
+        try writer.print(
+            \\// This protocol's author copyright notice is:
+            \\//
+            \\// {s}
+            \\
+            \\
+        , .{copyright});
+    }
 }
 
 fn writeHeader(writer: anytype) !void {
@@ -159,22 +177,26 @@ fn writeProtocolSpec(writer: anytype, protocol: Protocol, selected: ?ObjectSet) 
         \\        return "{s}";
         \\    }}
         \\
-        \\    pub fn specVer(_: *Self) u32 {{
+        \\    pub fn specVer(_: *const Self) u32 {{
         \\        return {};
         \\    }}
         \\
-        \\    pub fn objects(_: *Self) []const types.ProtocolObjectSpec {{
+        \\    pub fn objects(_: *const Self) []const types.ProtocolObjectSpec {{
         \\        return protocol_objects[0..];
         \\    }}
         \\
         \\    pub fn deinit(_: *Self, _: std.mem.Allocator) void {{}}
+        \\
+    , .{ protocol.name, protocol.version });
+
+    try writer.print(
         \\}};
         \\
         \\pub const protocol = {s}ProtocolSpec{{}};
         \\
         \\pub const protocol_objects: [{}]types.ProtocolObjectSpec = .{{
         \\
-    , .{ protocol.name, protocol.version, protocol.name_pascal, obj_count });
+    , .{ protocol.name_pascal, obj_count });
 
     for (protocol.objects) |obj| {
         if (selected) |sel| {

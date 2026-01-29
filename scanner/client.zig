@@ -1,10 +1,13 @@
 const std = @import("std");
 const mem = std.mem;
-
-const root = @import("root.zig");
-const Document = root.Document;
-const GenerateError = root.GenerateError;
-const writeMethodHandler = root.writeMethodHandler;
+const fmt = std.fmt;
+const xml = @import("xml");
+const Scanner = @import("./root.zig");
+const SCANNER_SIGNATURE = Scanner.SCANNER_SIGNATURE;
+const Document = Scanner.Document;
+const MessageMagic = Scanner.MessageMagic;
+const GenerateError = Scanner.GenerateError;
+const writeMethodHandler = Scanner.writeMethodHandler;
 
 const ir = @import("ir.zig");
 const Protocol = ir.Protocol;
@@ -32,6 +35,7 @@ fn generateClientCode(gpa: mem.Allocator, protocol: Protocol, selected: ?ObjectS
     var output: std.Io.Writer.Allocating = .init(std.heap.page_allocator);
     const writer = &output.writer;
 
+    try writeCopyrightHeader(writer, protocol);
     try writeHeader(writer, protocol);
 
     var obj_count: usize = 0;
@@ -56,6 +60,21 @@ fn generateClientCode(gpa: mem.Allocator, protocol: Protocol, selected: ?ObjectS
     return output.toOwnedSlice();
 }
 
+fn writeCopyrightHeader(writer: anytype, protocol: Protocol) !void {
+    try writer.print("// {s}\n", .{SCANNER_SIGNATURE});
+    try writer.print("// {s}\n\n", .{protocol.name});
+
+    if (protocol.copyright) |copyright| {
+        try writer.print(
+            \\// This protocol's author copyright notice is:
+            \\//
+            \\// {s}
+            \\
+            \\
+        , .{copyright});
+    }
+}
+
 fn writeHeader(writer: anytype, protocol: Protocol) !void {
     try writer.print(
         \\const std = @import("std");
@@ -64,7 +83,6 @@ fn writeHeader(writer: anytype, protocol: Protocol) !void {
         \\const types = hyprwire.types;
         \\const client = types.client;
         \\const spec = hyprwire.proto.{s}.spec;
-        \\
         \\
     , .{protocol.name});
 }
@@ -261,6 +279,9 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
         \\
         \\    const Self = @This();
         \\
+    , .{protocol.name_pascal});
+
+    try writer.print(
         \\    pub fn init(version: u32) Self {{
         \\        return .{{ .version = version }};
         \\    }}
@@ -278,7 +299,7 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
         \\        errdefer gpa.free(impls);
         \\
         \\
-    , .{ protocol.name_pascal, obj_count });
+    , .{obj_count});
 
     var idx: usize = 0;
     for (protocol.objects) |obj| {

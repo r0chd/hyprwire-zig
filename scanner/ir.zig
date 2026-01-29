@@ -11,6 +11,7 @@ pub const Protocol = struct {
     name: []const u8,
     name_pascal: []const u8,
     version: u32,
+    copyright: ?[]const u8,
     objects: []Object,
     enums: []Enum,
 
@@ -21,13 +22,17 @@ pub const Protocol = struct {
         const version_str = protocol_elem.attributes.get("version") orelse return error.MissingProtocolVersion;
         const version = try std.fmt.parseInt(u32, version_str, 10);
 
+        var copyright: ?[]const u8 = null;
+
         var objects: std.ArrayList(Object) = .empty;
         var enums: std.ArrayList(Enum) = .empty;
 
         for (protocol_elem.children) |child| {
             switch (child) {
                 .element => |e| {
-                    if (mem.eql(u8, e.name, "object")) {
+                    if (mem.eql(u8, e.name, "copyright")) {
+                        copyright = try extractTextContent(&e, gpa);
+                    } else if (mem.eql(u8, e.name, "object")) {
                         try objects.append(gpa, try Object.fromElement(&e, gpa));
                     } else if (mem.eql(u8, e.name, "enum")) {
                         try enums.append(gpa, try Enum.fromElement(&e, gpa));
@@ -41,6 +46,7 @@ pub const Protocol = struct {
             .name = name,
             .name_pascal = try toPascalCase(name, gpa),
             .version = version,
+            .copyright = copyright,
             .objects = try objects.toOwnedSlice(gpa),
             .enums = try enums.toOwnedSlice(gpa),
         };
@@ -445,6 +451,51 @@ pub fn toCamelCase(name: []const u8, gpa: mem.Allocator) ![]const u8 {
     }
 
     return try result.toOwnedSlice(gpa);
+}
+
+fn extractTextContent(elem: *const Node.Element, gpa: mem.Allocator) ![]const u8 {
+    var text_parts: std.ArrayList([]const u8) = .empty;
+    defer {
+        for (text_parts.items) |part| {
+            gpa.free(part);
+        }
+        text_parts.deinit(gpa);
+    }
+
+    for (elem.children) |child| {
+        switch (child) {
+            .text => |t| {
+                if (mem.trim(u8, t, " \t\n\r").len > 0) {
+                    try text_parts.append(gpa, try gpa.dupe(u8, mem.trim(u8, t, " \t\n\r")));
+                }
+            },
+            else => {},
+        }
+    }
+
+    if (text_parts.items.len == 0) {
+        return "";
+    }
+
+    if (text_parts.items.len == 1) {
+        const result = text_parts.items[0];
+        text_parts.items.len = 0; // Prevent free in defer
+        return result;
+    }
+
+    var total_len: usize = 0;
+    for (text_parts.items) |part| {
+        total_len += part.len;
+    }
+
+    var result = try gpa.alloc(u8, total_len);
+    var offset: usize = 0;
+    for (text_parts.items) |part| {
+        @memcpy(result[offset..offset + part.len], part);
+        offset += part.len;
+    }
+
+    return result;
 }
 
 test {
