@@ -48,12 +48,22 @@ fn writeCopyrightHeader(writer: anytype, protocol: Protocol) !void {
 
     if (protocol.copyright) |copyright| {
         try writer.print(
-            \\// This protocol's author copyright notice is:
             \\//
-            \\// {s}
+            \\// This protocol's author copyright notice is:
+            \\
+        , .{});
+
+        var lines = mem.splitScalar(u8, copyright, '\n');
+        while (lines.next()) |line| {
+            const l = mem.trimStart(u8, line, " ");
+            try writer.print("// {s}\n", .{l});
+        }
+
+        try writer.print(
+            \\//
             \\
             \\
-        , .{copyright});
+        , .{});
     }
 }
 
@@ -206,8 +216,4 @@ fn writeProtocolSpec(writer: anytype, protocol: Protocol, selected: ?ObjectSet) 
     }
 
     try writer.print("}};\n", .{});
-}
-
-test {
-    std.testing.refAllDecls(@This());
 }

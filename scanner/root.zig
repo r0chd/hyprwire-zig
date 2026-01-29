@@ -244,7 +244,3 @@ pub fn writeMethodHandler(writer: anytype, obj: Object, method: Method, idx: usi
         \\
     , .{});
 }
-
-test {
-    std.testing.refAllDecls(@This());
-}

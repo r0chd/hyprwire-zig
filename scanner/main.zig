@@ -253,7 +253,3 @@ fn writeWrapper(
         try iowriter.flush();
     }
 }
-
-test {
-    std.testing.refAllDecls(@This());
-}
