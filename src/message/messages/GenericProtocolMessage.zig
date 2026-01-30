@@ -7,33 +7,18 @@ const helpers = @import("helpers");
 const message_parser = @import("../MessageParser.zig");
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../MessageType.zig").MessageType;
-const root = @import("root.zig");
-const Message = root.Message;
-const Error = root.Error;
+const Message = @import("Message.zig");
+const Error = Message.Error;
 
 pub fn getFds(self: *const Self) []const i32 {
-    return self.fds_list;
-}
-
-pub fn getData(self: *const Self) []const u8 {
-    return self.data;
-}
-
-pub fn getLen(self: *const Self) usize {
-    return self.len;
-}
-
-pub fn getMessageType(self: *const Self) MessageType {
-    return self.message_type;
+    return self.fds;
 }
 
 object: u32 = 0,
 method: u32 = 0,
 data_span: []const u8,
-fds_list: []const i32,
-data: []const u8,
-len: usize,
-message_type: MessageType = .generic_protocol_message,
+fds: []const i32,
+interface: Message,
 
 const Self = @This();
 
@@ -43,10 +28,13 @@ pub fn init(gpa: mem.Allocator, data: []const u8, fds_list: []const i32) mem.All
 
     return .{
         .data_span = data_copy,
-        .fds_list = fds_copy,
-        .data = data_copy,
-        .len = data_copy.len,
-        .message_type = .generic_protocol_message,
+        .fds = fds_copy,
+        .interface = .{
+            .data = data_copy,
+            .len = data_copy.len,
+            .message_type = .generic_protocol_message,
+            .fdsFn = fdsFn,
+        },
     };
 }
 
@@ -135,20 +123,27 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
         .object = object_id,
         .method = method_id,
         .data_span = data_copy[11..],
-        .fds_list = try fds_consumed.toOwnedSlice(gpa),
-        .data = data_copy,
-        .len = i + 1,
-        .message_type = .generic_protocol_message,
+        .fds = try fds_consumed.toOwnedSlice(gpa),
+        .interface = .{
+            .data = data_copy,
+            .len = i + 1,
+            .message_type = .generic_protocol_message,
+            .fdsFn = fdsFn,
+        },
     };
 }
 
+pub fn fdsFn(ptr: *const Message) []const i32 {
+    const self: *const Self = @fieldParentPtr("interface", ptr);
+    return self.fds;
+}
+
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    gpa.free(self.data);
-    gpa.free(self.fds_list);
+    gpa.free(self.interface.data);
+    gpa.free(self.fds);
 }
 
 test "GenericProtocolMessage.init" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     const bytes_data = [_]u8{
@@ -162,14 +157,13 @@ test "GenericProtocolMessage.init" {
     var msg = try Self.init(alloc, &bytes_data, &.{});
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("generic_protocol_message ( object(1), 2 ) ", data);
 }
 
 test "GenericProtocolMessage.fromBytes - basic structure" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     const bytes = [_]u8{
@@ -185,14 +179,13 @@ test "GenericProtocolMessage.fromBytes - basic structure" {
     var msg = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("generic_protocol_message ( object(1), 2 ) ", data);
 }
 
 test "GenericProtocolMessage.fromBytes - varchar field" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     const bytes = [_]u8{
@@ -214,14 +207,13 @@ test "GenericProtocolMessage.fromBytes - varchar field" {
     var msg = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("generic_protocol_message ( object(1), 2, \"test\" ) ", data);
 }
 
 test "GenericProtocolMessage.fromBytes - uint array" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     const bytes = [_]u8{
@@ -241,14 +233,13 @@ test "GenericProtocolMessage.fromBytes - uint array" {
     var msg = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("generic_protocol_message ( object(1), 2, { 1, 2 } ) ", data);
 }
 
 test "GenericProtocolMessage.fromBytes - varchar array" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     const bytes = [_]u8{
@@ -272,14 +263,13 @@ test "GenericProtocolMessage.fromBytes - varchar array" {
     var msg = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("generic_protocol_message ( object(1), 2, { \"test\" } ) ", data);
 }
 
 test "GenericProtocolMessage.fromBytes - fd array" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     const bytes = [_]u8{
@@ -300,7 +290,7 @@ test "GenericProtocolMessage.fromBytes - fd array" {
     var msg = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("generic_protocol_message ( object(1), 2, { <fd>, <fd> } ) ", data);
@@ -308,7 +298,6 @@ test "GenericProtocolMessage.fromBytes - fd array" {
 }
 
 test "GenericProtocolMessage.fromBytes - standalone fd" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     const bytes = [_]u8{
@@ -325,12 +314,12 @@ test "GenericProtocolMessage.fromBytes - standalone fd" {
     var msg = try Self.fromBytes(alloc, &bytes, &fds_list, 0);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("generic_protocol_message ( object(1), 2, <fd> ) ", data);
-    try std.testing.expectEqualSlices(i32, &.{1}, msg.getFds());
-    try std.testing.expectEqual(bytes.len, msg.getLen());
+    try std.testing.expectEqualSlices(i32, &.{1}, msg.interface.getFds());
+    try std.testing.expectEqual(bytes.len, msg.interface.len);
 }
 
 // Don't pass any fd's despite advertising fd in message

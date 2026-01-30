@@ -9,8 +9,7 @@ const isTrace = helpers.isTrace;
 const types = @import("../implementation/types.zig");
 const WireObject = types.WireObject;
 const Object = types.Object;
-const messages = @import("../message/messages/root.zig");
-const Message = messages.Message;
+const Message = @import("../message/messages/Message.zig");
 const root = @import("../root.zig");
 const steadyMillis = root.steadyMillis;
 const ServerObject = @import("ServerObject.zig");
@@ -71,10 +70,10 @@ pub fn dispatchFirstPoll(self: *Self) void {
     self.pid = cred.pid;
 }
 
-pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: Message) void {
+pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: *Message) void {
     _ = io;
     if (isTrace()) {
-        const parsed = messages.parseData(message, gpa) catch |err| {
+        const parsed = message.parseData(gpa) catch |err| {
             log.debug("[{} @ {}] -> parse error: {}", .{ self.stream.socket.handle, steadyMillis(), err });
             return;
         };
@@ -83,8 +82,8 @@ pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: Messa
     }
 
     var iovec: posix.iovec = .{
-        .base = @constCast(message.vtable.getData(message.ptr).ptr),
-        .len = message.vtable.getLen(message.ptr),
+        .base = @constCast(message.data.ptr),
+        .len = message.len,
     };
     var msg: c.msghdr = .{
         .msg_iov = @ptrCast(&iovec),
@@ -97,7 +96,7 @@ pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: Messa
     };
 
     var control_buf: std.ArrayList(u8) = .empty;
-    const fds = message.vtable.getFds(message.ptr);
+    const fds = message.getFds();
     if (fds.len != 0) {
         control_buf.resize(gpa, c.CMSG_SPACE(@sizeOf(i32) * fds.len)) catch return;
         msg.msg_controllen = control_buf.capacity;
@@ -177,9 +176,9 @@ pub fn createObject(
     obj.protocol_name = gpa.dupe(u8, protocol_name) catch return null;
     errdefer gpa.free(obj.protocol_name);
 
-    var ret = messages.NewObject.init(gpa, seq, obj.id) catch return null;
+    var ret = Message.NewObject.init(gpa, seq, obj.id) catch return null;
     defer ret.deinit(gpa);
-    self.sendMessage(io, gpa, Message.from(&ret));
+    self.sendMessage(io, gpa, &ret.interface);
 
     self.onBind(gpa, obj) catch return null;
 
@@ -217,10 +216,10 @@ pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
     }
 }
 
-pub fn onGeneric(self: *Self, io: Io, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) (wire_object.Error || mem.Allocator.Error)!void {
+pub fn onGeneric(self: *Self, io: Io, gpa: mem.Allocator, msg: Message.GenericProtocolMessage) (wire_object.Error || mem.Allocator.Error)!void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
-            try types.called(WireObject.from(obj), io, gpa, msg.method, msg.data_span, msg.fds_list);
+            try types.called(WireObject.from(obj), io, gpa, msg.method, msg.data_span, msg.fds);
             break;
         }
     }

@@ -40,9 +40,6 @@ const Server = struct {
 
                 std.debug.print("Recvd fd {} with data: {s}\n", .{ message.message, read_buffer });
             },
-            .send_message_array_fd => |message| {
-                std.debug.print("Recvd {} fds\n", .{message.message.len});
-            },
             .send_message_array => |message| {
                 var str: std.ArrayList(u8) = .empty;
 

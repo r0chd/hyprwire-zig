@@ -3,30 +3,11 @@ const mem = std.mem;
 
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../MessageType.zig").MessageType;
-const Message = @import("root.zig").Message;
-const Error = @import("root.zig").Error;
-
-pub fn getFds(self: *const Self) []const i32 {
-    _ = self;
-    return &.{};
-}
-
-pub fn getData(self: *const Self) []const u8 {
-    return self.data;
-}
-
-pub fn getLen(self: *const Self) usize {
-    return self.len;
-}
-
-pub fn getMessageType(self: *const Self) MessageType {
-    return self.message_type;
-}
+const Message = @import("Message.zig");
+const Error = Message.Error;
 
 version: u32 = 0,
-data: []const u8,
-len: usize,
-message_type: MessageType = .handshake_ack,
+interface: Message,
 
 const Self = @This();
 
@@ -44,14 +25,16 @@ pub fn init(gpa: mem.Allocator, version: u32) mem.Allocator.Error!Self {
     const owned = try data.toOwnedSlice(gpa);
     return .{
         .version = version,
-        .data = owned,
-        .len = owned.len,
-        .message_type = .handshake_ack,
+        .interface = .{
+            .data = owned,
+            .len = owned.len,
+            .message_type = .handshake_ack,
+        },
     };
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    gpa.free(self.data);
+    gpa.free(self.interface.data);
 }
 
 pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Allocator.Error || Error)!Self {
@@ -72,27 +55,27 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Alloc
     const owned = try gpa.dupe(u8, data[offset .. offset + needle + 1]);
     return .{
         .version = version,
-        .data = owned,
-        .len = needle + 1,
-        .message_type = .handshake_ack,
+        .interface = .{
+            .data = owned,
+            .len = needle + 1,
+            .message_type = .handshake_ack,
+        },
     };
 }
 
 test "HandshakeAck.init" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     var msg = try Self.init(alloc, 1);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("handshake_ack ( 1 ) ", data);
 }
 
 test "HandshakeAck.fromBytes" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     // Message format: [type][UINT_magic][version:4][END]
@@ -106,7 +89,7 @@ test "HandshakeAck.fromBytes" {
     var msg = try Self.fromBytes(alloc, &bytes, 0);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("handshake_ack ( 1 ) ", data);

@@ -13,8 +13,7 @@ const WireObject = types.WireObject;
 const ProtocolImplementation = types.client.ProtocolImplementation;
 const ProtocolSpec = types.ProtocolSpec;
 const message_parser = @import("../message/MessageParser.zig");
-const messages = @import("../message/messages/root.zig");
-const Message = messages.Message;
+const Message = @import("../message/messages/Message.zig");
 const steadyMillis = @import("../root.zig").steadyMillis;
 const SocketRawParsedMessage = @import("../socket/SocketRawParsedMessage.zig");
 const ClientObject = @import("ClientObject.zig");
@@ -87,8 +86,8 @@ pub fn attempt(self: *Self, io: std.Io, gpa: mem.Allocator, path: [:0]const u8) 
 
     self.stream = stream;
 
-    var message = messages.Hello.init();
-    try self.sendMessage(io, gpa, Message.from(&message));
+    var message = Message.Hello.init();
+    try self.sendMessage(io, gpa, &message.interface);
 }
 
 pub fn attemptFromFd(self: *Self, io: Io, gpa: mem.Allocator, raw_fd: i32) !void {
@@ -105,8 +104,8 @@ pub fn attemptFromFd(self: *Self, io: Io, gpa: mem.Allocator, raw_fd: i32) !void
 
     self.stream = stream;
 
-    var message = messages.Hello.init();
-    try self.sendMessage(io, gpa, Message.from(&message));
+    var message = Message.Hello.init();
+    try self.sendMessage(io, gpa, &message.interface);
 }
 
 pub fn addImplementation(self: *Self, gpa: mem.Allocator, x: ProtocolImplementation) !void {
@@ -170,9 +169,9 @@ pub fn bindProtocol(
     try self.objects.append(gpa, object);
 
     const spec_name = spec.vtable.specName(spec.ptr);
-    var bind_message = try messages.BindProtocol.init(gpa, spec_name, object.seq, version);
+    var bind_message = try Message.BindProtocol.init(gpa, spec_name, object.seq, version);
     defer bind_message.deinit(gpa);
-    try self.sendMessage(io, gpa, Message.from(&bind_message));
+    try self.sendMessage(io, gpa, &bind_message.interface);
 
     try self.waitForObject(io, gpa, object);
 
@@ -296,7 +295,7 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
     }
 }
 
-pub fn onGeneric(self: *const Self, io: Io, gpa: mem.Allocator, msg: messages.GenericProtocolMessage) !void {
+pub fn onGeneric(self: *const Self, io: Io, gpa: mem.Allocator, msg: Message.GenericProtocolMessage) !void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
             try types.called(
@@ -305,7 +304,7 @@ pub fn onGeneric(self: *const Self, io: Io, gpa: mem.Allocator, msg: messages.Ge
                 gpa,
                 msg.method,
                 msg.data_span,
-                msg.fds_list,
+                msg.fds,
             );
             break;
         }
@@ -320,10 +319,10 @@ pub fn objectForId(self: *const Self, id: u32) ?Object {
     return null;
 }
 
-pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: Message) !void {
+pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: *Message) !void {
     _ = io;
     if (isTrace()) {
-        const parsed = messages.parseData(message, gpa) catch |err| {
+        const parsed = message.parseData(gpa) catch |err| {
             log.debug("[{} @ {}] -> parse error: {}", .{ self.stream.socket.handle, steadyMillis(), err });
             return;
         };
@@ -332,8 +331,8 @@ pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: Messa
     }
 
     var iovec: posix.iovec = std.mem.zeroes(posix.iovec);
-    iovec.base = @constCast(message.vtable.getData(message.ptr).ptr);
-    iovec.len = message.vtable.getLen(message.ptr);
+    iovec.base = @constCast(message.data.ptr);
+    iovec.len = message.len;
 
     var msg: c.msghdr = std.mem.zeroes(c.msghdr);
     msg.msg_iov = @ptrCast(&iovec);
@@ -341,7 +340,7 @@ pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: Messa
 
     var control_buf: std.ArrayList(u8) = .empty;
     defer control_buf.deinit(gpa);
-    const fds = message.vtable.getFds(message.ptr);
+    const fds = message.getFds();
     if (fds.len > 0) {
         try control_buf.resize(gpa, c.CMSG_SPACE(@sizeOf(i32) * fds.len));
         @memset(control_buf.items, 0);
@@ -395,9 +394,9 @@ pub fn roundtrip(self: *Self, io: Io, gpa: mem.Allocator) !void {
     if (self.@"error") return;
 
     const next_seq = self.last_ackd_roundtrip_seq + 1;
-    var message = try messages.RoundtripRequest.init(gpa, next_seq);
+    var message = try Message.RoundtripRequest.init(gpa, next_seq);
     defer message.deinit(gpa);
-    try self.sendMessage(io, gpa, Message.from(&message));
+    try self.sendMessage(io, gpa, &message.interface);
 
     while (self.last_ackd_roundtrip_seq < next_seq) {
         self.dispatchEvents(io, gpa, true) catch break;

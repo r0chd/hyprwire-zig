@@ -4,33 +4,13 @@ const mem = std.mem;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const message_parser = @import("../MessageParser.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
-const root = @import("root.zig");
-const Message = root.Message;
-const Error = root.Error;
+const Message = @import("Message.zig");
+const Error = Message.Error;
 
-pub fn getFds(self: *const Self) []const i32 {
-    _ = self;
-    return &.{};
-}
-
-pub fn getData(self: *const Self) []const u8 {
-    return self.data;
-}
-
-pub fn getLen(self: *const Self) usize {
-    return self.len;
-}
-
-pub fn getMessageType(self: *const Self) MessageType {
-    return self.message_type;
-}
-
-data: []const u8,
-len: usize,
-message_type: MessageType = .bind_protocol,
 seq: u32 = 0,
 version: u32 = 0,
 protocol: []const u8,
+interface: Message,
 
 const Self = @This();
 
@@ -59,10 +39,12 @@ pub fn init(gpa: mem.Allocator, protocol: []const u8, seq: u32, version: u32) me
     try data.append(gpa, @intFromEnum(MessageMagic.end));
 
     return .{
-        .len = data.items.len,
-        .data = try data.toOwnedSlice(gpa),
-        .message_type = .bind_protocol,
         .protocol = try gpa.dupe(u8, protocol),
+        .interface = .{
+            .len = data.items.len,
+            .data = try data.toOwnedSlice(gpa),
+            .message_type = .bind_protocol,
+        },
     };
 }
 
@@ -117,36 +99,36 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Alloc
     const owned = try gpa.dupe(u8, data[offset .. offset + needle - offset]);
 
     return .{
-        .data = owned,
-        .len = needle - offset,
-        .message_type = .bind_protocol,
         .seq = seq,
         .protocol = try gpa.dupe(u8, protocol_slice),
         .version = version,
+        .interface = .{
+            .data = owned,
+            .len = needle - offset,
+            .message_type = .bind_protocol,
+        },
     };
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    gpa.free(self.data);
     gpa.free(self.protocol);
+    gpa.free(self.interface.data);
 }
 
 test "BindProtocol.init" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     var msg = try Self.init(alloc, "test@1", 5, 1);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("bind_protocol ( 5, \"test@1\", 1 ) ", data);
-    try std.testing.expectEqualSlices(i32, msg.getFds(), &.{});
+    try std.testing.expectEqualSlices(i32, msg.interface.getFds(), &.{});
 }
 
 test "BindProtocol.fromBytes" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     // Message format: [type][UINT_magic][seq:4][VARCHAR_magic][varint_len][protocol][UINT_magic][version:4][END]
@@ -166,11 +148,11 @@ test "BindProtocol.fromBytes" {
     };
     var msg = try Self.fromBytes(alloc, &bytes, 0);
     defer msg.deinit(alloc);
-    try std.testing.expectEqual(msg.getLen(), bytes.len);
+    try std.testing.expectEqual(msg.interface.len, bytes.len);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("bind_protocol ( 5, \"test@1\", 1 ) ", data);
-    try std.testing.expectEqualSlices(i32, msg.getFds(), &.{});
+    try std.testing.expectEqualSlices(i32, msg.interface.getFds(), &.{});
 }

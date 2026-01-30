@@ -10,8 +10,7 @@ const isTrace = helpers.isTrace;
 const types = @import("../implementation/types.zig");
 const Method = types.Method;
 const message_parser = @import("../message/MessageParser.zig");
-const messages = @import("../message/messages/root.zig");
-const Message = messages.Message;
+const Message = @import("../message/messages/Message.zig");
 const MessageType = @import("../message/MessageType.zig").MessageType;
 const ServerClient = @import("../server/ServerClient.zig");
 const ServerSocket = @import("../server/ServerSocket.zig");
@@ -93,7 +92,7 @@ pub fn @"error"(self: *Self, io: Io, gpa: mem.Allocator, id: u32, message: [:0]c
     _ = message;
 }
 
-pub fn sendMessage(self: *Self, io: Io, gpa: mem.Allocator, message: Message) !void {
+pub fn sendMessage(self: *Self, io: Io, gpa: mem.Allocator, message: *Message) !void {
     if (self.client) |client| {
         try client.sendMessage(io, gpa, message);
     }
@@ -281,9 +280,9 @@ pub fn call(self: *Self, io: Io, gpa: mem.Allocator, id: u32, args: *types.Args)
 
     try data.append(gpa, @intFromEnum(MessageMagic.end));
 
-    var msg = try messages.GenericProtocolMessage.init(gpa, data.items, fds.items);
+    var msg = try Message.GenericProtocolMessage.init(gpa, data.items, fds.items);
     defer msg.deinit(gpa);
-    try self.sendMessage(io, gpa, Message.from(&msg));
+    try self.sendMessage(io, gpa, &msg.interface);
 
     if (wait_on_seq != 0) {
         if (self.client) |client| {

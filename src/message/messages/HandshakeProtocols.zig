@@ -4,30 +4,11 @@ const mem = std.mem;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const message_parser = @import("../MessageParser.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
-const Message = @import("root.zig").Message;
-const Error = @import("root.zig").Error;
-
-pub fn getFds(self: *const Self) []const i32 {
-    _ = self;
-    return &.{};
-}
-
-pub fn getData(self: *const Self) []const u8 {
-    return self.data;
-}
-
-pub fn getLen(self: *const Self) usize {
-    return self.len;
-}
-
-pub fn getMessageType(self: *const Self) MessageType {
-    return self.message_type;
-}
+const Message = @import("Message.zig");
+const Error = Message.Error;
 
 protocols: []const []const u8,
-data: []const u8,
-len: usize,
-message_type: MessageType = .handshake_protocols,
+interface: Message,
 
 const Self = @This();
 
@@ -67,9 +48,11 @@ pub fn init(gpa: mem.Allocator, protocols: []const []const u8) mem.Allocator.Err
 
     return .{
         .protocols = protocols_owned,
-        .data = data_slice,
-        .len = data_slice.len,
-        .message_type = .handshake_protocols,
+        .interface = .{
+            .data = data_slice,
+            .len = data_slice.len,
+            .message_type = .handshake_protocols,
+        },
     };
 }
 
@@ -120,14 +103,16 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Alloc
 
     return .{
         .protocols = protocols_owned,
-        .data = owned_data,
-        .len = len,
-        .message_type = .handshake_protocols,
+        .interface = .{
+            .data = owned_data,
+            .len = len,
+            .message_type = .handshake_protocols,
+        },
     };
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    gpa.free(self.data);
+    gpa.free(self.interface.data);
     for (self.protocols) |p| {
         gpa.free(p);
     }
@@ -135,22 +120,20 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
 }
 
 test "HandshakeProtocols.init" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     var msg = try Self.init(alloc, &.{ "test@1", "test@2" });
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("handshake_protocols ( { \"test@1\", \"test@2\" } ) ", data);
-    try std.testing.expectEqualSlices(i32, msg.getFds(), &.{});
-    try std.testing.expectEqual(msg.getLen(), 19);
+    try std.testing.expectEqualSlices(i32, msg.interface.getFds(), &.{});
+    try std.testing.expectEqual(msg.interface.len, 19);
 }
 
 test "HandshakeProtocols.fromBytes" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     // Message format: [type][ARRAY_magic][VARCHAR_magic][varint_arr_len][varint_str_len][str]...[END]
@@ -171,7 +154,7 @@ test "HandshakeProtocols.fromBytes" {
     var msg = try Self.fromBytes(alloc, &bytes, 0);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("handshake_protocols ( { \"test@1\", \"test@2\" } ) ", data);

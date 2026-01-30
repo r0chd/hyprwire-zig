@@ -29,12 +29,121 @@ pub const Error = error{
     MalformedMessage,
 };
 
-pub const Message = Trait(.{
-    .getFds = fn () []const i32,
-    .getData = fn () []const u8,
-    .getLen = fn () usize,
-    .getMessageType = fn () MessageType,
-}, null);
+data: []const u8,
+len: usize,
+message_type: MessageType = .invalid,
+fdsFn: *const fn (ptr: *const Self) []const i32 = defaultGetFds,
+
+const Self = @This();
+
+pub fn getFds(self: *const Self) []const i32 {
+    return self.fdsFn(self);
+}
+
+fn defaultGetFds(ptr: *const Self) []const i32 {
+    _ = ptr;
+    return &.{};
+}
+
+pub fn parseData(self: Self, gpa: mem.Allocator) (std.Io.Writer.Error || mem.Allocator.Error || Error)![]const u8 {
+    var result: std.Io.Writer.Allocating = .init(gpa);
+    defer result.deinit();
+
+    try result.writer.print("{s} ( ", .{@tagName(self.message_type)});
+
+    var first: bool = true;
+    var needle: usize = 1;
+    while (needle < self.data.len) {
+        const magic_byte = self.data[needle];
+        needle += 1;
+
+        const magic = enums.fromInt(MessageMagic, magic_byte) orelse return Error.MalformedMessage;
+        switch (magic) {
+            .end => {
+                break;
+            },
+            .type_seq => {
+                if (!first) _ = try result.writer.write(", ");
+                first = false;
+                const value = mem.readVarInt(u32, self.data[needle .. needle + 4], .little);
+                try result.writer.print("seq: {}", .{value});
+                needle += 4;
+            },
+            .type_uint => {
+                if (!first) _ = try result.writer.write(", ");
+                first = false;
+                const value = mem.readVarInt(u32, self.data[needle .. needle + 4], .little);
+                try result.writer.print("{}", .{value});
+                needle += 4;
+            },
+            .type_int => {
+                if (!first) _ = try result.writer.write(", ");
+                first = false;
+                const value = mem.readVarInt(i32, self.data[needle .. needle + 4], .little);
+                try result.writer.print("{}", .{value});
+                needle += 4;
+            },
+            .type_f32 => {
+                if (!first) _ = try result.writer.write(", ");
+                first = false;
+                const int_bits = mem.readVarInt(u32, self.data[needle .. needle + 4], .little);
+                const value: f32 = @bitCast(int_bits);
+                try result.writer.print("{}", .{value});
+                needle += 4;
+            },
+            .type_varchar => {
+                if (!first) _ = try result.writer.write(", ");
+                first = false;
+                const len, const int_len = message_parser.parseVarInt(self.data, needle);
+                if (len > 0) {
+                    const ptr = self.data[needle + int_len .. needle + int_len + len];
+                    try result.writer.print("\"{s}\"", .{ptr[0..len]});
+                } else {
+                    _ = try result.writer.write("\"\"");
+                }
+                needle += int_len + len;
+            },
+            .type_array => {
+                if (!first) _ = try result.writer.write(", ");
+                first = false;
+                const this_type = enums.fromInt(MessageMagic, self.data[needle]) orelse return Error.MalformedMessage;
+                needle += 1;
+                const els, const int_len = message_parser.parseVarInt(self.data, needle);
+                _ = try result.writer.write("{ ");
+                needle += int_len;
+
+                for (0..els) |i| {
+                    const str, const len = try formatPrimitiveType(gpa, self.data[needle..], this_type);
+                    defer gpa.free(str);
+
+                    needle += len;
+                    try result.writer.print("{s}", .{str});
+                    if (i < els - 1) {
+                        try result.writer.print(", ", .{});
+                    }
+                }
+
+                _ = try result.writer.write(" }");
+            },
+            .type_object => {
+                if (!first) _ = try result.writer.write(", ");
+                first = false;
+                const id = mem.readVarInt(u32, self.data[needle .. needle + 4], .little);
+                needle += 4;
+                try result.writer.print("object({})", .{id});
+            },
+            .type_fd => {
+                if (!first) _ = try result.writer.write(", ");
+                first = false;
+                _ = try result.writer.write("<fd>");
+            },
+            else => return Error.MalformedMessage,
+        }
+    }
+
+    try result.writer.writeAll(" ) ");
+    return result.toOwnedSlice();
+}
 
 fn formatPrimitiveType(
     gpa: mem.Allocator,
@@ -73,107 +182,6 @@ fn formatPrimitiveType(
     }
 }
 
-pub fn parseData(message: Message, gpa: mem.Allocator) (std.Io.Writer.Error || mem.Allocator.Error || Error)![]const u8 {
-    var result: std.Io.Writer.Allocating = .init(gpa);
-    defer result.deinit();
-
-    try result.writer.print("{s} ( ", .{@tagName(message.vtable.getMessageType(message.ptr))});
-
-    var first: bool = true;
-    var needle: usize = 1;
-    const message_data = message.vtable.getData(message.ptr);
-    while (needle < message_data.len) {
-        const magic_byte = message_data[needle];
-        needle += 1;
-
-        const magic = enums.fromInt(MessageMagic, magic_byte) orelse return Error.MalformedMessage;
-        switch (magic) {
-            .end => {
-                break;
-            },
-            .type_seq => {
-                if (!first) _ = try result.writer.write(", ");
-                first = false;
-                const value = mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
-                try result.writer.print("seq: {}", .{value});
-                needle += 4;
-            },
-            .type_uint => {
-                if (!first) _ = try result.writer.write(", ");
-                first = false;
-                const value = mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
-                try result.writer.print("{}", .{value});
-                needle += 4;
-            },
-            .type_int => {
-                if (!first) _ = try result.writer.write(", ");
-                first = false;
-                const value = mem.readVarInt(i32, message_data[needle .. needle + 4], .little);
-                try result.writer.print("{}", .{value});
-                needle += 4;
-            },
-            .type_f32 => {
-                if (!first) _ = try result.writer.write(", ");
-                first = false;
-                const int_bits = mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
-                const value: f32 = @bitCast(int_bits);
-                try result.writer.print("{}", .{value});
-                needle += 4;
-            },
-            .type_varchar => {
-                if (!first) _ = try result.writer.write(", ");
-                first = false;
-                const len, const int_len = message_parser.parseVarInt(message_data, needle);
-                if (len > 0) {
-                    const ptr = message_data[needle + int_len .. needle + int_len + len];
-                    try result.writer.print("\"{s}\"", .{ptr[0..len]});
-                } else {
-                    _ = try result.writer.write("\"\"");
-                }
-                needle += int_len + len;
-            },
-            .type_array => {
-                if (!first) _ = try result.writer.write(", ");
-                first = false;
-                const this_type = enums.fromInt(MessageMagic, message_data[needle]) orelse return Error.MalformedMessage;
-                needle += 1;
-                const els, const int_len = message_parser.parseVarInt(message_data, needle);
-                _ = try result.writer.write("{ ");
-                needle += int_len;
-
-                for (0..els) |i| {
-                    const str, const len = try formatPrimitiveType(gpa, message_data[needle..], this_type);
-                    defer gpa.free(str);
-
-                    needle += len;
-                    try result.writer.print("{s}", .{str});
-                    if (i < els - 1) {
-                        try result.writer.print(", ", .{});
-                    }
-                }
-
-                _ = try result.writer.write(" }");
-            },
-            .type_object => {
-                if (!first) _ = try result.writer.write(", ");
-                first = false;
-                const id = mem.readVarInt(u32, message_data[needle .. needle + 4], .little);
-                needle += 4;
-                try result.writer.print("object({})", .{id});
-            },
-            .type_fd => {
-                if (!first) _ = try result.writer.write(", ");
-                first = false;
-                _ = try result.writer.write("<fd>");
-            },
-            else => return Error.MalformedMessage,
-        }
-    }
-
-    try result.writer.writeAll(" ) ");
-    return result.toOwnedSlice();
-}
-
 test {
     std.testing.refAllDecls(@This());
 }
@@ -193,7 +201,7 @@ test "parseData integer types" {
     };
     var message = try GenericProtocolMessage.init(alloc, &bytes_data, &.{});
     defer message.deinit(alloc);
-    const data = try parseData(Message.from(&message), alloc);
+    const data = try message.interface.parseData(alloc);
     defer alloc.free(data);
 }
 
@@ -207,7 +215,7 @@ test "parseData varchar" {
     };
     var message = try GenericProtocolMessage.init(alloc, &bytes_data, &.{});
     defer message.deinit(alloc);
-    const data = try parseData(Message.from(&message), alloc);
+    const data = try message.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("generic_protocol_message ( \"\" ) ", data);

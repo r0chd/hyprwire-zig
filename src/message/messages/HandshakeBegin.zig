@@ -4,30 +4,11 @@ const mem = std.mem;
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const message_parser = @import("../MessageParser.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
-const Message = @import("root.zig").Message;
-const Error = @import("root.zig").Error;
-
-pub fn getFds(self: *const Self) []const i32 {
-    _ = self;
-    return &.{};
-}
-
-pub fn getData(self: *const Self) []const u8 {
-    return self.data;
-}
-
-pub fn getLen(self: *const Self) usize {
-    return self.len;
-}
-
-pub fn getMessageType(self: *const Self) MessageType {
-    return self.message_type;
-}
+const Message = @import("Message.zig");
+const Error = Message.Error;
 
 versions: []const u32,
-data: []const u8,
-len: usize,
-message_type: MessageType = .handshake_begin,
+interface: Message,
 
 const Self = @This();
 
@@ -59,9 +40,11 @@ pub fn init(gpa: mem.Allocator, versions: []const u32) mem.Allocator.Error!Self 
 
     return .{
         .versions = versions_slice,
-        .data = data_slice,
-        .len = data_slice.len,
-        .message_type = .handshake_begin,
+        .interface = .{
+            .data = data_slice,
+            .len = data_slice.len,
+            .message_type = .handshake_begin,
+        },
     };
 }
 
@@ -100,33 +83,33 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Alloc
 
     return .{
         .versions = versions,
-        .data = try gpa.dupe(u8, data[offset .. offset + message_len]),
-        .len = message_len,
-        .message_type = .handshake_begin,
+        .interface = .{
+            .data = try gpa.dupe(u8, data[offset .. offset + message_len]),
+            .len = message_len,
+            .message_type = .handshake_begin,
+        },
     };
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    gpa.free(self.data);
+    gpa.free(self.interface.data);
     gpa.free(self.versions);
 }
 
 test "HandshakeBegin.init" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     const versions = [_]u32{ 1, 2 };
     var msg = try Self.init(alloc, &versions);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("handshake_begin ( { 1, 2 } ) ", data);
 }
 
 test "HandshakeBegin.fromBytes" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     // Message format: [type][ARRAY_magic][UINT_magic][varint_arr_len][version1:4][version2:4]...[END]
@@ -145,7 +128,7 @@ test "HandshakeBegin.fromBytes" {
     var msg = try Self.fromBytes(alloc, &bytes, 0);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("handshake_begin ( { 1, 2 } ) ", data);

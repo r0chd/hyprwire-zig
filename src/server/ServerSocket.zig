@@ -11,7 +11,7 @@ const types = @import("../implementation/types.zig");
 const ProtocolServerImplementation = types.server.ProtocolImplementation;
 const message_parser = @import("../message/MessageParser.zig");
 const FatalError = @import("../message/messages/FatalProtocolError.zig");
-const Message = @import("../message/messages/root.zig").Message;
+const Message = @import("../message/messages/Message.zig");
 const RoundtripDone = @import("../message/messages/RoundtripDone.zig");
 const root = @import("../root.zig");
 const steadyMillis = root.steadyMillis;
@@ -361,7 +361,7 @@ pub fn dispatchClient(self: *Self, io: Io, gpa: mem.Allocator, client: *ServerCl
             return;
         };
         defer fatal_msg.deinit(gpa);
-        client.sendMessage(io, gpa, Message.from(&fatal_msg));
+        client.sendMessage(io, gpa, &fatal_msg.interface);
         client.@"error" = true;
         return;
     }
@@ -370,7 +370,7 @@ pub fn dispatchClient(self: *Self, io: Io, gpa: mem.Allocator, client: *ServerCl
 
     message_parser.handleMessage(io, gpa, &data, .{ .server = client }) catch {
         var fatal_msg = try FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire");
-        client.sendMessage(io, gpa, Message.from(&fatal_msg));
+        client.sendMessage(io, gpa, &fatal_msg.interface);
         client.@"error" = true;
         return;
     };
@@ -378,7 +378,7 @@ pub fn dispatchClient(self: *Self, io: Io, gpa: mem.Allocator, client: *ServerCl
     if (client.scheduled_roundtrip_seq > 0) {
         var roundtrip_done = try RoundtripDone.init(gpa, client.scheduled_roundtrip_seq);
         defer roundtrip_done.deinit(gpa);
-        client.sendMessage(io, gpa, Message.from(&roundtrip_done));
+        client.sendMessage(io, gpa, &roundtrip_done.interface);
         client.scheduled_roundtrip_seq = 0;
     }
 }

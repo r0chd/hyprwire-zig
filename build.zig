@@ -148,7 +148,7 @@ fn buildScannerSnapshotTests(b: *Build, hyprwire: *Build.Module, test_step: *Bui
 
 fn buildExamples(b: *Build, target: Build.ResolvedTarget, optimize: std.builtin.OptimizeMode, hyprwire: *Build.Module) void {
     const scanner = Scanner.init(b, hyprwire);
-    scanner.addCustomProtocol(b.path("./examples/simple/protocol-v1.xml"));
+    scanner.addCustomProtocol(b.path("./examples/protocols/protocol-v1.xml"));
     scanner.generate("test_protocol_v1", 1);
 
     const client = b.addExecutable(.{
@@ -173,10 +173,21 @@ fn buildExamples(b: *Build, target: Build.ResolvedTarget, optimize: std.builtin.
     });
     b.installArtifact(server);
 
+    const fork = b.addExecutable(.{
+        .name = "fork",
+        .root_module = b.createModule(.{
+            .root_source_file = b.path("examples/fork/main.zig"),
+            .imports = &.{.{ .name = "hyprwire", .module = hyprwire }},
+            .target = target,
+            .optimize = optimize,
+        }),
+    });
+    b.installArtifact(fork);
+
     const examples_step = b.step("examples", "Build all examples");
-    examples_step.dependOn(b.getInstallStep());
-    server.step.dependOn(examples_step);
-    client.step.dependOn(examples_step);
+    examples_step.dependOn(&server.step);
+    examples_step.dependOn(&client.step);
+    examples_step.dependOn(&fork.step);
 }
 
 pub const Scanner = struct {

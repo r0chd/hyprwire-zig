@@ -3,32 +3,13 @@ const mem = std.mem;
 
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../MessageType.zig").MessageType;
-const Message = @import("root.zig").Message;
-const Error = @import("root.zig").Error;
-
-pub fn getFds(self: *const Self) []const i32 {
-    _ = self;
-    return &.{};
-}
-
-pub fn getData(self: *const Self) []const u8 {
-    return self.data;
-}
-
-pub fn getLen(self: *const Self) usize {
-    return self.len;
-}
-
-pub fn getMessageType(self: *const Self) MessageType {
-    return self.message_type;
-}
+const Message = @import("Message.zig");
+const Error = Message.Error;
 
 object_id: u32 = 0,
 error_id: u32 = 0,
 error_msg: []const u8,
-data: []const u8,
-len: usize,
-message_type: MessageType = .fatal_protocol_error,
+interface: Message,
 
 const Self = @This();
 
@@ -71,9 +52,11 @@ pub fn initBuffer(buffer: []u8, object_id: u32, error_id: u32, error_msg: []cons
         .object_id = object_id,
         .error_id = error_id,
         .error_msg = error_msg,
-        .len = estimated_capacity,
-        .data = data.items[0..data.items.len],
-        .message_type = .fatal_protocol_error,
+        .interface = .{
+            .len = estimated_capacity,
+            .data = data.items[0..data.items.len],
+            .message_type = .fatal_protocol_error,
+        },
     };
 }
 
@@ -117,9 +100,11 @@ pub fn init(gpa: mem.Allocator, object_id: u32, error_id: u32, error_msg: []cons
         .object_id = object_id,
         .error_id = error_id,
         .error_msg = error_msg,
-        .len = data.items.len,
-        .data = try data.toOwnedSlice(gpa),
-        .message_type = .fatal_protocol_error,
+        .interface = .{
+            .len = data.items.len,
+            .data = try data.toOwnedSlice(gpa),
+            .message_type = .fatal_protocol_error,
+        },
     };
 }
 
@@ -163,9 +148,11 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Alloc
     needle += 1;
 
     return Self{
-        .data = try gpa.dupe(u8, data[offset..needle]),
-        .len = needle - offset,
-        .message_type = .fatal_protocol_error,
+        .interface = .{
+            .data = try gpa.dupe(u8, data[offset..needle]),
+            .len = needle - offset,
+            .message_type = .fatal_protocol_error,
+        },
         .object_id = object_id,
         .error_id = error_id,
         .error_msg = error_msg,
@@ -173,24 +160,22 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Alloc
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    gpa.free(self.data);
+    gpa.free(self.interface.data);
 }
 
 test "FatalProtocolError.init" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     var msg = try Self.init(alloc, 3, 5, "test error");
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("fatal_protocol_error ( 3, 5, \"test error\" ) ", data);
 }
 
 test "FatalProtocolError.fromBytes" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     // Message format: [type][UINT_magic][objectId:4][UINT_magic][errorId:4][VARCHAR_magic][varint_len][errorMsg][END]
@@ -211,7 +196,7 @@ test "FatalProtocolError.fromBytes" {
     var msg = try Self.fromBytes(alloc, &bytes, 0);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("fatal_protocol_error ( 3, 5, \"test error\" ) ", data);

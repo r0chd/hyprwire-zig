@@ -7,7 +7,7 @@ const hyprwire = @import("hyprwire");
 const Trait = @import("trait").Trait;
 
 const message_parser = @import("../message/MessageParser.zig");
-const Message = @import("../message/messages/root.zig").Message;
+const Message = @import("../message/messages/Message.zig");
 const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 const Object = @import("object.zig").Object;
 const types = @import("types.zig");
@@ -25,7 +25,7 @@ pub const WireObject = Trait(.{
     .methodsOut = fn () []const Method,
     .methodsIn = fn () []const Method,
     .errd = fn () void,
-    .sendMessage = fn (std.Io, mem.Allocator, Message) anyerror!void,
+    .sendMessage = fn (std.Io, mem.Allocator, *Message) anyerror!void,
     .server = fn () bool,
     .getId = fn () u32,
 }, .{Object});

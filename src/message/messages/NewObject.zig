@@ -3,31 +3,12 @@ const mem = std.mem;
 
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../MessageType.zig").MessageType;
-const Message = @import("root.zig").Message;
-const Error = @import("root.zig").Error;
-
-pub fn getFds(self: *const Self) []const i32 {
-    _ = self;
-    return &.{};
-}
-
-pub fn getData(self: *const Self) []const u8 {
-    return self.data;
-}
-
-pub fn getLen(self: *const Self) usize {
-    return self.len;
-}
-
-pub fn getMessageType(self: *const Self) MessageType {
-    return self.message_type;
-}
+const Message = @import("Message.zig");
+const Error = Message.Error;
 
 id: u32,
 seq: u32,
-data: []const u8,
-len: usize,
-message_type: MessageType = .new_object,
+interface: Message,
 
 const Self = @This();
 
@@ -50,9 +31,11 @@ pub fn init(gpa: mem.Allocator, seq: u32, id: u32) mem.Allocator.Error!Self {
     return .{
         .id = id,
         .seq = seq,
-        .data = owned,
-        .len = owned.len,
-        .message_type = .new_object,
+        .interface = .{
+            .data = owned,
+            .len = owned.len,
+            .message_type = .new_object,
+        },
     };
 }
 
@@ -79,31 +62,31 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, offset: usize) (mem.Alloc
     return .{
         .id = id,
         .seq = seq,
-        .data = try gpa.dupe(u8, data[offset..][0..12]),
-        .len = 12,
-        .message_type = .new_object,
+        .interface = .{
+            .data = try gpa.dupe(u8, data[offset..][0..12]),
+            .len = 12,
+            .message_type = .new_object,
+        },
     };
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {
-    gpa.free(self.data);
+    gpa.free(self.interface.data);
 }
 
 test "NewObject.init" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     var msg = try Self.init(alloc, 3, 2);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("new_object ( 2, 3 ) ", data);
 }
 
 test "NewObject.fromBytes" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     const bytes = [_]u8{
@@ -117,12 +100,12 @@ test "NewObject.fromBytes" {
     var msg = try Self.fromBytes(alloc, &bytes, 0);
     defer msg.deinit(alloc);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("new_object ( 3, 2 ) ", data);
-    try std.testing.expectEqual(msg.getLen(), 12);
-    try std.testing.expectEqualSlices(i32, msg.getFds(), &.{});
+    try std.testing.expectEqual(msg.interface.len, 12);
+    try std.testing.expectEqualSlices(i32, msg.interface.getFds(), &.{});
 }
 
 test "NewObject errors" {

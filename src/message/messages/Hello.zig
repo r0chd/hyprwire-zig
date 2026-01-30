@@ -3,13 +3,10 @@ const mem = std.mem;
 
 const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../MessageType.zig").MessageType;
-const root = @import("root.zig");
-const Message = root.Message;
-const Error = root.Error;
+const Message = @import("Message.zig");
+const Error = Message.Error;
 
-data: []const u8,
-len: usize,
-message_type: MessageType = .invalid,
+interface: Message,
 
 const Self = @This();
 
@@ -25,9 +22,11 @@ pub fn init() Self {
     };
 
     return .{
-        .data = data,
-        .len = data.len,
-        .message_type = .sup,
+        .interface = .{
+            .data = data,
+            .len = data.len,
+            .message_type = .sup,
+        },
     };
 }
 
@@ -47,44 +46,26 @@ pub fn fromBytes(data: []const u8, offset: usize) Error!Self {
     if (!mem.eql(u8, &expected, data[offset .. offset + 7])) return Error.MalformedMessage;
 
     return .{
-        .data = data[offset .. offset + 7],
-        .len = expected.len,
-        .message_type = .sup,
+        .interface = .{
+            .data = data[offset .. offset + 7],
+            .len = expected.len,
+            .message_type = .sup,
+        },
     };
 }
 
-pub fn getFds(self: *Self) []const i32 {
-    _ = self;
-
-    return &.{};
-}
-
-pub fn getData(self: *Self) []const u8 {
-    return self.data;
-}
-
-pub fn getLen(self: *Self) usize {
-    return self.len;
-}
-
-pub fn getMessageType(self: *Self) MessageType {
-    return self.message_type;
-}
-
 test "Hello.init" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     var msg = Self.init();
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("sup ( \"VAX\" ) ", data);
 }
 
 test "Hello.fromBytes" {
-    const messages = @import("./root.zig");
     const alloc = std.testing.allocator;
 
     const bytes = [_]u8{
@@ -98,7 +79,7 @@ test "Hello.fromBytes" {
     };
     var msg = try Self.fromBytes(&bytes, 0);
 
-    const data = try messages.parseData(Message.from(&msg), alloc);
+    const data = try msg.interface.parseData(alloc);
     defer alloc.free(data);
 
     try std.testing.expectEqualStrings("sup ( \"VAX\" ) ", data);

@@ -14,8 +14,7 @@ const Method = types.Method;
 const WireObject = @import("../implementation/wire_object.zig").WireObject;
 const message_parser = @import("../message/MessageParser.zig");
 const FatalErrorMessage = @import("../message/messages/FatalProtocolError.zig");
-const messages = @import("../message/messages/root.zig");
-const Message = messages.Message;
+const Message = @import("../message/messages/Message.zig");
 const MessageType = @import("../message/MessageType.zig").MessageType;
 const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 const ServerClient = @import("ServerClient.zig");
@@ -64,7 +63,7 @@ pub fn errd(self: *Self) void {
     }
 }
 
-pub fn sendMessage(self: *Self, io: Io, gpa: mem.Allocator, message: Message) !void {
+pub fn sendMessage(self: *Self, io: Io, gpa: mem.Allocator, message: *Message) !void {
     if (self.client) |client| {
         client.sendMessage(io, gpa, message);
     }
@@ -111,7 +110,7 @@ pub fn @"error"(self: *Self, io: Io, gpa: mem.Allocator, id: u32, message: [:0]c
     var buffer: [1024]u8 = undefined;
     var msg = FatalErrorMessage.initBuffer(&buffer, self.id, id, message);
     if (self.client) |client| {
-        client.sendMessage(io, gpa, Message.from(&msg));
+        client.sendMessage(io, gpa, &msg.interface);
     }
 
     self.errd();
@@ -280,9 +279,9 @@ pub fn call(self: *Self, io: Io, gpa: mem.Allocator, id: u32, args: *types.Args)
 
     try data.append(gpa, @intFromEnum(MessageMagic.end));
 
-    var msg = try messages.GenericProtocolMessage.init(gpa, data.items, fds.items);
+    var msg = try Message.GenericProtocolMessage.init(gpa, data.items, fds.items);
     defer msg.deinit(gpa);
-    try self.sendMessage(io, gpa, Message.from(&msg));
+    try self.sendMessage(io, gpa, &msg.interface);
 
     return 0;
 }
@@ -332,8 +331,8 @@ test {
         const methods_out = self.methodsOut();
         _ = methods_out;
 
-        var hello = messages.Hello.init();
-        try self.sendMessage(io, alloc, Message.from(&hello));
+        var hello = Message.Hello.init();
+        try self.sendMessage(io, alloc, &hello.interface);
         _ = self.server();
     }
 }
