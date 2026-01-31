@@ -47,8 +47,7 @@ fn generateServerCode(gpa: mem.Allocator, protocol: Protocol, selected: ?ObjectS
         if (selected) |sel| {
             if (!sel.contains(obj.name)) continue;
         }
-        const is_last = seen == obj_count - 1;
-        try writeObjectCode(writer, obj, is_last);
+        try writeObjectCode(writer, obj);
         seen += 1;
     }
 
@@ -94,52 +93,57 @@ fn writeHeader(writer: anytype, protocol: Protocol) !void {
     , .{protocol.name});
 }
 
-fn writeObjectCode(writer: anytype, obj: Object, is_last: bool) !void {
+fn writeObjectCode(writer: anytype, obj: Object) !void {
     for (obj.c2s_methods, 0..) |method, idx| {
         try writeMethodHandler(writer, obj, method, idx);
     }
-    try writeObjectStruct(writer, obj, is_last);
+    try writeObjectStruct(writer, obj);
 }
 
-fn writeObjectStruct(writer: anytype, obj: Object, is_last: bool) !void {
+fn writeObjectStruct(writer: anytype, obj: Object) !void {
     const is_first_object = mem.eql(u8, obj.name, "my_manager_v1");
 
-    try writer.print("\npub const {s}Object = struct {{\n", .{obj.name_pascal});
-
-    try writer.print("    pub const Event = union(enum) {{\n", .{});
+    try writer.print("\npub const {s}Event = union(enum) {{\n", .{obj.name_pascal});
     for (obj.c2s_methods) |method| {
         if (method.args.len == 0 and method.returns_type.len == 0) {
-            try writer.print("        @\"{s}\": struct {{}},\n", .{method.name});
+            try writer.print("    @\"{s}\": struct {{}},\n", .{method.name});
         } else {
-            try writer.print("        @\"{s}\": struct {{\n", .{method.name});
+            try writer.print("    @\"{s}\": struct {{\n", .{method.name});
             if (method.returns_type.len > 0) {
-                try writer.print("            seq: u32,\n", .{});
+                try writer.print("        seq: u32,\n", .{});
             } else {
                 for (method.args) |arg| {
-                    try writer.print("            @\"{s}\": {s},\n", .{ arg.name, arg.zig_server_struct_type });
+                    try writer.print("        @\"{s}\": {s},\n", .{ arg.name, arg.zig_server_struct_type });
                 }
             }
-            try writer.print("        }},\n", .{});
+            try writer.print("    }},\n", .{});
         }
     }
-    try writer.print("    }};\n", .{});
+    try writer.print("}};\n\n", .{});
 
     try writer.print(
+        \\pub const {s}Listener = hyprwire.reexports.Trait(.{{
+        \\    .{s}Listener = fn (std.mem.Allocator, *anyopaque, {s}Event) void,
+        \\}});
         \\
-        \\    pub const Listener = hyprwire.reexports.Trait(.{{
-        \\        .{s}Listener = fn (std.mem.Allocator, Event) void,
-        \\    }}, null);
         \\
-        \\    object: *types.Object,
+    , .{ obj.name_pascal, obj.name_camel, obj.name_pascal });
+
+    try writer.print("pub const {s}Object = struct {{\n", .{obj.name_pascal});
+    try writer.print("    pub const Event = {s}Event;\n", .{obj.name_pascal});
+    try writer.print("    pub const Listener = {s}Listener;\n\n", .{obj.name_pascal});
+
+    try writer.print(
+        \\    object: *const types.Object,
         \\    listener: Listener,
         \\    arena: std.heap.ArenaAllocator,
         \\
         \\    const Self = @This();
         \\
-        \\    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *types.Object) !*Self {{
+        \\    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {{
         \\        const self = try gpa.create(Self);
         \\        self.* = .{{
-    , .{obj.name_camel});
+    , .{});
 
     if (is_first_object) {
         try writer.print(
@@ -180,11 +184,11 @@ fn writeObjectStruct(writer: anytype, obj: Object, is_last: bool) !void {
             \\        gpa.destroy(self);
             \\    }}
             \\
-            \\    pub fn getObject(self: *Self) *types.Object {{
+            \\    pub fn getObject(self: *const Self) *const types.Object {{
             \\        return self.object;
             \\    }}
             \\
-            \\    pub fn @"error"(self: *Self, code: u32, message: []const u8) void {{
+            \\    pub fn @"error"(self: *const Self, code: u32, message: []const u8) void {{
             \\        self.object.vtable.@"error"(self.object.ptr, code, message);
             \\    }}
             \\
@@ -218,11 +222,7 @@ fn writeObjectStruct(writer: anytype, obj: Object, is_last: bool) !void {
         try writeSendMethod(writer, method);
     }
 
-    if (is_last) {
-        try writer.print("}};\n\n", .{});
-    } else {
-        try writer.print("}};\n", .{});
-    }
+    try writer.print("}};\n", .{});
 }
 
 fn writeSendMethod(writer: anytype, method: Method) !void {
@@ -266,7 +266,7 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
     try writer.print(
         \\pub const {s}Listener = hyprwire.reexports.Trait(.{{
         \\    .bind = fn (*types.Object) void,
-        \\}}, null);
+        \\}});
         \\
         \\pub const {s}Impl = struct {{
         \\    version: u32,

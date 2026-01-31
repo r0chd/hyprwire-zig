@@ -25,7 +25,13 @@ const Server = struct {
         self.manager = manager;
     }
 
-    pub fn myManagerV1Listener(self: *Self, alloc: mem.Allocator, event: test_protocol.MyManagerV1Object.Event) void {
+    pub fn myManagerV1Listener(
+        self: *Self,
+        alloc: mem.Allocator,
+        proxy: *test_protocol.MyManagerV1Object,
+        event: test_protocol.MyManagerV1Object.Event,
+    ) void {
+        _ = proxy;
         switch (event) {
             .send_message => |message| {
                 std.debug.print("Recvd message: {s}\n", .{message.message});
@@ -69,7 +75,7 @@ const Server = struct {
                 const server_object = self.socket.createObject(
                     self.io,
                     self.alloc,
-                    manager.getObject().vtable.getClient(manager.getObject().ptr),
+                    manager.getObject().getClient(),
                     @ptrCast(@alignCast(manager.getObject().ptr)),
                     "my_object_v1",
                     seq.seq,
@@ -84,8 +90,12 @@ const Server = struct {
         }
     }
 
-    pub fn myObjectV1Listener(self: *Self, alloc: mem.Allocator, event: test_protocol.MyObjectV1Object.Event) void {
-        const obj = self.object orelse return;
+    pub fn myObjectV1Listener(
+        self: *Self,
+        alloc: mem.Allocator,
+        proxy: *test_protocol.MyObjectV1Object,
+        event: test_protocol.MyObjectV1Object.Event,
+    ) void {
         switch (event) {
             .send_message => |message| {
                 std.debug.print("Object says hello: {s}\n", .{message.message});
@@ -95,7 +105,7 @@ const Server = struct {
 
                 std.debug.print("Erroring out the client!\n", .{});
 
-                obj.@"error"(self.io, alloc, @intFromEnum(message.message), "Important error occurred!");
+                proxy.@"error"(self.io, alloc, @intFromEnum(message.message), "Important error occurred!");
             },
             .destroy => {},
         }

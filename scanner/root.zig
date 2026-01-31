@@ -169,6 +169,7 @@ pub fn writeMethodHandler(writer: anytype, obj: Object, method: Method, idx: usi
         \\    object.listener.vtable.{s}Listener(
         \\        object.listener.ptr,
         \\        fallback_allocator.allocator(),
+        \\        object,
     , .{ obj.name_pascal, obj.name_camel });
 
     if (method.args.len == 0 and method.returns_type.len == 0) {

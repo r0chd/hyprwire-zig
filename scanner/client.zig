@@ -1,11 +1,11 @@
 const std = @import("std");
 const mem = std.mem;
+
 const Scanner = @import("./root.zig");
 const SCANNER_SIGNATURE = Scanner.SCANNER_SIGNATURE;
 const Document = Scanner.Document;
 const GenerateError = Scanner.GenerateError;
 const writeMethodHandler = Scanner.writeMethodHandler;
-
 const ir = @import("ir.zig");
 const Protocol = ir.Protocol;
 const Object = ir.Object;
@@ -28,8 +28,7 @@ pub fn generateClientCodeForGlobal(gpa: mem.Allocator, doc: *const Document, glo
 }
 
 fn generateClientCode(gpa: mem.Allocator, protocol: Protocol, selected: ?ObjectSet) ![]const u8 {
-    _ = gpa;
-    var output: std.Io.Writer.Allocating = .init(std.heap.page_allocator);
+    var output: std.Io.Writer.Allocating = .init(gpa);
     const writer = &output.writer;
 
     try writeCopyrightHeader(writer, protocol);
@@ -102,37 +101,46 @@ fn writeObjectCode(writer: anytype, obj: Object, use_short_init: bool) !void {
 }
 
 fn writeObjectStruct(writer: anytype, obj: Object, use_short_init: bool) !void {
-    try writer.print("pub const {s}Object = struct {{\n", .{obj.name_pascal});
-
-    try writer.print("    pub const Event = union(enum) {{\n", .{});
+    // Define Event outside the struct to avoid dependency loop
+    try writer.print("pub const {s}Event = union(enum) {{\n", .{obj.name_pascal});
     for (obj.s2c_methods) |method| {
-        try writer.print("        @\"{s}\": struct {{\n", .{method.name});
+        try writer.print("    @\"{s}\": struct {{\n", .{method.name});
         for (method.args) |arg| {
-            try writer.print("            {s}: {s},\n", .{ arg.name, arg.zig_event_type });
+            try writer.print("        {s}: {s},\n", .{ arg.name, arg.zig_event_type });
         }
-        try writer.print("        }},\n", .{});
+        try writer.print("    }},\n", .{});
     }
-    try writer.print("    }};\n\n", .{});
+    try writer.print("}};\n\n", .{});
+
+    // Define Listener outside the struct to avoid dependency loop
+    // Use *anyopaque to avoid forward reference to the Object type
+    try writer.print(
+        \\pub const {s}Listener = hyprwire.reexports.Trait(.{{
+        \\    .{s}Listener = fn (std.mem.Allocator, *anyopaque, {s}Event) void,
+        \\}});
+        \\
+        \\
+    , .{ obj.name_pascal, obj.name_camel, obj.name_pascal });
+
+    try writer.print("pub const {s}Object = struct {{\n", .{obj.name_pascal});
+    try writer.print("    pub const Event = {s}Event;\n", .{obj.name_pascal});
+    try writer.print("    pub const Listener = {s}Listener;\n\n", .{obj.name_pascal});
 
     try writer.print(
-        \\    pub const Listener = hyprwire.reexports.Trait(.{{
-        \\        .{s}Listener = fn (std.mem.Allocator, Event) void,
-        \\    }}, null);
-        \\
         \\    object: *const types.Object,
         \\    listener: Listener,
         \\    arena: std.heap.ArenaAllocator,
         \\
         \\    const Self = @This();
         \\
-    , .{obj.name_camel});
+        \\    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {{
+        \\        const self = try gpa.create(Self);
+        \\        self.* = .{{
+    , .{});
 
     if (use_short_init) {
         try writer.print(
             \\
-            \\    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {{
-            \\        const self = try gpa.create(Self);
-            \\        self.* = .{{
             \\            .object = object,
             \\            .listener = listener,
             \\            .arena = std.heap.ArenaAllocator.init(gpa),
@@ -144,9 +152,6 @@ fn writeObjectStruct(writer: anytype, obj: Object, use_short_init: bool) !void {
     } else {
         try writer.print(
             \\
-            \\    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {{
-            \\        const self = try gpa.create(Self);
-            \\        self.* = Self{{
             \\            .listener = listener,
             \\            .object = object,
             \\            .arena = std.heap.ArenaAllocator.init(gpa),
@@ -174,21 +179,6 @@ fn writeObjectStruct(writer: anytype, obj: Object, use_short_init: bool) !void {
 
     for (obj.c2s_methods) |method| {
         try writeSendMethod(writer, method);
-    }
-
-    if (use_short_init) {
-        for (obj.s2c_methods) |method| {
-            if (method.args.len == 1 and mem.eql(u8, method.args[0].type_str, "varchar")) {
-                try writer.print(
-                    \\
-                    \\    pub fn setSendMessage(self: *Self, callback: *const fn ([*:0]const u8) void) void {{
-                    \\        self.listener.send_message = callback;
-                    \\    }}
-                    \\
-                , .{});
-                break;
-            }
-        }
     }
 
     try writer.print(

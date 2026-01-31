@@ -170,7 +170,7 @@ fn clearFd(io: Io, fd: Fd) void {
             var file = fd.asFile();
             var buffer: [128]u8 = undefined;
             var reader = file.reader(io, &buffer);
-            var ioreader = reader.interface;
+            var ioreader = &reader.interface;
             ioreader.readSliceAll(&buf) catch break;
             continue;
         }
@@ -189,9 +189,9 @@ fn clearWakeupFd(self: *const Self, io: Io) void {
     clearFd(io, self.wakeup_fd);
 }
 
-pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, fd: Fd) !*ServerClient {
+pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, fd: i32) !*ServerClient {
     const stream = std.Io.net.Stream{ .socket = .{
-        .handle = fd.raw,
+        .handle = fd,
         .address = .{ .ip4 = .loopback(0) },
     } };
     const x = ServerClient{ .stream = stream };
@@ -200,7 +200,7 @@ pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, fd: Fd) !*ServerCl
     errdefer gpa.destroy(client);
     client.* = x;
 
-    _ = posix.system.fcntl(fd.raw, posix.F.GETFL, @as(u32, 0));
+    _ = posix.system.fcntl(fd, posix.F.GETFL, @as(u32, 0));
 
     client.self = client;
     client.server = self;

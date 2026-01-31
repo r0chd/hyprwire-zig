@@ -32,6 +32,7 @@ handshake_begin: std.time.Instant,
 @"error": bool = false,
 handshake_done: bool = false,
 last_ackd_roundtrip_seq: u32 = 0,
+last_sent_roundtrip_seq: u32 = 0,
 seq: u32 = 0,
 
 pending_socket_data: std.ArrayList(SocketRawParsedMessage) = .empty,
@@ -298,7 +299,7 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
 pub fn onGeneric(self: *const Self, io: Io, gpa: mem.Allocator, msg: Message.GenericProtocolMessage) !void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
-            try types.called(WireObject.from(obj), io, gpa, msg.method, msg.data_span, msg.fds);
+            try WireObject.from(obj).called(io, gpa, msg.method, msg.data_span, msg.fds);
             break;
         }
     }
@@ -386,7 +387,8 @@ pub fn disconnectOnError(self: *Self, io: Io) void {
 pub fn roundtrip(self: *Self, io: Io, gpa: mem.Allocator) !void {
     if (self.@"error") return;
 
-    const next_seq = self.last_ackd_roundtrip_seq + 1;
+    self.last_sent_roundtrip_seq += 1;
+    const next_seq = self.last_sent_roundtrip_seq;
     var message = try Message.RoundtripRequest.init(gpa, next_seq);
     defer message.deinit(gpa);
     try self.sendMessage(io, gpa, &message.interface);

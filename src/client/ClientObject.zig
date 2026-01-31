@@ -7,8 +7,10 @@ const Io = std.Io;
 const helpers = @import("helpers");
 const isTrace = helpers.isTrace;
 
+const Object = @import("../implementation/Object.zig");
 const types = @import("../implementation/types.zig");
 const Method = types.Method;
+const WireObject = @import("../implementation/WireObject.zig");
 const message_parser = @import("../message/MessageParser.zig");
 const Message = @import("../message/messages/Message.zig");
 const MessageType = @import("../message/MessageType.zig").MessageType;
@@ -18,6 +20,7 @@ const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 const ClientSocket = @import("ClientSocket.zig");
 
 const log = std.log.scoped(.hw);
+
 client: ?*ClientSocket,
 spec: ?*const types.ProtocolObjectSpec = null,
 data: ?*anyopaque = null,
@@ -29,6 +32,128 @@ seq: u32 = 1,
 protocol_name: []const u8 = "",
 
 const Self = @This();
+
+pub const vtable: WireObject.VTable = .{
+    .object = .{
+        .call = callWrapper,
+        .listen = listenWrapper,
+        .clientSock = clientSockWrapper,
+        .serverSock = serverSockWrapper,
+        .setData = setDataWrapper,
+        .getData = getDataWrapper,
+        .@"error" = errorWrapper,
+        .deinit = deinitWrapper,
+        .setOnDeinit = setOnDeinitWrapper,
+        .getClient = getClientWrapper,
+    },
+    .getVersion = getVersionWrapper,
+    .getListeners = getListenersWrapper,
+    .methodsOut = methodsOutWrapper,
+    .methodsIn = methodsInWrapper,
+    .errd = errdWrapper,
+    .sendMessage = sendMessageWrapper,
+    .server = serverWrapper,
+    .getId = getIdWrapper,
+};
+
+pub fn asWireObject(self: *Self) WireObject {
+    return .{ .ptr = self, .vtable = &vtable };
+}
+
+pub fn asObject(self: *Self) Object {
+    return .{ .ptr = self, .vtable = &vtable.object };
+}
+
+// VTable wrappers
+fn callWrapper(ptr: *anyopaque, io: std.Io, gpa: mem.Allocator, id: u32, args: *types.Args) anyerror!u32 {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.call(io, gpa, id, args);
+}
+
+fn listenWrapper(ptr: *anyopaque, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) anyerror!void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.listen(gpa, id, callback);
+}
+
+fn clientSockWrapper(ptr: *anyopaque) ?*ClientSocket {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.clientSock();
+}
+
+fn serverSockWrapper(ptr: *anyopaque) ?*ServerSocket {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.serverSock();
+}
+
+fn setDataWrapper(ptr: *anyopaque, data: *anyopaque) void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    self.setData(data);
+}
+
+fn getDataWrapper(ptr: *anyopaque) ?*anyopaque {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.getData();
+}
+
+fn errorWrapper(ptr: *anyopaque, io: std.Io, gpa: mem.Allocator, id: u32, message: [:0]const u8) void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    self.@"error"(io, gpa, id, message);
+}
+
+fn deinitWrapper(ptr: *anyopaque, gpa: mem.Allocator) void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    self.deinit(gpa);
+}
+
+fn setOnDeinitWrapper(ptr: *anyopaque, cb: *const fn () void) void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    self.setOnDeinit(cb);
+}
+
+fn getClientWrapper(ptr: *anyopaque) ?*ServerClient {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.getClient();
+}
+
+fn getVersionWrapper(ptr: *anyopaque) u32 {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.getVersion();
+}
+
+fn getListenersWrapper(ptr: *anyopaque) []*anyopaque {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.getListeners();
+}
+
+fn methodsOutWrapper(ptr: *anyopaque) []const Method {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.methodsOut();
+}
+
+fn methodsInWrapper(ptr: *anyopaque) []const Method {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.methodsIn();
+}
+
+fn errdWrapper(ptr: *anyopaque) void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    self.errd();
+}
+
+fn sendMessageWrapper(ptr: *anyopaque, io: std.Io, gpa: mem.Allocator, message: *Message) anyerror!void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.sendMessage(io, gpa, message);
+}
+
+fn serverWrapper(ptr: *anyopaque) bool {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.server();
+}
+
+fn getIdWrapper(ptr: *anyopaque) u32 {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return self.getId();
+}
 
 pub fn init(client: *ClientSocket) Self {
     return .{
@@ -115,186 +240,7 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
 }
 
 pub fn call(self: *Self, io: Io, gpa: mem.Allocator, id: u32, args: *types.Args) !u32 {
-    const methods = self.methodsOut();
-    if (methods.len <= id) {
-        const msg = try fmt.allocPrintSentinel(gpa, "core protocol error: invalid method {} for object {}", .{ id, self.id }, 0);
-        defer gpa.free(msg);
-        log.debug("core protocol error: {s}", .{msg});
-        self.@"error"(io, gpa, id, msg);
-        return error.InvalidMethod;
-    }
-
-    const method = methods[id];
-    const params = method.params;
-
-    if (method.since > self.version) {
-        const msg = try fmt.allocPrintSentinel(gpa, "invalid method spec {} for object {} -> server cannot call returnsType methods", .{ id, self.id }, 0);
-        defer gpa.free(msg);
-        log.debug("core protocol error: {s}", .{msg});
-        self.@"error"(io, gpa, id, msg);
-        return error.InvalidMethod;
-    }
-
-    var data: std.ArrayList(u8) = .empty;
-    defer data.deinit(gpa);
-    var fds: std.ArrayList(i32) = .empty;
-    defer fds.deinit(gpa);
-
-    try data.append(gpa, @intFromEnum(MessageType.generic_protocol_message));
-    try data.append(gpa, @intFromEnum(MessageMagic.type_object));
-
-    var object_id_buf: [4]u8 = undefined;
-    mem.writeInt(u32, &object_id_buf, self.id, .little);
-    try data.appendSlice(gpa, &object_id_buf);
-
-    try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
-    var method_id_buf: [4]u8 = undefined;
-    mem.writeInt(u32, &method_id_buf, id, .little);
-    try data.appendSlice(gpa, &method_id_buf);
-
-    var wait_on_seq: u32 = 0;
-
-    if (method.returns_type.len > 0) {
-        try data.append(gpa, @intFromEnum(MessageMagic.type_seq));
-
-        const self_client = self;
-        if (self_client.client) |client| {
-            client.seq += 1;
-            wait_on_seq = client.seq;
-        }
-
-        var seq_buf: [4]u8 = undefined;
-        mem.writeInt(u32, &seq_buf, wait_on_seq, .little);
-        try data.appendSlice(gpa, &seq_buf);
-    }
-
-    var i: usize = 0;
-    while (i < params.len) : (i += 1) {
-        const param = enums.fromInt(MessageMagic, params[i]) orelse return error.InvalidMessage;
-        switch (param) {
-            .type_uint => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
-                const arg = (args.next() orelse return error.InvalidMessage).get(u32) orelse return error.InvalidMessage;
-                var buf: [4]u8 = undefined;
-                mem.writeInt(u32, &buf, arg, .little);
-                try data.appendSlice(gpa, &buf);
-            },
-            .type_int => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_int));
-                const arg = (args.next() orelse return error.InvalidMessage).get(i32) orelse return error.InvalidMessage;
-                var buf: [4]u8 = undefined;
-                mem.writeInt(i32, &buf, arg, .little);
-                try data.appendSlice(gpa, &buf);
-            },
-            .type_object => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_object));
-                const arg = (args.next() orelse return error.InvalidMessage).get(u32) orelse return error.InvalidMessage;
-                var buf: [4]u8 = undefined;
-                mem.writeInt(u32, &buf, arg, .little);
-                try data.appendSlice(gpa, &buf);
-            },
-            .type_f32 => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_f32));
-                const arg = (args.next() orelse return error.InvalidMessage).get(f32) orelse return error.InvalidMessage;
-                const bits: u32 = @bitCast(arg);
-                var buf: [4]u8 = undefined;
-                mem.writeInt(u32, &buf, bits, .little);
-                try data.appendSlice(gpa, &buf);
-            },
-            .type_varchar => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_varchar));
-                const str = (args.next() orelse return error.InvalidMessage).get([:0]const u8) orelse return error.InvalidMessage;
-                var len_buf: [10]u8 = undefined;
-                try data.appendSlice(gpa, message_parser.encodeVarInt(str.len, &len_buf));
-                try data.appendSlice(gpa, str[0..str.len]);
-            },
-            .type_array => {
-                if (i + 1 >= params.len) return error.InvalidMessage;
-                const arr_type = enums.fromInt(MessageMagic, params[i + 1]) orelse return error.InvalidMessage;
-                i += 1;
-
-                try data.append(gpa, @intFromEnum(MessageMagic.type_array));
-                try data.append(gpa, @intFromEnum(arr_type));
-
-                switch (arr_type) {
-                    .type_uint => {
-                        const arr = (args.next() orelse return error.InvalidMessage).get([]const u32) orelse return error.InvalidMessage;
-                        var len_buf: [10]u8 = undefined;
-                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
-                        for (arr) |v| {
-                            var buf: [4]u8 = undefined;
-                            mem.writeInt(u32, &buf, v, .little);
-                            try data.appendSlice(gpa, &buf);
-                        }
-                    },
-                    .type_int => {
-                        const arr = (args.next() orelse return error.InvalidMessage).get([]const i32) orelse return error.InvalidMessage;
-                        var len_buf: [10]u8 = undefined;
-                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
-                        for (arr) |v| {
-                            var buf: [4]u8 = undefined;
-                            mem.writeInt(i32, &buf, v, .little);
-                            try data.appendSlice(gpa, &buf);
-                        }
-                    },
-                    .type_f32 => {
-                        const arr = (args.next() orelse return error.InvalidMessage).get([]const f32) orelse return error.InvalidMessage;
-                        var len_buf: [10]u8 = undefined;
-                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
-                        for (arr) |v| {
-                            const bits: u32 = @bitCast(v);
-                            var buf: [4]u8 = undefined;
-                            mem.writeInt(u32, &buf, bits, .little);
-                            try data.appendSlice(gpa, &buf);
-                        }
-                    },
-                    .type_varchar => {
-                        const arr = (args.next() orelse return error.InvalidMessage).get([]const [:0]const u8) orelse return error.InvalidMessage;
-                        var len_buf: [10]u8 = undefined;
-                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
-                        for (arr) |s| {
-                            var slen_buf: [10]u8 = undefined;
-                            try data.appendSlice(gpa, message_parser.encodeVarInt(s.len, &slen_buf));
-                            try data.appendSlice(gpa, s[0..s.len]);
-                        }
-                    },
-                    .type_fd => {
-                        const fd_list = (args.next() orelse return error.InvalidMessage).get([]const i32) orelse return error.InvalidMessage;
-                        for (fd_list) |fd| {
-                            try fds.append(gpa, fd);
-                        }
-                        var len_buf: [10]u8 = undefined;
-                        try data.appendSlice(gpa, message_parser.encodeVarInt(fd_list.len, &len_buf));
-                    },
-                    else => return error.InvalidMessage,
-                }
-            },
-            .type_fd => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_fd));
-                const fd = (args.next() orelse return error.InvalidMessage).get(i32) orelse return error.InvalidMessage;
-                try fds.append(gpa, fd);
-            },
-            else => {},
-        }
-    }
-
-    try data.append(gpa, @intFromEnum(MessageMagic.end));
-
-    var msg = try Message.GenericProtocolMessage.init(gpa, data.items, fds.items);
-    defer msg.deinit(gpa);
-    try self.sendMessage(io, gpa, &msg.interface);
-
-    if (wait_on_seq != 0) {
-        if (self.client) |client| {
-            const obj = client.makeObject(gpa, self.protocol_name, method.returns_type, wait_on_seq);
-            if (obj) |o| {
-                try client.waitForObject(io, gpa, o);
-                return o.id;
-            }
-        }
-    }
-
-    return 0;
+    return self.asWireObject().callMethod(io, gpa, id, args);
 }
 
 pub fn listen(self: *Self, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) !void {

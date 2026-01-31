@@ -34,7 +34,7 @@ fn generateSpecCode(gpa: mem.Allocator, protocol: Protocol, selected: ?ObjectSet
     try writeCopyrightHeader(writer, protocol);
     try writeHeader(writer);
     try writeEnums(writer, protocol);
-    try writeObjectSpecs(writer, gpa, protocol, selected);
+    try writeObjectSpecs(writer, protocol, selected);
     try writeProtocolSpec(writer, protocol, selected);
 
     return try output.toOwnedSlice();
@@ -85,17 +85,16 @@ fn writeEnums(writer: anytype, protocol: Protocol) !void {
     }
 }
 
-fn writeObjectSpecs(writer: anytype, gpa: mem.Allocator, protocol: Protocol, selected: ?ObjectSet) !void {
+fn writeObjectSpecs(writer: anytype, protocol: Protocol, selected: ?ObjectSet) !void {
     for (protocol.objects) |obj| {
         if (selected) |sel| {
             if (!sel.contains(obj.name)) continue;
         }
-        try writeObjectSpec(writer, gpa, obj);
+        try writeObjectSpec(writer, obj);
     }
 }
 
-fn writeObjectSpec(writer: anytype, gpa: mem.Allocator, obj: Object) !void {
-    _ = gpa;
+fn writeObjectSpec(writer: anytype, obj: Object) !void {
     try writer.print("\npub const {s}Spec = struct {{\n", .{obj.name_pascal});
 
     try writer.print("    c2s_methods: []const types.Method = &.{{\n", .{});

@@ -12,7 +12,7 @@ const isTrace = helpers.isTrace;
 const steadyMillis = @import("hyprwire").steadyMillis;
 
 const ClientSocket = @import("../client/ClientSocket.zig");
-const wire_object = @import("../implementation/wire_object.zig");
+const WireObject = @import("../implementation/WireObject.zig");
 const ServerClient = @import("../server/ServerClient.zig");
 const SocketRawParsedMessage = @import("../socket/SocketRawParsedMessage.zig");
 const Message = @import("./messages/Message.zig");
@@ -32,7 +32,7 @@ pub fn handleMessage(
     gpa: mem.Allocator,
     data: *SocketRawParsedMessage,
     role: union(enum) { client: *ClientSocket, server: *ServerClient },
-) (wire_object.Error || Error || Message.Error || mem.Allocator.Error || Io.Writer.Error)!void {
+) (WireObject.Error || Error || Message.Error || mem.Allocator.Error || Io.Writer.Error)!void {
     return switch (role) {
         .client => |client| handleClientMessage(io, gpa, data, client),
         .server => |client| handleServerMessage(io, gpa, data, client),
@@ -44,7 +44,7 @@ fn handleClientMessage(
     gpa: mem.Allocator,
     data: *SocketRawParsedMessage,
     client: *ClientSocket,
-) (wire_object.Error || Error || Message.Error || mem.Allocator.Error || Io.Writer.Error)!void {
+) (WireObject.Error || Error || Message.Error || mem.Allocator.Error || Io.Writer.Error)!void {
     var needle: usize = 0;
     while (needle < data.data.items.len) {
         const ret = try parseSingleMessageClient(io, gpa, data, needle, client);
@@ -77,7 +77,7 @@ fn handleServerMessage(
     gpa: mem.Allocator,
     data: *SocketRawParsedMessage,
     client: *ServerClient,
-) (wire_object.Error || Error || Message.Error || mem.Allocator.Error || Io.Writer.Error)!void {
+) (WireObject.Error || Error || Message.Error || mem.Allocator.Error || Io.Writer.Error)!void {
     var needle: usize = 0;
     while (needle < data.data.items.len and !client.@"error") {
         const ret = try parseSingleMessageServer(io, gpa, data, needle, client);
@@ -102,7 +102,7 @@ fn parseSingleMessageServer(
     raw: *SocketRawParsedMessage,
     off: usize,
     client: *ServerClient,
-) (wire_object.Error || Error || Message.Error || mem.Allocator.Error || Io.Writer.Error)!usize {
+) (WireObject.Error || Error || Message.Error || mem.Allocator.Error || Io.Writer.Error)!usize {
     if (enums.fromInt(MessageType, raw.data.items[off])) |message_type| {
         switch (message_type) {
             .sup => {
@@ -246,7 +246,7 @@ fn parseSingleMessageClient(
     raw: *SocketRawParsedMessage,
     off: usize,
     client: *ClientSocket,
-) (wire_object.Error || Error || Message.Error || mem.Allocator.Error || Io.Writer.Error)!usize {
+) (WireObject.Error || Error || Message.Error || mem.Allocator.Error || Io.Writer.Error)!usize {
     if (enums.fromInt(MessageType, raw.data.items[off])) |message_type| {
         switch (message_type) {
             .handshake_begin => {

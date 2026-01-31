@@ -26,6 +26,7 @@ fn myManagerV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) vo
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
+        object,
         .{ .@"send_message" = .{
             .@"message" = message,
         } },
@@ -45,24 +46,28 @@ fn myManagerV1_method1(r: *types.Object, message: [*]const u32, message_len: u32
     object.listener.vtable.myManagerV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
+        object,
         .{ .@"recv_message_array_uint" = .{
             .@"message" = fallback_allocator.allocator().dupe(u32, message[0..message_len]) catch @panic("OOM"),
         } },
     );
 }
-pub const MyManagerV1Object = struct {
-    pub const Event = union(enum) {
-        @"send_message": struct {
-            message: [*:0]const u8,
-        },
-        @"recv_message_array_uint": struct {
-            message: []const u32,
-        },
-    };
+pub const MyManagerV1Event = union(enum) {
+    @"send_message": struct {
+        message: [*:0]const u8,
+    },
+    @"recv_message_array_uint": struct {
+        message: []const u32,
+    },
+};
 
-    pub const Listener = hyprwire.reexports.Trait(.{
-        .myManagerV1Listener = fn (std.mem.Allocator, Event) void,
-    }, null);
+pub const MyManagerV1Listener = hyprwire.reexports.Trait(.{
+    .myManagerV1Listener = fn (std.mem.Allocator, *anyopaque, MyManagerV1Event) void,
+});
+
+pub const MyManagerV1Object = struct {
+    pub const Event = MyManagerV1Event;
+    pub const Listener = MyManagerV1Listener;
 
     object: *const types.Object,
     listener: Listener,
@@ -72,7 +77,7 @@ pub const MyManagerV1Object = struct {
 
     pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {
         const self = try gpa.create(Self);
-        self.* = Self{
+        self.* = .{
             .listener = listener,
             .object = object,
             .arena = std.heap.ArenaAllocator.init(gpa),
@@ -161,21 +166,25 @@ fn myObjectV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) voi
     object.listener.vtable.myObjectV1Listener(
         object.listener.ptr,
         fallback_allocator.allocator(),
+        object,
         .{ .@"send_message" = .{
             .@"message" = message,
         } },
     );
 }
-pub const MyObjectV1Object = struct {
-    pub const Event = union(enum) {
-        @"send_message": struct {
-            message: [*:0]const u8,
-        },
-    };
+pub const MyObjectV1Event = union(enum) {
+    @"send_message": struct {
+        message: [*:0]const u8,
+    },
+};
 
-    pub const Listener = hyprwire.reexports.Trait(.{
-        .myObjectV1Listener = fn (std.mem.Allocator, Event) void,
-    }, null);
+pub const MyObjectV1Listener = hyprwire.reexports.Trait(.{
+    .myObjectV1Listener = fn (std.mem.Allocator, *anyopaque, MyObjectV1Event) void,
+});
+
+pub const MyObjectV1Object = struct {
+    pub const Event = MyObjectV1Event;
+    pub const Listener = MyObjectV1Listener;
 
     object: *const types.Object,
     listener: Listener,
@@ -222,10 +231,6 @@ pub const MyObjectV1Object = struct {
         var args = types.Args.init(&buffer, .{});
         _ = try self.object.vtable.call(self.object.ptr, io, gpa, 2, &args);
         self.object.destroy();
-    }
-
-    pub fn setSendMessage(self: *Self, callback: *const fn ([*:0]const u8) void) void {
-        self.listener.send_message = callback;
     }
 
     pub fn dispatch(

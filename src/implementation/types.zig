@@ -2,10 +2,9 @@ const std = @import("std");
 const mem = std.mem;
 
 pub const client = @import("client_impl.zig");
-pub const Object = @import("object.zig").Object;
+pub const Object = @import("Object.zig");
 pub const server = @import("server_impl.zig");
-pub const WireObject = @import("wire_object.zig").WireObject;
-pub const called = @import("wire_object.zig").called;
+pub const WireObject = @import("WireObject.zig");
 
 pub const Method = struct {
     idx: u32 = 0,

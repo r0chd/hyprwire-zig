@@ -12,9 +12,13 @@ const TEST_PROTOCOL_VERSION: u32 = 1;
 const Client = struct {
     const Self = @This();
 
-    pub fn myManagerV1Listener(self: *Self, alloc: mem.Allocator, event: test_protocol.MyManagerV1Object.Event) void {
-        _ = alloc;
-        _ = self;
+    pub fn myManagerV1Listener(
+        self: *Self,
+        alloc: mem.Allocator,
+        proxy: *test_protocol.MyManagerV1Object,
+        event: test_protocol.MyManagerV1Object.Event,
+    ) void {
+        _ = .{ self, alloc, proxy };
         switch (event) {
             .send_message => |message| {
                 std.debug.print("Server says {s}\n", .{message.message});
@@ -25,9 +29,13 @@ const Client = struct {
         }
     }
 
-    pub fn myObjectV1Listener(self: *Self, alloc: mem.Allocator, event: test_protocol.MyObjectV1Object.Event) void {
-        _ = alloc;
-        _ = self;
+    pub fn myObjectV1Listener(
+        self: *Self,
+        alloc: mem.Allocator,
+        proxy: *test_protocol.MyObjectV1Object,
+        event: test_protocol.MyObjectV1Object.Event,
+    ) void {
+        _ = .{ self, alloc, proxy };
         switch (event) {
             .send_message => |message| {
                 std.debug.print("Server says on object {s}\n", .{message.message});
@@ -101,7 +109,7 @@ pub fn main(init: std.process.Init) !void {
     try socket.roundtrip(io, gpa);
 
     var object_arg = manager.sendMakeObject(io, gpa).?;
-    defer object_arg.vtable.deinit(object_arg.ptr, gpa);
+    defer object_arg.deinit(gpa);
     var object = try test_protocol.MyObjectV1Object.init(
         gpa,
         .from(&client),

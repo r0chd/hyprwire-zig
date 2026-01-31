@@ -8,8 +8,7 @@ const isTrace = helpers.isTrace;
 
 const types = @import("../implementation/types.zig");
 const Object = types.Object;
-const WireObject = types.WireObject;
-const wire_object = @import("../implementation/wire_object.zig");
+const WireObject = @import("../implementation/WireObject.zig");
 const Message = @import("../message/messages/Message.zig");
 const root = @import("../root.zig");
 const steadyMillis = root.steadyMillis;
@@ -216,10 +215,10 @@ pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
     }
 }
 
-pub fn onGeneric(self: *Self, io: Io, gpa: mem.Allocator, msg: Message.GenericProtocolMessage) (wire_object.Error || mem.Allocator.Error)!void {
+pub fn onGeneric(self: *Self, io: Io, gpa: mem.Allocator, msg: Message.GenericProtocolMessage) (WireObject.Error || mem.Allocator.Error)!void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
-            try types.called(WireObject.from(obj), io, gpa, msg.method, msg.data_span, msg.fds);
+            try WireObject.from(obj).called(io, gpa, msg.method, msg.data_span, msg.fds);
             break;
         }
     }
