@@ -53,7 +53,7 @@ pub fn main(init: std.process.Init) !void {
     defer socket.deinit(io, gpa);
 
     var impl = test_protocol.TestProtocolV1Impl.init(1);
-    try socket.addImplementation(gpa, types.client.ProtocolImplementation.from(&impl));
+    try socket.addImplementation(gpa, &impl);
 
     try socket.waitForHandshake(io, gpa);
 

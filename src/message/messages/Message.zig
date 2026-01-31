@@ -4,7 +4,6 @@ const fmt = std.fmt;
 const enums = std.enums;
 
 const MessageMagic = @import("hyprwire").MessageMagic;
-const Trait = @import("trait").Trait;
 
 const message_parser = @import("../MessageParser.zig");
 const MessageType = @import("../MessageType.zig").MessageType;

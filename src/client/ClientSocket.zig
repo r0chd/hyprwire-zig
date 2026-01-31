@@ -108,8 +108,14 @@ pub fn attemptFromFd(self: *Self, io: Io, gpa: mem.Allocator, raw_fd: i32) !void
     try self.sendMessage(io, gpa, &message.interface);
 }
 
-pub fn addImplementation(self: *Self, gpa: mem.Allocator, x: ProtocolImplementation) !void {
-    try self.impls.append(gpa, x);
+pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: anytype) !void {
+    const ImplPtr = @TypeOf(impl);
+    const impl_type_info = @typeInfo(ImplPtr);
+
+    if (impl_type_info != .pointer) {
+        @compileError("addImplementation() requires a pointer to an implementation, got: " ++ @typeName(ImplPtr));
+    }
+    try self.impls.append(gpa, ProtocolImplementation.from(impl));
 }
 
 pub fn waitForHandshake(self: *Self, io: Io, gpa: mem.Allocator) !void {

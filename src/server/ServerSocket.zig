@@ -11,7 +11,6 @@ const types = @import("../implementation/types.zig");
 const ProtocolServerImplementation = types.server.ProtocolImplementation;
 const message_parser = @import("../message/MessageParser.zig");
 const FatalError = @import("../message/messages/FatalProtocolError.zig");
-const Message = @import("../message/messages/Message.zig");
 const RoundtripDone = @import("../message/messages/RoundtripDone.zig");
 const root = @import("../root.zig");
 const steadyMillis = root.steadyMillis;

@@ -1,7 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 
-const Trait = @import("trait").Trait;
+const Trait = @import("helpers").Trait;
 
 const Object = @import("object.zig").Object;
 const ProtocolSpec = @import("types.zig").ProtocolSpec;

@@ -1,7 +1,7 @@
 const std = @import("std");
 const ProtocolSpec = @import("types.zig").ProtocolSpec;
 
-const Trait = @import("trait").Trait;
+const Trait = @import("helpers").Trait;
 const mem = std.mem;
 
 pub const ObjectImplementation = struct {

@@ -6,7 +6,7 @@ const mem = std.mem;
 const ServerClient = @import("../server/ServerClient.zig");
 const ClientSocket = @import("../client/ClientSocket.zig");
 const ServerSocket = @import("../server/ServerSocket.zig");
-const Trait = @import("trait").Trait;
+const Trait = @import("helpers").Trait;
 
 pub const Object = Trait(.{
     .call = fn (std.Io, mem.Allocator, u32, *types.Args) anyerror!u32,

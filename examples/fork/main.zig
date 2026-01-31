@@ -18,7 +18,7 @@ fn client(io: Io, gpa: mem.Allocator, fd: i32) !void {
     };
 
     var impl = test_protocol.client.TestProtocolV1Impl.init(1);
-    try sock.addImplementation(gpa, types.client.ProtocolImplementation.from(&impl));
+    try sock.addImplementation(gpa, &impl);
 
     std.debug.print("OK!\n", .{});
 

@@ -8,10 +8,6 @@
             .url = "git+https://github.com/ianprime0509/zig-xml#8874de5b846f4e3e806a062cd11a01b2bb90fc7a",
             .hash = "xml-0.2.0-ZTbP3wE6AgCsnyZut_plzxi6WB2tzzh3kFRBOp3AL7n9",
         },
-        .trait = .{
-            .url = "git+https://forgejo.r0chd.pl/r0chd/zig-interface?ref=0.16#4c4a4e16fc5e5a6c423e3a45423b5ebf22416353",
-            .hash = "trait-0.0.2-87cOXiqyAQBq5ZivgJW6qsJqSoqsDZzpk5MNAdzFB2Cb",
-        },
     },
     .paths = .{
         "scanner",

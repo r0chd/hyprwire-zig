@@ -38,11 +38,6 @@ pub fn build(b: *Build) void {
     exe_options.addOption([:0]const u8, "version", zon.version);
     exe_options.addOption(u32, "protocol_version", 1);
 
-    const trait_dep = b.dependency("trait", .{
-        .target = target,
-        .optimize = optimize,
-    });
-
     const helpers = b.addModule("helpers", .{
         .root_source_file = b.path("src/helpers/root.zig"),
         .target = target,
@@ -67,7 +62,6 @@ pub fn build(b: *Build) void {
     hyprwire.addImport("xml", xml.module("xml"));
     hyprwire.linkSystemLibrary("ffi", .{});
     hyprwire.addImport("helpers", helpers);
-    hyprwire.addImport("trait", trait_dep.module("trait"));
     hyprwire.addImport("protocols", protocols);
     hyprwire.addOptions("build_options", exe_options);
     hyprwire.addImport("hyprwire", hyprwire);

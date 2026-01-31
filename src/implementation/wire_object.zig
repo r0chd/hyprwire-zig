@@ -4,7 +4,7 @@ const mem = std.mem;
 
 const helpers = @import("helpers");
 const hyprwire = @import("hyprwire");
-const Trait = @import("trait").Trait;
+const Trait = @import("helpers").Trait;
 
 const message_parser = @import("../message/MessageParser.zig");
 const Message = @import("../message/messages/Message.zig");

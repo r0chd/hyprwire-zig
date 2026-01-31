@@ -1,11 +1,8 @@
 const std = @import("std");
 const mem = std.mem;
-const fmt = std.fmt;
-const xml = @import("xml");
 const Scanner = @import("./root.zig");
 const SCANNER_SIGNATURE = Scanner.SCANNER_SIGNATURE;
 const Document = Scanner.Document;
-const MessageMagic = Scanner.MessageMagic;
 const GenerateError = Scanner.GenerateError;
 const writeMethodHandler = Scanner.writeMethodHandler;
 

@@ -7,11 +7,13 @@ const MessageMagic = @import("hyprwire").MessageMagic;
 
 pub const FallbackAllocator = @import("FallbackAllocator.zig");
 pub const socket = @import("socket.zig");
+pub const Trait = @import("trait.zig").Trait;
 
 const c = @cImport({
     @cInclude("sys/socket.h");
     @cInclude("ffi.h");
 });
+
 pub fn isTrace() bool {
     // Holy moly I'm not going to ask user to pass
     // Environ.Map everytime I need to know if tracing
