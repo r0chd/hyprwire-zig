@@ -7,14 +7,14 @@ const helpers = @import("helpers");
 const isTrace = helpers.isTrace;
 
 const types = @import("../implementation/types.zig");
-const WireObject = types.WireObject;
 const Object = types.Object;
+const WireObject = types.WireObject;
+const wire_object = @import("../implementation/wire_object.zig");
 const Message = @import("../message/messages/Message.zig");
 const root = @import("../root.zig");
 const steadyMillis = root.steadyMillis;
 const ServerObject = @import("ServerObject.zig");
 const ServerSocket = @import("ServerSocket.zig");
-const wire_object = @import("../implementation/wire_object.zig");
 
 const c = @cImport(@cInclude("sys/socket.h"));
 
@@ -136,20 +136,20 @@ pub fn createObject(
     obj.version = version;
     self.objects.append(gpa, obj) catch return null;
 
-    var found_spec: ?types.ProtocolObjectSpec = null;
+    var found_spec: ?*const types.ProtocolObjectSpec = null;
     var protocol_name: []const u8 = "";
 
     for (self.server.?.impls.items) |impl| {
-        const protocol_spec = impl.vtable.protocol(impl.ptr);
-        if (!mem.eql(u8, protocol_spec.vtable.specName(protocol_spec.ptr), protocol)) continue;
+        const protocol_spec = impl.protocol();
+        if (!mem.eql(u8, protocol_spec.specName(), protocol)) continue;
 
-        for (protocol_spec.vtable.objects(protocol_spec.ptr)) |spec| {
-            if (object.len > 0 and !mem.eql(u8, spec.vtable.objectName(spec.ptr), object)) continue;
+        for (protocol_spec.objects()) |spec| {
+            if (object.len > 0 and !mem.eql(u8, spec.objectName(), object)) continue;
             found_spec = spec;
             break;
         }
 
-        protocol_name = protocol_spec.vtable.specName(protocol_spec.ptr);
+        protocol_name = protocol_spec.specName();
 
         if (found_spec == null) {
             log.err("[{} @ {}] Error: createObject has no spec", .{ self.stream.socket.handle, steadyMillis() });
@@ -157,8 +157,8 @@ pub fn createObject(
             return null;
         }
 
-        if (protocol_spec.vtable.specVer(protocol_spec.ptr) < version) {
-            log.err("[{} @ {}] Error: createObject for protocol {s} object {s} for version {}, but we have only {}", .{ self.stream.socket.handle, steadyMillis(), protocol_name, object, version, protocol_spec.vtable.specVer(protocol_spec.ptr) });
+        if (protocol_spec.specVer() < version) {
+            log.err("[{} @ {}] Error: createObject for protocol {s} object {s} for version {}, but we have only {}", .{ self.stream.socket.handle, steadyMillis(), protocol_name, object, version, protocol_spec.specVer() });
             self.@"error" = true;
             return null;
         }
@@ -188,10 +188,10 @@ pub fn createObject(
 pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
     const server = self.server orelse return;
     for (server.impls.items) |impl| {
-        const protocol = impl.vtable.protocol(impl.ptr);
-        if (!mem.eql(u8, protocol.vtable.specName(protocol.ptr), obj.protocol_name)) continue;
+        const protocol = impl.protocol();
+        if (!mem.eql(u8, protocol.specName(), obj.protocol_name)) continue;
 
-        const implementations = try impl.vtable.implementation(impl.ptr, gpa);
+        const implementations = try impl.implementation(gpa);
         defer {
             for (implementations) |implementation| {
                 gpa.destroy(implementation);
@@ -201,7 +201,7 @@ pub fn onBind(self: *Self, gpa: mem.Allocator, obj: *ServerObject) !void {
 
         for (implementations) |implementation| {
             const spec = obj.spec orelse continue;
-            if (!mem.eql(u8, implementation.object_name, spec.vtable.objectName(spec.ptr))) continue;
+            if (!mem.eql(u8, implementation.object_name, spec.objectName())) continue;
 
             if (implementation.onBind) |on_bind| {
                 const ctx = implementation.context orelse continue;

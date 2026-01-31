@@ -1,12 +1,11 @@
 const std = @import("std");
 const mem = std.mem;
-const fmt = std.fmt;
+
 const Scanner = @import("./root.zig");
 const SCANNER_SIGNATURE = Scanner.SCANNER_SIGNATURE;
 const Document = Scanner.Document;
 const GenerateError = Scanner.GenerateError;
 const writeMethodHandler = Scanner.writeMethodHandler;
-
 const ir = @import("ir.zig");
 const Protocol = ir.Protocol;
 const Object = ir.Object;
@@ -127,7 +126,7 @@ fn writeObjectStruct(writer: anytype, obj: Object, is_last: bool) !void {
 
     try writer.print(
         \\
-        \\    pub const Listener = hyprwire.Trait(.{{
+        \\    pub const Listener = hyprwire.reexports.Trait(.{{
         \\        .{s}Listener = fn (std.mem.Allocator, Event) void,
         \\    }}, null);
         \\
@@ -265,13 +264,17 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
 
 fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, obj_count: usize) !void {
     try writer.print(
-        \\pub const {s}Listener = hyprwire.Trait(.{{
+        \\pub const {s}Listener = hyprwire.reexports.Trait(.{{
         \\    .bind = fn (*types.Object) void,
         \\}}, null);
         \\
         \\pub const {s}Impl = struct {{
         \\    version: u32,
         \\    listener: {s}Listener,
+        \\    interface: types.server.ProtocolImplementation = .{{
+        \\        .protocolFn = Self.protocolFn,
+        \\        .implementationFn = Self.implementationFn,
+        \\    }},
         \\
         \\    const Self = @This();
         \\
@@ -288,14 +291,16 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
         \\        }};
         \\    }}
         \\
-        \\    pub fn protocol(_: *Self) types.ProtocolSpec {{
-        \\        return types.ProtocolSpec.from(&spec.{s}ProtocolSpec{{}});
+        \\    pub fn protocolFn(_: *const types.server.ProtocolImplementation) *const types.ProtocolSpec {{
+        \\        return &(spec.{s}ProtocolSpec{{}}).interface;
         \\    }}
         \\
-        \\    pub fn implementation(
-        \\        self: *Self,
+        \\    pub fn implementationFn(
+        \\        ptr: *const types.server.ProtocolImplementation,
         \\        gpa: std.mem.Allocator,
         \\    ) ![]*server.ObjectImplementation {{
+        \\        const self: *const Self = @fieldParentPtr("interface", ptr);
+        \\
         \\        const impls = try gpa.alloc(*server.ObjectImplementation, {});
         \\        errdefer gpa.free(impls);
         \\

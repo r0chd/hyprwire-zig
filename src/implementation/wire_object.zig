@@ -52,7 +52,7 @@ pub fn called(
     defer arena.deinit();
     var buffer: [65_536]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    var fallback_allocator = hyprwire.FallbackAllocator{
+    var fallback_allocator = helpers.FallbackAllocator{
         .fba = &fba,
         .fixed = fba.allocator(),
         .fallback = arena.allocator(),

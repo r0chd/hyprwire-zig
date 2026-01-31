@@ -31,7 +31,7 @@ pub const Error = error{
 data: []const u8,
 len: usize,
 message_type: MessageType = .invalid,
-fdsFn: *const fn (ptr: *const Self) []const i32 = defaultGetFds,
+fdsFn: *const fn (*const Self) []const i32 = defaultGetFds,
 
 const Self = @This();
 

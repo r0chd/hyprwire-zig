@@ -152,8 +152,8 @@ fn parseSingleMessageServer(
                     protocol_names.deinit(gpa);
                 }
                 for (client.server.?.impls.items) |impl| {
-                    var protocol = impl.vtable.protocol(impl.ptr);
-                    protocol_names.appendAssumeCapacity(try fmt.allocPrintSentinel(gpa, "{s}@{}", .{ protocol.vtable.specName(protocol.ptr), protocol.vtable.specVer(protocol.ptr) }, 0));
+                    var protocol = impl.protocol();
+                    protocol_names.appendAssumeCapacity(try fmt.allocPrintSentinel(gpa, "{s}@{}", .{ protocol.specName(), protocol.specVer() }, 0));
                 }
                 var message = try Message.HandshakeProtocols.init(gpa, protocol_names.items);
                 defer message.deinit(gpa);

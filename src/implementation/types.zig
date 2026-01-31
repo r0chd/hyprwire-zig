@@ -1,14 +1,11 @@
 const std = @import("std");
 const mem = std.mem;
 
-const Trait = @import("helpers").Trait;
-
 pub const client = @import("client_impl.zig");
 pub const Object = @import("object.zig").Object;
 pub const server = @import("server_impl.zig");
-const wire_object = @import("wire_object.zig");
-pub const WireObject = wire_object.WireObject;
-pub const called = wire_object.called;
+pub const WireObject = @import("wire_object.zig").WireObject;
+pub const called = @import("wire_object.zig").called;
 
 pub const Method = struct {
     idx: u32 = 0,
@@ -17,18 +14,50 @@ pub const Method = struct {
     since: u32 = 0,
 };
 
-pub const ProtocolObjectSpec = Trait(.{
-    .objectName = fn () []const u8,
-    .c2s = fn () []const Method,
-    .s2c = fn () []const Method,
-}, null);
+pub const ProtocolObjectSpec = struct {
+    objectNameFn: *const fn (*const Self) []const u8,
+    c2sFn: *const fn (*const Self) []const Method,
+    s2cFn: *const fn (*const Self) []const Method,
 
-pub const ProtocolSpec = Trait(.{
-    .specName = fn () []const u8,
-    .specVer = fn () u32,
-    .objects = fn () []const ProtocolObjectSpec,
-    .deinit = fn (mem.Allocator) void,
-}, null);
+    const Self = @This();
+
+    pub fn objectName(self: *const Self) []const u8 {
+        return self.objectNameFn(self);
+    }
+
+    pub fn c2s(self: *const Self) []const Method {
+        return self.c2sFn(self);
+    }
+
+    pub fn s2c(self: *const Self) []const Method {
+        return self.s2cFn(self);
+    }
+};
+
+pub const ProtocolSpec = struct {
+    specNameFn: *const fn (*const Self) []const u8,
+    specVerFn: *const fn (*const Self) u32,
+    objectsFn: *const fn (*const Self) []const *const ProtocolObjectSpec,
+    deinitFn: *const fn (*Self, mem.Allocator) void,
+
+    const Self = @This();
+
+    pub fn specName(self: *const Self) []const u8 {
+        return self.specNameFn(self);
+    }
+
+    pub fn specVer(self: *const Self) u32 {
+        return self.specVerFn(self);
+    }
+
+    pub fn objects(self: *const Self) []const *const ProtocolObjectSpec {
+        return self.objectsFn(self);
+    }
+
+    pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+        return self.deinitFn(self, gpa);
+    }
+};
 
 pub const Args = struct {
     args: []const Arg,

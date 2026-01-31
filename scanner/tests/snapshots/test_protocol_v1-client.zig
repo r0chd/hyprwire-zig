@@ -1,4 +1,4 @@
-// Generated with hyprwire-scanner 0.2.1. Made with pure malice and hatred by r0chd.
+// Generated with hyprwire-scanner-zig 0.2.1. Made with pure malice and hatred by r0chd.
 // test_protocol_v1
 
 //
@@ -18,7 +18,7 @@ fn myManagerV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) vo
     defer _ = object.arena.reset(.retain_capacity);
     var buffer: [32_768]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    var fallback_allocator = hyprwire.FallbackAllocator{
+    var fallback_allocator = hyprwire.reexports.FallbackAllocator{
         .fba = &fba,
         .fixed = fba.allocator(),
         .fallback = object.arena.allocator(),
@@ -37,7 +37,7 @@ fn myManagerV1_method1(r: *types.Object, message: [*]const u32, message_len: u32
     defer _ = object.arena.reset(.retain_capacity);
     var buffer: [32_768]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    var fallback_allocator = hyprwire.FallbackAllocator{
+    var fallback_allocator = hyprwire.reexports.FallbackAllocator{
         .fba = &fba,
         .fixed = fba.allocator(),
         .fallback = object.arena.allocator(),
@@ -60,7 +60,7 @@ pub const MyManagerV1Object = struct {
         },
     };
 
-    pub const Listener = hyprwire.Trait(.{
+    pub const Listener = hyprwire.reexports.Trait(.{
         .myManagerV1Listener = fn (std.mem.Allocator, Event) void,
     }, null);
 
@@ -153,7 +153,7 @@ fn myObjectV1_method0(r: *types.Object, message: [*:0]const u8) callconv(.c) voi
     defer _ = object.arena.reset(.retain_capacity);
     var buffer: [32_768]u8 = undefined;
     var fba = std.heap.FixedBufferAllocator.init(&buffer);
-    var fallback_allocator = hyprwire.FallbackAllocator{
+    var fallback_allocator = hyprwire.reexports.FallbackAllocator{
         .fba = &fba,
         .fixed = fba.allocator(),
         .fallback = object.arena.allocator(),
@@ -173,7 +173,7 @@ pub const MyObjectV1Object = struct {
         },
     };
 
-    pub const Listener = hyprwire.Trait(.{
+    pub const Listener = hyprwire.reexports.Trait(.{
         .myObjectV1Listener = fn (std.mem.Allocator, Event) void,
     }, null);
 
@@ -243,21 +243,27 @@ pub const MyObjectV1Object = struct {
 
 pub const TestProtocolV1Impl = struct {
     version: u32,
+    interface: types.client.ProtocolImplementation = .{
+        .protocolFn = Self.protocolFn,
+        .implementationFn = Self.implementationFn,
+    },
 
     const Self = @This();
+
     pub fn init(version: u32) Self {
         return .{ .version = version };
     }
 
-    pub fn protocol(self: *Self) types.ProtocolSpec {
-        _ = self;
-        return types.ProtocolSpec.from(&spec.protocol);
+    pub fn protocolFn(_: *const types.client.ProtocolImplementation) *const types.ProtocolSpec {
+        return &(spec.TestProtocolV1ProtocolSpec{}).interface;
     }
 
-    pub fn implementation(
-        self: *Self,
+    pub fn implementationFn(
+        ptr: *const types.client.ProtocolImplementation,
         gpa: std.mem.Allocator,
     ) ![]*client.ObjectImplementation {
+        const self: *const Self = @fieldParentPtr("interface", ptr);
+
         const impls = try gpa.alloc(*client.ObjectImplementation, 2);
         errdefer gpa.free(impls);
 

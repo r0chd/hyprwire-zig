@@ -8,7 +8,7 @@ const Fd = helpers.Fd;
 const isTrace = helpers.isTrace;
 
 const types = @import("../implementation/types.zig");
-const ProtocolServerImplementation = types.server.ProtocolImplementation;
+const ProtocolImplementation = types.server.ProtocolImplementation;
 const message_parser = @import("../message/MessageParser.zig");
 const FatalError = @import("../message/messages/FatalProtocolError.zig");
 const RoundtripDone = @import("../message/messages/RoundtripDone.zig");
@@ -30,7 +30,7 @@ wakeup_fd: Fd,
 wakeup_write_fd: Fd,
 pollfds: std.ArrayList(posix.pollfd) = .empty,
 clients: std.ArrayList(*ServerClient) = .empty,
-impls: std.ArrayList(ProtocolServerImplementation) = .empty,
+impls: std.ArrayList(*const ProtocolImplementation) = .empty,
 thread_can_poll: bool = false,
 poll_thread: ?std.Thread = null,
 poll_mtx: std.Thread.Mutex.Recursive = .init,
@@ -123,7 +123,7 @@ pub fn attemptEmpty(self: *Self) !void {
     self.is_empty_listener = true;
 }
 
-pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: ProtocolServerImplementation) !void {
+pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: *const ProtocolImplementation) !void {
     try self.impls.append(gpa, impl);
 }
 
@@ -369,6 +369,7 @@ pub fn dispatchClient(self: *Self, io: Io, gpa: mem.Allocator, client: *ServerCl
 
     message_parser.handleMessage(io, gpa, &data, .{ .server = client }) catch {
         var fatal_msg = try FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire");
+        defer fatal_msg.deinit(gpa);
         client.sendMessage(io, gpa, &fatal_msg.interface);
         client.@"error" = true;
         return;

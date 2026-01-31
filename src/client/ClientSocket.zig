@@ -24,8 +24,8 @@ const log = std.log.scoped(.hw);
 const HANDSHAKE_MAX_MS: i64 = 5000;
 
 stream: Io.net.Stream,
-impls: std.ArrayList(ProtocolImplementation) = .empty,
-server_specs: std.ArrayList(ProtocolSpec) = .empty,
+impls: std.ArrayList(*const ProtocolImplementation) = .empty,
+server_specs: std.ArrayList(*ProtocolSpec) = .empty,
 pollfds: std.ArrayList(posix.pollfd) = .empty,
 objects: std.ArrayList(*ClientObject) = .empty,
 handshake_begin: std.time.Instant,
@@ -67,7 +67,7 @@ pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
     }
     self.pending_socket_data.deinit(gpa);
     for (self.server_specs.items) |object| {
-        object.vtable.deinit(object.ptr, gpa);
+        object.deinit(gpa);
     }
     self.server_specs.deinit(gpa);
     self.objects.deinit(gpa);
@@ -108,14 +108,8 @@ pub fn attemptFromFd(self: *Self, io: Io, gpa: mem.Allocator, raw_fd: i32) !void
     try self.sendMessage(io, gpa, &message.interface);
 }
 
-pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: anytype) !void {
-    const ImplPtr = @TypeOf(impl);
-    const impl_type_info = @typeInfo(ImplPtr);
-
-    if (impl_type_info != .pointer) {
-        @compileError("addImplementation() requires a pointer to an implementation, got: " ++ @typeName(ImplPtr));
-    }
-    try self.impls.append(gpa, ProtocolImplementation.from(impl));
+pub fn addImplementation(self: *Self, gpa: mem.Allocator, impl: *const ProtocolImplementation) !void {
+    try self.impls.append(gpa, impl);
 }
 
 pub fn waitForHandshake(self: *Self, io: Io, gpa: mem.Allocator) !void {
@@ -134,9 +128,9 @@ pub fn isHandshakeDone(self: *const Self) bool {
     return self.handshake_done;
 }
 
-pub fn getSpec(self: *Self, name: []const u8) ?ProtocolSpec {
+pub fn getSpec(self: *Self, name: []const u8) ?*ProtocolSpec {
     for (self.server_specs.items) |s| {
-        if (mem.eql(u8, s.vtable.specName(s.ptr), name)) return s;
+        if (mem.eql(u8, s.specName(), name)) return s;
     }
 
     return null;
@@ -155,26 +149,26 @@ pub fn bindProtocol(
     self: *Self,
     io: Io,
     gpa: mem.Allocator,
-    spec: ProtocolSpec,
+    spec: *const ProtocolSpec,
     version: u32,
 ) !*ClientObject {
-    if (version > spec.vtable.specVer(spec.ptr)) {
-        log.debug("version {} is larger than current spec ver of {}", .{ version, spec.vtable.specVer(spec.ptr) });
+    if (version > spec.specVer()) {
+        log.debug("version {} is larger than current spec ver of {}", .{ version, spec.specVer() });
         self.disconnectOnError(io);
         return error.VersionMismatch;
     }
 
     const object = try gpa.create(ClientObject);
     object.* = ClientObject.init(self);
-    const objects = spec.vtable.objects(spec.ptr);
+    const objects = spec.objects();
     object.spec = objects[0];
     self.seq += 1;
     object.seq = self.seq;
     object.version = version;
-    object.protocol_name = spec.vtable.specName(spec.ptr);
+    object.protocol_name = spec.specName();
     try self.objects.append(gpa, object);
 
-    const spec_name = spec.vtable.specName(spec.ptr);
+    const spec_name = spec.specName();
     var bind_message = try Message.BindProtocol.init(gpa, spec_name, object.seq, version);
     defer bind_message.deinit(gpa);
     try self.sendMessage(io, gpa, &bind_message.interface);
@@ -190,11 +184,11 @@ pub fn makeObject(self: *Self, gpa: mem.Allocator, protocol_name: []const u8, ob
     object.protocol_name = protocol_name;
 
     for (self.impls.items) |impl| {
-        var protocol = impl.vtable.protocol(impl.ptr);
-        if (!mem.eql(u8, protocol.vtable.specName(protocol.ptr), protocol_name)) continue;
+        var protocol = impl.protocol();
+        if (!mem.eql(u8, protocol.specName(), protocol_name)) continue;
 
-        for (protocol.vtable.objects(protocol.ptr)) |obj| {
-            if (!mem.eql(u8, obj.vtable.objectName(obj.ptr), object_name)) continue;
+        for (protocol.objects()) |obj| {
+            if (!mem.eql(u8, obj.objectName(), object_name)) continue;
 
             object.spec = obj;
             break;
@@ -304,14 +298,7 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
 pub fn onGeneric(self: *const Self, io: Io, gpa: mem.Allocator, msg: Message.GenericProtocolMessage) !void {
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
-            try types.called(
-                WireObject.from(obj),
-                io,
-                gpa,
-                msg.method,
-                msg.data_span,
-                msg.fds,
-            );
+            try types.called(WireObject.from(obj), io, gpa, msg.method, msg.data_span, msg.fds);
             break;
         }
     }
@@ -387,7 +374,7 @@ fn serverSpecsInner(self: *Self, gpa: mem.Allocator, specs: []const []const u8) 
         const at_pos = mem.lastIndexOfScalar(u8, spec, '@') orelse return error.ParseError;
 
         const s = try ServerSpec.init(gpa, spec[0..at_pos], try fmt.parseInt(u32, spec[at_pos + 1 ..], 10));
-        try self.server_specs.append(gpa, ProtocolSpec.from(s));
+        try self.server_specs.append(gpa, &s.interface);
     }
 }
 

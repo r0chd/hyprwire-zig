@@ -19,7 +19,7 @@ const Server = struct {
     pub fn bind(self: *Self, object: *hw.types.Object) void {
         std.debug.print("Object bound XD\n", .{});
 
-        var manager = test_protocol.MyManagerV1Object.init(self.alloc, test_protocol.MyManagerV1Object.Listener.from(self), object) catch return;
+        var manager = test_protocol.MyManagerV1Object.init(self.alloc, .from(self), object) catch return;
         manager.sendSendMessage(self.io, self.alloc, "Hello object") catch {};
 
         self.manager = manager;
@@ -75,9 +75,9 @@ const Server = struct {
                     seq.seq,
                 ).?;
 
-                self.object_handle = hw.types.Object.from(server_object);
+                self.object_handle = .from(server_object);
 
-                var object = test_protocol.MyObjectV1Object.init(self.alloc, test_protocol.MyObjectV1Object.Listener.from(self), &self.object_handle.?) catch return;
+                var object = test_protocol.MyObjectV1Object.init(self.alloc, .from(self), &self.object_handle.?) catch return;
                 object.sendSendMessage(self.io, alloc, "Hello object") catch return;
                 self.object = object;
             },
@@ -136,9 +136,8 @@ pub fn main(init: std.process.Init) !void {
     };
     defer server.deinit();
 
-    const spec = test_protocol.TestProtocolV1Impl.init(1, test_protocol.TestProtocolV1Listener.from(&server));
-    const pro = hw.types.server.ProtocolImplementation.from(&spec);
-    try socket.addImplementation(gpa, pro);
+    const spec = test_protocol.TestProtocolV1Impl.init(1, .from(&server));
+    try socket.addImplementation(gpa, &spec.interface);
 
     while (socket.dispatchEvents(io, gpa, true) catch false) {}
 }

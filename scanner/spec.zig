@@ -111,17 +111,25 @@ fn writeObjectSpec(writer: anytype, gpa: mem.Allocator, obj: Object) !void {
     try writer.print("    }},\n\n", .{});
 
     try writer.print(
+        \\    interface: types.ProtocolObjectSpec = .{{
+        \\        .objectNameFn = Self.objectNameFn,
+        \\        .c2sFn = Self.c2sFn,
+        \\        .s2cFn = Self.s2cFn,
+        \\    }},
+        \\
         \\    const Self = @This();
         \\
-        \\    pub fn objectName(_: *const Self) []const u8 {{
+        \\    pub fn objectNameFn(_: *const types.ProtocolObjectSpec) []const u8 {{
         \\        return "{s}";
         \\    }}
         \\
-        \\    pub fn c2s(self: *const Self) []const types.Method {{
+        \\    pub fn c2sFn(ptr: *const types.ProtocolObjectSpec) []const types.Method {{
+        \\        const self: *const Self = @fieldParentPtr("interface", ptr);
         \\        return self.c2s_methods;
         \\    }}
         \\
-        \\    pub fn s2c(self: *const Self) []const types.Method {{
+        \\    pub fn s2cFn(ptr: *const types.ProtocolObjectSpec) []const types.Method {{
+        \\        const self: *const Self = @fieldParentPtr("interface", ptr);
         \\        return self.s2c_methods;
         \\    }}
         \\}};
@@ -176,24 +184,33 @@ fn writeProtocolSpec(writer: anytype, protocol: Protocol, selected: ?ObjectSet) 
         }
         try writer.print("    {s}: {s}Spec = .{{}},\n", .{ obj.name_camel, obj.name_pascal });
     }
+    try writer.print(
+        \\    interface: types.ProtocolSpec = .{{
+        \\        .deinitFn = Self.deinitFn,
+        \\        .objectsFn = Self.objectsFn,
+        \\        .specNameFn = Self.specNameFn,
+        \\        .specVerFn = Self.specVerFn,
+        \\    }},
+        \\
+    , .{});
 
     try writer.print(
         \\
         \\    const Self = @This();
         \\
-        \\    pub fn specName(_: *const Self) []const u8 {{
+        \\    pub fn specNameFn(_: *const types.ProtocolSpec) []const u8 {{
         \\        return "{s}";
         \\    }}
         \\
-        \\    pub fn specVer(_: *const Self) u32 {{
+        \\    pub fn specVerFn(_: *const types.ProtocolSpec) u32 {{
         \\        return {};
         \\    }}
         \\
-        \\    pub fn objects(_: *const Self) []const types.ProtocolObjectSpec {{
+        \\    pub fn objectsFn(_: *const types.ProtocolSpec) []const *const types.ProtocolObjectSpec {{
         \\        return protocol_objects[0..];
         \\    }}
         \\
-        \\    pub fn deinit(_: *Self, _: std.mem.Allocator) void {{}}
+        \\    pub fn deinitFn(_: *types.ProtocolSpec, _: std.mem.Allocator) void {{}}
         \\
     , .{ protocol.name, protocol.version });
 
@@ -202,7 +219,7 @@ fn writeProtocolSpec(writer: anytype, protocol: Protocol, selected: ?ObjectSet) 
         \\
         \\pub const protocol = {s}ProtocolSpec{{}};
         \\
-        \\pub const protocol_objects: [{}]types.ProtocolObjectSpec = .{{
+        \\pub const protocol_objects: [{}]*const types.ProtocolObjectSpec = .{{
         \\
     , .{ protocol.name_pascal, obj_count });
 
@@ -210,7 +227,7 @@ fn writeProtocolSpec(writer: anytype, protocol: Protocol, selected: ?ObjectSet) 
         if (selected) |sel| {
             if (!sel.contains(obj.name)) continue;
         }
-        try writer.print("    types.ProtocolObjectSpec.from(&protocol.{s}),\n", .{obj.name_camel});
+        try writer.print("    &protocol.{s}.interface,\n", .{obj.name_camel});
     }
 
     try writer.print("}};\n", .{});

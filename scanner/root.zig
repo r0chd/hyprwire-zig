@@ -1,18 +1,19 @@
 const std = @import("std");
 const mem = std.mem;
-const xml = @import("xml");
 const build_options = @import("build_options");
 const version = build_options.version;
 
-/// Scanner signature - easily editable for customization
-pub const SCANNER_SIGNATURE = "Generated with hyprwire-scanner " ++ version ++ ". Made with pure malice and hatred by r0chd.";
+const xml = @import("xml");
 
+pub const generateClientCodeForGlobal = @import("client.zig").generateClientCodeForGlobal;
+pub const generateServerCodeForGlobal = @import("server.zig").generateServerCodeForGlobal;
+pub const generateSpecCodeForGlobal = @import("spec.zig").generateSpecCodeForGlobal;
 pub const ir = @import("ir.zig");
 const Object = ir.Object;
 const Method = ir.Method;
-pub const generateClientCodeForGlobal = @import("client.zig").generateClientCodeForGlobal;
-pub const generateSpecCodeForGlobal = @import("spec.zig").generateSpecCodeForGlobal;
-pub const generateServerCodeForGlobal = @import("server.zig").generateServerCodeForGlobal;
+
+/// Scanner signature - easily editable for customization
+pub const SCANNER_SIGNATURE = "Generated with hyprwire-scanner-zig " ++ version ++ ". Made with pure malice and hatred by r0chd.";
 
 pub const MessageMagic = enum(u8) {
     /// Signifies an end of a message
@@ -160,7 +161,7 @@ pub fn writeMethodHandler(writer: anytype, obj: Object, method: Method, idx: usi
         \\    defer _ = object.arena.reset(.retain_capacity);
         \\    var buffer: [32_768]u8 = undefined;
         \\    var fba = std.heap.FixedBufferAllocator.init(&buffer);
-        \\    var fallback_allocator = hyprwire.FallbackAllocator{{
+        \\    var fallback_allocator = hyprwire.reexports.FallbackAllocator{{
         \\        .fba = &fba,
         \\        .fixed = fba.allocator(),
         \\        .fallback = object.arena.allocator(),

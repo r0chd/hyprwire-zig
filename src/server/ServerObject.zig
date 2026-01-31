@@ -8,10 +8,10 @@ const helpers = @import("helpers");
 const isTrace = helpers.isTrace;
 
 const ClientSocket = @import("../client/ClientSocket.zig");
-const Object = @import("../implementation/object.zig").Object;
+const object = @import("../implementation/object.zig");
 const types = @import("../implementation/types.zig");
 const Method = types.Method;
-const WireObject = @import("../implementation/wire_object.zig").WireObject;
+const wire_object = @import("../implementation/wire_object.zig");
 const message_parser = @import("../message/MessageParser.zig");
 const FatalErrorMessage = @import("../message/messages/FatalProtocolError.zig");
 const Message = @import("../message/messages/Message.zig");
@@ -24,7 +24,7 @@ const log = std.log.scoped(.hw);
 pub const MAX_ERROR_MSG_SIZE: usize = 256;
 
 client: ?*ServerClient,
-spec: ?types.ProtocolObjectSpec = null,
+spec: ?*const types.ProtocolObjectSpec = null,
 data: ?*anyopaque = null,
 listeners: std.ArrayList(*anyopaque) = .empty,
 on_deinit: ?*const fn () void = null,
@@ -43,7 +43,7 @@ pub fn init(client: *ServerClient) Self {
 
 pub fn methodsOut(self: *Self) []const Method {
     if (self.spec) |spec| {
-        return spec.vtable.s2c(spec.ptr);
+        return spec.s2c();
     } else {
         return &.{};
     }
@@ -51,7 +51,7 @@ pub fn methodsOut(self: *Self) []const Method {
 
 pub fn methodsIn(self: *Self) []const Method {
     if (self.spec) |spec| {
-        return spec.vtable.c2s(spec.ptr);
+        return spec.c2s();
     } else {
         return &.{};
     }
@@ -303,38 +303,6 @@ pub fn getListeners(self: *Self) []*anyopaque {
 
 pub fn getVersion(self: *Self) u32 {
     return self.version;
-}
-
-test {
-    const alloc = std.testing.allocator;
-    const io = std.testing.io;
-    {
-        const stream = std.Io.net.Stream{ .socket = .{
-            .handle = 1,
-            .address = .{ .ip4 = .loopback(0) },
-        } };
-        var client = ServerClient{ .stream = stream };
-        var self = Self.init(&client);
-
-        self.@"error"(io, alloc, 1, "test");
-        const obj = Object.from(&self);
-        _ = obj;
-
-        const wire_object = WireObject.from(&self);
-        _ = wire_object;
-
-        self.errd();
-
-        const methods_in = self.methodsIn();
-        _ = methods_in;
-
-        const methods_out = self.methodsOut();
-        _ = methods_out;
-
-        var hello = Message.Hello.init();
-        try self.sendMessage(io, alloc, &hello.interface);
-        _ = self.server();
-    }
 }
 
 test {

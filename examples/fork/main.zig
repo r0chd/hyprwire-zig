@@ -7,7 +7,6 @@ const mem = std.mem;
 
 const hw = @import("hyprwire");
 const test_protocol = hw.proto.test_protocol_v1;
-const types = hw.types;
 
 fn client(io: Io, gpa: mem.Allocator, fd: i32) !void {
     const sock = try hw.ClientSocket.open(io, gpa, .{ .fd = fd });
@@ -18,17 +17,17 @@ fn client(io: Io, gpa: mem.Allocator, fd: i32) !void {
     };
 
     var impl = test_protocol.client.TestProtocolV1Impl.init(1);
-    try sock.addImplementation(gpa, &impl);
+    try sock.addImplementation(gpa, &impl.interface);
 
     std.debug.print("OK!\n", .{});
 
-    var protocol = impl.protocol();
-    const SPEC = sock.getSpec(protocol.vtable.specName(protocol.ptr)) orelse {
+    var protocol = impl.interface.protocol();
+    const SPEC = sock.getSpec(protocol.specName()) orelse {
         std.debug.print("err: test protocol unsupported\n", .{});
         return;
     };
 
-    std.debug.print("test protocol supported at version {}. Binding.\n", .{SPEC.vtable.specVer(SPEC.ptr)});
+    std.debug.print("test protocol supported at version {}. Binding.\n", .{SPEC.specVer()});
 
     var obj = try sock.bindProtocol(io, gpa, protocol, 1);
     defer obj.deinit(gpa);

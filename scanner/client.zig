@@ -115,7 +115,7 @@ fn writeObjectStruct(writer: anytype, obj: Object, use_short_init: bool) !void {
     try writer.print("    }};\n\n", .{});
 
     try writer.print(
-        \\    pub const Listener = hyprwire.Trait(.{{
+        \\    pub const Listener = hyprwire.reexports.Trait(.{{
         \\        .{s}Listener = fn (std.mem.Allocator, Event) void,
         \\    }}, null);
         \\
@@ -283,8 +283,13 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
     try writer.print(
         \\pub const {s}Impl = struct {{
         \\    version: u32,
+        \\    interface: types.client.ProtocolImplementation = .{{
+        \\        .protocolFn = Self.protocolFn,
+        \\        .implementationFn = Self.implementationFn,
+        \\    }},
         \\
         \\    const Self = @This();
+        \\
         \\
     , .{protocol.name_pascal});
 
@@ -293,15 +298,16 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
         \\        return .{{ .version = version }};
         \\    }}
         \\
-        \\    pub fn protocol(self: *Self) types.ProtocolSpec {{
-        \\        _ = self;
-        \\        return types.ProtocolSpec.from(&spec.protocol);
+        \\    pub fn protocolFn(_: *const types.client.ProtocolImplementation) *const types.ProtocolSpec {{
+        \\        return &(spec.TestProtocolV1ProtocolSpec{{}}).interface;
         \\    }}
         \\
-        \\    pub fn implementation(
-        \\        self: *Self,
+        \\    pub fn implementationFn(
+        \\        ptr: *const types.client.ProtocolImplementation,
         \\        gpa: std.mem.Allocator,
         \\    ) ![]*client.ObjectImplementation {{
+        \\        const self: *const Self = @fieldParentPtr("interface", ptr);
+        \\
         \\        const impls = try gpa.alloc(*client.ObjectImplementation, {});
         \\        errdefer gpa.free(impls);
         \\

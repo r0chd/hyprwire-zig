@@ -19,7 +19,7 @@ const ClientSocket = @import("ClientSocket.zig");
 
 const log = std.log.scoped(.hw);
 client: ?*ClientSocket,
-spec: ?types.ProtocolObjectSpec = null,
+spec: ?*const types.ProtocolObjectSpec = null,
 data: ?*anyopaque = null,
 listeners: std.ArrayList(*anyopaque) = .empty,
 on_deinit: ?*const fn () void = null,
@@ -64,7 +64,7 @@ pub fn setOnDeinit(self: *Self, cb: *const fn () void) void {
 
 pub fn methodsOut(self: *Self) []const Method {
     if (self.spec) |spec| {
-        return spec.vtable.c2s(spec.ptr);
+        return spec.c2s();
     } else {
         return &.{};
     }
@@ -72,7 +72,7 @@ pub fn methodsOut(self: *Self) []const Method {
 
 pub fn methodsIn(self: *Self) []const Method {
     if (self.spec) |spec| {
-        return spec.vtable.s2c(spec.ptr);
+        return spec.s2c();
     } else {
         return &.{};
     }

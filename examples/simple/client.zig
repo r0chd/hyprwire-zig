@@ -5,7 +5,6 @@ const mem = std.mem;
 const Io = std.Io;
 
 const hw = @import("hyprwire");
-const types = hw.types;
 const test_protocol = hw.proto.test_protocol_v1.client;
 
 const TEST_PROTOCOL_VERSION: u32 = 1;
@@ -53,17 +52,17 @@ pub fn main(init: std.process.Init) !void {
     defer socket.deinit(io, gpa);
 
     var impl = test_protocol.TestProtocolV1Impl.init(1);
-    try socket.addImplementation(gpa, &impl);
+    try socket.addImplementation(gpa, &impl.interface);
 
     try socket.waitForHandshake(io, gpa);
 
-    var protocol = impl.protocol();
-    const SPEC = socket.getSpec(protocol.vtable.specName(protocol.ptr)) orelse {
+    var protocol = impl.interface.protocol();
+    const SPEC = socket.getSpec(protocol.specName()) orelse {
         std.debug.print("err: test protocol unsupported\n", .{});
         std.process.exit(1);
     };
 
-    std.debug.print("test protocol supported at version {}. Binding.\n", .{SPEC.vtable.specVer(SPEC.ptr)});
+    std.debug.print("test protocol supported at version {}. Binding.\n", .{SPEC.specVer()});
 
     var client = Client{};
 
@@ -71,8 +70,8 @@ pub fn main(init: std.process.Init) !void {
     defer obj.deinit(gpa);
     var manager = try test_protocol.MyManagerV1Object.init(
         gpa,
-        test_protocol.MyManagerV1Object.Listener.from(&client),
-        &types.Object.from(obj),
+        .from(&client),
+        &.from(obj),
     );
     defer manager.deinit(gpa);
 
@@ -103,7 +102,11 @@ pub fn main(init: std.process.Init) !void {
 
     var object_arg = manager.sendMakeObject(io, gpa).?;
     defer object_arg.vtable.deinit(object_arg.ptr, gpa);
-    var object = try test_protocol.MyObjectV1Object.init(gpa, test_protocol.MyObjectV1Object.Listener.from(&client), &object_arg);
+    var object = try test_protocol.MyObjectV1Object.init(
+        gpa,
+        .from(&client),
+        &object_arg,
+    );
     defer object.deinit(gpa);
 
     try object.sendSendMessage(io, gpa, "Hello on object");

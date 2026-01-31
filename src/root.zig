@@ -3,9 +3,10 @@ const time = std.time;
 
 pub const proto = @import("protocols");
 
-// Reexports for codegen
-pub const FallbackAllocator = @import("helpers").FallbackAllocator;
-pub const Trait = @import("helpers").Trait;
+pub const reexports = struct {
+    pub const FallbackAllocator = @import("helpers").FallbackAllocator;
+    pub const Trait = @import("helpers").Trait;
+};
 
 pub const ClientSocket = @import("client/ClientSocket.zig");
 pub const ServerSocket = @import("server/ServerSocket.zig");
