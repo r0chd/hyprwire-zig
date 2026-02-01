@@ -36,7 +36,7 @@ pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
         log.debug("[{}] destroying client", .{self.stream.socket.handle});
     }
     for (self.objects.items) |object| {
-        object.deinit(gpa);
+        object.asObject().deinit(gpa);
         gpa.destroy(object);
     }
     self.objects.deinit(gpa);
@@ -113,7 +113,25 @@ pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: *Mess
         }
     }
 
-    _ = c.sendmsg(self.stream.socket.handle, &msg, 0);
+    while (self.stream.socket.handle >= 0) {
+        const ret = c.sendmsg(self.stream.socket.handle, &msg, 0);
+        if (ret < 0) {
+            const err = std.posix.errno(ret);
+
+            if (err == .AGAIN) {
+                const pfd = posix.pollfd{
+                    .fd = self.stream.socket.handle,
+                    .events = posix.POLL.OUT,
+                    .revents = 0,
+                };
+                var pfds = [_]posix.pollfd{pfd};
+
+                _ = posix.poll(&pfds, -1) catch {};
+                continue;
+            }
+        }
+        break;
+    }
 }
 
 pub fn createObject(
@@ -219,9 +237,11 @@ pub fn onGeneric(self: *Self, io: Io, gpa: mem.Allocator, msg: Message.GenericPr
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
             try WireObject.from(obj).called(io, gpa, msg.method, msg.data_span, msg.fds);
-            break;
+            return;
         }
     }
+
+    log.debug("[{} @ {}] -> Generic message not handled. No object with id {}!", .{ self.stream.socket.handle, steadyMillis(), msg.object });
 }
 
 pub fn getPid(self: *const Self) i32 {

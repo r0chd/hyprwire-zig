@@ -214,15 +214,16 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
     if (method.returns_type.len > 0) {
         try writer.print(
             \\
-            \\    pub fn send{s}(self: *Self, io: std.Io, gpa: std.mem.Allocator) ?types.Object {{
+            \\    pub fn send{s}(self: *Self, io: std.Io, gpa: std.mem.Allocator) !types.Object {{
             \\        var buffer: [0]types.Arg = undefined;
             \\        var args = types.Args.init(&buffer, .{{}});
-            \\        const id = self.object.vtable.call(self.object.ptr, io, gpa, {}, &args) catch return null;
+            \\        const seq = try self.object.vtable.call(self.object.ptr, io, gpa, {}, &args);
             \\        if (self.object.vtable.clientSock(self.object.ptr)) |sock| {{
-            \\            return sock.objectForId(id);
+            \\            const obj = sock.objectForSeq(seq) orelse return error.NoObject;
+            \\            return types.Object.from(obj);
             \\        }}
             \\
-            \\        return null;
+            \\        return error.NoClientSocket;
             \\    }}
             \\
         , .{ method.name_pascal, method.idx });

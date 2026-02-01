@@ -79,7 +79,7 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
     var manager = try test_protocol.client.MyManagerV1Object.init(
         gpa,
         .from(&client),
-        &.from(obj),
+        &obj,
     );
 
     std.debug.print("Bound!\n", .{});
@@ -100,7 +100,7 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
     try manager.sendSendMessageArray(io, gpa, &.{});
     try manager.sendSendMessageArrayUint(io, gpa, &.{ 69, 420, 2137 });
 
-    var object_arg = manager.sendMakeObject(io, gpa).?;
+    var object_arg = try manager.sendMakeObject(io, gpa);
     defer object_arg.deinit(gpa);
     var cobject = try test_protocol.client.MyObjectV1Object.init(
         gpa,
@@ -110,7 +110,7 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
     defer cobject.deinit(gpa);
     try client.objects.append(gpa, cobject);
 
-    var object_arg2 = manager.sendMakeObject(io, gpa).?;
+    var object_arg2 = try manager.sendMakeObject(io, gpa);
     defer object_arg2.deinit(gpa);
     var cobject2 = try test_protocol.client.MyObjectV1Object.init(
         gpa,

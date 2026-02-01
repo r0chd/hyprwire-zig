@@ -126,15 +126,16 @@ pub const MyManagerV1Object = struct {
         _ = try self.object.vtable.call(self.object.ptr, io, gpa, 3, &args);
     }
 
-    pub fn sendMakeObject(self: *Self, io: std.Io, gpa: std.mem.Allocator) ?types.Object {
+    pub fn sendMakeObject(self: *Self, io: std.Io, gpa: std.mem.Allocator) !types.Object {
         var buffer: [0]types.Arg = undefined;
         var args = types.Args.init(&buffer, .{});
-        const id = self.object.vtable.call(self.object.ptr, io, gpa, 4, &args) catch return null;
+        const seq = try self.object.vtable.call(self.object.ptr, io, gpa, 4, &args);
         if (self.object.vtable.clientSock(self.object.ptr)) |sock| {
-            return sock.objectForId(id);
+            const obj = sock.objectForSeq(seq) orelse return error.NoObject;
+            return types.Object.from(obj);
         }
 
-        return null;
+        return error.NoClientSocket;
     }
 
     pub fn dispatch(

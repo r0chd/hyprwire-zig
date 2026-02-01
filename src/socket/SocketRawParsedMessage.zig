@@ -29,7 +29,9 @@ pub fn readFromSocket(io: Io, gpa: mem.Allocator, socket: Io.net.Socket) !Self {
 
     const err, const count = socket.receiveManyTimeout(io, @as(*[1]Io.net.IncomingMessage, &incoming), &buffer, .{}, .none);
     if (err) |e| return e;
-    if (count == 0) return .{};
+    if (count == 0) return .{
+        .bad = true,
+    };
 
     var msghdr = c.msghdr{
         .msg_control = incoming.control.ptr,

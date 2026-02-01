@@ -1,24 +1,45 @@
 const std = @import("std");
-const types = @import("types.zig");
-
 const mem = std.mem;
+const Io = std.Io;
 
-const ServerClient = @import("../server/ServerClient.zig");
 const ClientSocket = @import("../client/ClientSocket.zig");
+const ServerClient = @import("../server/ServerClient.zig");
 const ServerSocket = @import("../server/ServerSocket.zig");
+const types = @import("types.zig");
 
 pub const VTable = struct {
     call: *const fn (*anyopaque, std.Io, mem.Allocator, u32, *types.Args) anyerror!u32,
     listen: *const fn (*anyopaque, mem.Allocator, u32, *const fn (*anyopaque) void) anyerror!void,
-    clientSock: *const fn (*anyopaque) ?*ClientSocket,
-    serverSock: *const fn (*anyopaque) ?*ServerSocket,
+    clientSock: *const fn (*anyopaque) ?*ClientSocket = defaultClientSock,
+    serverSock: *const fn (*anyopaque) ?*ServerSocket = defaultServerSock,
     setData: *const fn (*anyopaque, *anyopaque) void,
     getData: *const fn (*anyopaque) ?*anyopaque,
     @"error": *const fn (*anyopaque, std.Io, mem.Allocator, u32, [:0]const u8) void,
     deinit: *const fn (*anyopaque, mem.Allocator) void,
     setOnDeinit: *const fn (*anyopaque, *const fn () void) void,
-    getClient: *const fn (*anyopaque) ?*ServerClient,
+    getClient: *const fn (*anyopaque) ?*ServerClient = defaultGetClient,
 };
+
+fn defaultClientSock(ptr: *anyopaque) ?*ClientSocket {
+    _ = ptr;
+    return null;
+}
+
+fn defaultServerSock(ptr: *anyopaque) ?*ServerSocket {
+    _ = ptr;
+    return null;
+}
+
+fn defaultWaitOnSelf(ptr: *anyopaque, io: Io, gpa: mem.Allocator) anyerror!void {
+    _ = ptr;
+    _ = io;
+    _ = gpa;
+}
+
+fn defaultGetClient(ptr: *anyopaque) ?*ServerClient {
+    _ = ptr;
+    return null;
+}
 
 ptr: *anyopaque,
 vtable: *const VTable,

@@ -14,6 +14,7 @@ pub fn getFds(self: *const Self) []const i32 {
     return self.fds;
 }
 
+depends_on_seq: u32 = 0,
 object: u32 = 0,
 method: u32 = 0,
 data_span: []const u8,
@@ -136,6 +137,14 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
 pub fn fdsFn(ptr: *const Message) []const i32 {
     const self: *const Self = @fieldParentPtr("interface", ptr);
     return self.fds;
+}
+
+pub fn resolveSeq(self: *Self, id: u32) void {
+    self.object = id;
+    if (self.interface.data.len >= 6) {
+        const data_ptr: *[4]u8 = @ptrCast(@constCast(self.interface.data[2..6].ptr));
+        mem.writeInt(u32, data_ptr, id, .little);
+    }
 }
 
 pub fn deinit(self: *Self, gpa: mem.Allocator) void {

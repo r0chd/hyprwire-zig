@@ -19,8 +19,12 @@ const SocketRawParsedMessage = @import("../socket/SocketRawParsedMessage.zig");
 const ClientObject = @import("ClientObject.zig");
 const ServerSpec = @import("ServerSpec.zig");
 
-const c = @cImport(@cInclude("sys/socket.h"));
+const c = @cImport({
+    @cInclude("sys/socket.h");
+    @cInclude("errno.h");
+});
 const log = std.log.scoped(.hw);
+
 const HANDSHAKE_MAX_MS: i64 = 5000;
 
 stream: Io.net.Stream,
@@ -36,7 +40,8 @@ last_sent_roundtrip_seq: u32 = 0,
 seq: u32 = 0,
 
 pending_socket_data: std.ArrayList(SocketRawParsedMessage) = .empty,
-waiting_on_object: ?*ClientObject = null,
+pending_outgoing: std.ArrayList(Message.GenericProtocolMessage) = .empty,
+waiting_on_object: ?WireObject = null,
 
 const Self = @This();
 
@@ -67,6 +72,10 @@ pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
         data.deinit(gpa);
     }
     self.pending_socket_data.deinit(gpa);
+    for (self.pending_outgoing.items) |*msg| {
+        msg.deinit(gpa);
+    }
+    self.pending_outgoing.deinit(gpa);
     for (self.server_specs.items) |object| {
         object.deinit(gpa);
     }
@@ -141,9 +150,11 @@ pub fn onSeq(self: *Self, seq: u32, id: u32) void {
     for (self.objects.items) |object| {
         if (object.seq == seq) {
             object.id = id;
-            break;
+            return;
         }
     }
+
+    log.debug("[{} @ {}] -> No object for sequence {} (Would be id {}).!", .{ self.stream.socket.handle, steadyMillis(), seq, id });
 }
 
 pub fn bindProtocol(
@@ -152,7 +163,7 @@ pub fn bindProtocol(
     gpa: mem.Allocator,
     spec: *const ProtocolSpec,
     version: u32,
-) !*ClientObject {
+) !Object {
     if (version > spec.specVer()) {
         log.debug("version {} is larger than current spec ver of {}", .{ version, spec.specVer() });
         self.disconnectOnError(io);
@@ -174,13 +185,14 @@ pub fn bindProtocol(
     defer bind_message.deinit(gpa);
     try self.sendMessage(io, gpa, &bind_message.interface);
 
-    try self.waitForObject(io, gpa, object);
+    try self.waitForObject(io, gpa, .from(object));
 
-    return object;
+    return .from(object);
 }
 
-pub fn makeObject(self: *Self, gpa: mem.Allocator, protocol_name: []const u8, object_name: []const u8, seq: u32) ?*ClientObject {
-    const object = gpa.create(ClientObject) catch return null;
+pub fn makeObject(self: *Self, gpa: mem.Allocator, protocol_name: []const u8, object_name: []const u8, seq: u32) !*ClientObject {
+    const object = try gpa.create(ClientObject);
+    errdefer gpa.destroy(object);
     object.* = .init(self);
     object.protocol_name = protocol_name;
 
@@ -198,33 +210,21 @@ pub fn makeObject(self: *Self, gpa: mem.Allocator, protocol_name: []const u8, ob
     }
 
     if (object.spec == null) {
-        gpa.destroy(object);
-        return null;
+        return error.NoSpec;
     }
 
     object.seq = seq;
     object.version = 0; // TODO: client version doesn't matter that much, but for verification's sake we could fix this
-    self.objects.append(gpa, object) catch {
-        gpa.destroy(object);
-        return null;
-    };
+    try self.objects.append(gpa, object);
     return object;
 }
 
-pub fn waitForObject(self: *Self, io: Io, gpa: mem.Allocator, x: *ClientObject) !void {
+pub fn waitForObject(self: *Self, io: Io, gpa: mem.Allocator, x: WireObject) !void {
     self.waiting_on_object = x;
-    while (x.id == 0 and !self.@"error") {
+    while (x.getId() == 0 and !self.@"error") {
         try self.dispatchEvents(io, gpa, true);
     }
     self.waiting_on_object = null;
-}
-
-pub fn shouldEndReading(self: *const Self) bool {
-    if (self.waiting_on_object) |waiting| {
-        return waiting.id != 0;
-    }
-
-    return false;
 }
 
 pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !void {
@@ -241,21 +241,6 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
             log.debug("handshake error: timed out", .{});
             self.disconnectOnError(io);
             return error.TimedOut;
-        }
-    }
-
-    if (self.pending_socket_data.items.len > 0) {
-        const datas = try self.pending_socket_data.toOwnedSlice(gpa);
-        defer {
-            for (datas) |*data| data.deinit(gpa);
-            gpa.free(datas);
-        }
-        for (datas) |*data| {
-            message_parser.handleMessage(io, gpa, data, .{ .client = self }) catch {
-                log.debug("fatal: failed to handle message on wire", .{});
-                self.disconnectOnError(io);
-                return error.FailedToHandleMessage;
-            };
         }
     }
 
@@ -291,6 +276,33 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
         return error.FailedToHandleMessage;
     };
 
+    var i: usize = self.pending_outgoing.items.len;
+    while (i > 0) : (i -= 1) {
+        const idx = i - 1;
+        var msg = &self.pending_outgoing.items[idx];
+        const obj = self.objectForSeq(msg.depends_on_seq);
+        if (obj == null) {
+            var removed = self.pending_outgoing.orderedRemove(idx);
+            removed.deinit(gpa);
+            continue;
+        }
+
+        if (obj.?.id == 0) {
+            continue;
+        }
+
+        msg.resolveSeq(obj.?.id);
+        if (isTrace()) {
+            const d = try msg.interface.parseData(gpa);
+            defer gpa.free(d);
+            log.debug("[{} @ {}] -> Handle deferred {s}", .{ self.stream.socket.handle, steadyMillis(), d });
+        }
+
+        try self.sendMessage(io, gpa, &msg.interface);
+        var removed = self.pending_outgoing.orderedRemove(idx);
+        removed.deinit(gpa);
+    }
+
     if (self.@"error") {
         return error.ConnectionClosed;
     }
@@ -300,14 +312,24 @@ pub fn onGeneric(self: *const Self, io: Io, gpa: mem.Allocator, msg: Message.Gen
     for (self.objects.items) |obj| {
         if (obj.id == msg.object) {
             try WireObject.from(obj).called(io, gpa, msg.method, msg.data_span, msg.fds);
-            break;
+            return;
         }
     }
+
+    log.debug("[{} @ {}] -> Generic message not handled. No object with id {}!", .{ self.stream.socket.handle, steadyMillis(), msg.object });
 }
 
 pub fn objectForId(self: *const Self, id: u32) ?Object {
     for (self.objects.items) |object| {
         if (object.id == id) return Object.from(object);
+    }
+
+    return null;
+}
+
+pub fn objectForSeq(self: *const Self, seq: u32) ?*ClientObject {
+    for (self.objects.items) |object| {
+        if (object.seq == seq) return object;
     }
 
     return null;
@@ -354,7 +376,25 @@ pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: *Mess
         }
     }
 
-    _ = c.sendmsg(self.stream.socket.handle, &msg, 0);
+    while (self.stream.socket.handle >= 0) {
+        const ret = c.sendmsg(self.stream.socket.handle, &msg, 0);
+        if (ret < 0) {
+            const err = std.posix.errno(ret);
+
+            if (err == .AGAIN) {
+                const pfd = posix.pollfd{
+                    .fd = self.stream.socket.handle,
+                    .events = posix.POLL.OUT,
+                    .revents = 0,
+                };
+                var pfds = [_]posix.pollfd{pfd};
+
+                _ = posix.poll(&pfds, -1) catch {};
+                continue;
+            }
+        }
+        break;
+    }
 }
 
 pub fn extractLoopFD(self: *const Self) i32 {

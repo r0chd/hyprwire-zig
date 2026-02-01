@@ -50,15 +50,6 @@ fn handleClientMessage(
         const ret = try parseSingleMessageClient(io, gpa, data, needle, client);
 
         needle += ret;
-
-        if (client.shouldEndReading()) {
-            if (isTrace()) log.debug("[{} @ {}] -- handleMessage: End read early", .{ client.stream.socket.handle, steadyMillis() });
-            data.data.items = data.data.items[needle..data.data.items.len];
-            try client.pending_socket_data.append(gpa, data.*);
-            // Move ownership to pending_socket_data
-            data.* = SocketRawParsedMessage{};
-            return;
-        }
     }
 
     if (data.fds.items.len != 0) {

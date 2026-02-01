@@ -3,15 +3,16 @@ const fmt = std.fmt;
 const mem = std.mem;
 
 const helpers = @import("helpers");
+const hyprwire = @import("hyprwire");
 
 const message_parser = @import("../message/MessageParser.zig");
 const Message = @import("../message/messages/Message.zig");
-const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 const MessageType = @import("../message/MessageType.zig").MessageType;
+const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 const Object = @import("Object.zig");
 const types = @import("types.zig");
 const Method = types.Method;
-const hyprwire = @import("hyprwire");
+const ClientObject = @import("../client/ClientObject.zig");
 
 const c = @cImport({
     @cInclude("sys/socket.h");
@@ -194,18 +195,24 @@ pub fn callMethod(self: Self, io: std.Io, gpa: mem.Allocator, id: u32, args: *ty
     mem.writeInt(u32, &method_id_buf, id, .little);
     try data.appendSlice(gpa, &method_id_buf);
 
-    var wait_on_seq: u32 = 0;
+    var return_seq: u32 = 0;
 
     if (method.returns_type.len > 0) {
+        if (helpers.isTrace()) {
+            if (self.getClient()) |client| {
+                log.debug("[{} @ {}] -- call {}: returnsType has {s}", .{ client.stream.socket.handle, hyprwire.steadyMillis(), id, method.returns_type });
+            }
+        }
+
         try data.append(gpa, @intFromEnum(MessageMagic.type_seq));
 
         if (self.clientSock()) |client| {
             client.seq += 1;
-            wait_on_seq = client.seq;
+            return_seq = client.seq;
         }
 
         var seq_buf: [4]u8 = undefined;
-        mem.writeInt(u32, &seq_buf, wait_on_seq, .little);
+        mem.writeInt(u32, &seq_buf, return_seq, .little);
         try data.appendSlice(gpa, &seq_buf);
     }
 
@@ -322,23 +329,28 @@ pub fn callMethod(self: Self, io: std.Io, gpa: mem.Allocator, id: u32, args: *ty
     try data.append(gpa, @intFromEnum(MessageMagic.end));
 
     var msg = try Message.GenericProtocolMessage.init(gpa, data.items, fds.items);
-    defer msg.deinit(gpa);
-    try self.sendMessage(io, gpa, &msg.interface);
 
-    // Handle return type for client
-    if (wait_on_seq != 0) {
-        if (self.clientSock()) |client| {
-            // Get protocol_name from the underlying object
-            // We need to access this through the client's object list
-            for (client.objects.items) |obj| {
-                if (obj.id == self.getId()) {
-                    const made_obj = client.makeObject(gpa, obj.protocol_name, method.returns_type, wait_on_seq);
-                    if (made_obj) |o| {
-                        try client.waitForObject(io, gpa, o);
-                        return o.id;
-                    }
-                    break;
-                }
+    if (self.getId() == 0 and !self.server()) {
+        const self_client: *ClientObject = @ptrCast(@alignCast(self.ptr));
+
+        if (helpers.isTrace()) {
+            if (self_client.client) |client| {
+                log.debug("[{} @ {}] -- call: waiting on object of type {s}", .{ client.stream.socket.handle, hyprwire.steadyMillis(), method.returns_type });
+            }
+        }
+
+        msg.depends_on_seq = self_client.seq;
+        if (self_client.client) |client| {
+            try client.pending_outgoing.append(gpa, msg);
+        }
+    } else {
+        try self.sendMessage(io, gpa, &msg.interface);
+        msg.deinit(gpa);
+        if (return_seq != 0) {
+            const self_client: *ClientObject = @ptrCast(@alignCast(self.ptr));
+            if (self_client.client) |client| {
+                _ = try client.makeObject(gpa, self_client.protocol_name, method.returns_type, return_seq);
+                return return_seq;
             }
         }
     }

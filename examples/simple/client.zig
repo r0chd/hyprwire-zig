@@ -79,7 +79,7 @@ pub fn main(init: std.process.Init) !void {
     var manager = try test_protocol.MyManagerV1Object.init(
         gpa,
         .from(&client),
-        &.from(obj),
+        &obj,
     );
     defer manager.deinit(gpa);
 
@@ -108,7 +108,7 @@ pub fn main(init: std.process.Init) !void {
 
     try socket.roundtrip(io, gpa);
 
-    var object_arg = manager.sendMakeObject(io, gpa).?;
+    var object_arg = try manager.sendMakeObject(io, gpa);
     defer object_arg.deinit(gpa);
     var object = try test_protocol.MyObjectV1Object.init(
         gpa,

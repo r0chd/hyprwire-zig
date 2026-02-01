@@ -35,25 +35,23 @@ const Self = @This();
 
 pub const vtable: WireObject.VTable = .{
     .object = .{
-        .call = callWrapper,
-        .listen = listenWrapper,
-        .clientSock = clientSockWrapper,
-        .serverSock = serverSockWrapper,
-        .setData = setDataWrapper,
-        .getData = getDataWrapper,
-        .@"error" = errorWrapper,
-        .deinit = deinitWrapper,
-        .setOnDeinit = setOnDeinitWrapper,
-        .getClient = getClientWrapper,
+        .call = call,
+        .listen = listen,
+        .clientSock = clientSock,
+        .setData = setData,
+        .getData = getData,
+        .@"error" = @"error",
+        .deinit = deinit,
+        .setOnDeinit = setOnDeinit,
     },
-    .getVersion = getVersionWrapper,
-    .getListeners = getListenersWrapper,
-    .methodsOut = methodsOutWrapper,
-    .methodsIn = methodsInWrapper,
-    .errd = errdWrapper,
-    .sendMessage = sendMessageWrapper,
-    .server = serverWrapper,
-    .getId = getIdWrapper,
+    .getVersion = getVersion,
+    .getListeners = getListeners,
+    .methodsOut = methodsOut,
+    .methodsIn = methodsIn,
+    .errd = errd,
+    .sendMessage = sendMessage,
+    .server = server,
+    .getId = getId,
 };
 
 pub fn asWireObject(self: *Self) WireObject {
@@ -64,130 +62,34 @@ pub fn asObject(self: *Self) Object {
     return .{ .ptr = self, .vtable = &vtable.object };
 }
 
-// VTable wrappers
-fn callWrapper(ptr: *anyopaque, io: std.Io, gpa: mem.Allocator, id: u32, args: *types.Args) anyerror!u32 {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.call(io, gpa, id, args);
-}
-
-fn listenWrapper(ptr: *anyopaque, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) anyerror!void {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.listen(gpa, id, callback);
-}
-
-fn clientSockWrapper(ptr: *anyopaque) ?*ClientSocket {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.clientSock();
-}
-
-fn serverSockWrapper(ptr: *anyopaque) ?*ServerSocket {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.serverSock();
-}
-
-fn setDataWrapper(ptr: *anyopaque, data: *anyopaque) void {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    self.setData(data);
-}
-
-fn getDataWrapper(ptr: *anyopaque) ?*anyopaque {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.getData();
-}
-
-fn errorWrapper(ptr: *anyopaque, io: std.Io, gpa: mem.Allocator, id: u32, message: [:0]const u8) void {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    self.@"error"(io, gpa, id, message);
-}
-
-fn deinitWrapper(ptr: *anyopaque, gpa: mem.Allocator) void {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    self.deinit(gpa);
-}
-
-fn setOnDeinitWrapper(ptr: *anyopaque, cb: *const fn () void) void {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    self.setOnDeinit(cb);
-}
-
-fn getClientWrapper(ptr: *anyopaque) ?*ServerClient {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.getClient();
-}
-
-fn getVersionWrapper(ptr: *anyopaque) u32 {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.getVersion();
-}
-
-fn getListenersWrapper(ptr: *anyopaque) []*anyopaque {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.getListeners();
-}
-
-fn methodsOutWrapper(ptr: *anyopaque) []const Method {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.methodsOut();
-}
-
-fn methodsInWrapper(ptr: *anyopaque) []const Method {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.methodsIn();
-}
-
-fn errdWrapper(ptr: *anyopaque) void {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    self.errd();
-}
-
-fn sendMessageWrapper(ptr: *anyopaque, io: std.Io, gpa: mem.Allocator, message: *Message) anyerror!void {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.sendMessage(io, gpa, message);
-}
-
-fn serverWrapper(ptr: *anyopaque) bool {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.server();
-}
-
-fn getIdWrapper(ptr: *anyopaque) u32 {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return self.getId();
-}
-
 pub fn init(client: *ClientSocket) Self {
     return .{
         .client = client,
     };
 }
 
-pub fn clientSock(self: *Self) ?*ClientSocket {
+fn clientSock(ptr: *anyopaque) ?*ClientSocket {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     return self.client;
 }
 
-pub fn serverSock(self: *Self) ?*ServerSocket {
-    _ = self;
-    return null;
-}
-
-pub fn getClient(self: *Self) ?*ServerClient {
-    _ = self;
-    return null;
-}
-
-pub fn getData(self: *Self) ?*anyopaque {
+fn getData(ptr: *anyopaque) ?*anyopaque {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     return self.data;
 }
 
-pub fn setData(self: *Self, data: *anyopaque) void {
+fn setData(ptr: *anyopaque, data: *anyopaque) void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     self.data = data;
 }
 
-pub fn setOnDeinit(self: *Self, cb: *const fn () void) void {
+fn setOnDeinit(ptr: *anyopaque, cb: *const fn () void) void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     self.on_deinit = cb;
 }
 
-pub fn methodsOut(self: *Self) []const Method {
+fn methodsOut(ptr: *anyopaque) []const Method {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     if (self.spec) |spec| {
         return spec.c2s();
     } else {
@@ -195,7 +97,8 @@ pub fn methodsOut(self: *Self) []const Method {
     }
 }
 
-pub fn methodsIn(self: *Self) []const Method {
+fn methodsIn(ptr: *anyopaque) []const Method {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     if (self.spec) |spec| {
         return spec.s2c();
     } else {
@@ -203,32 +106,35 @@ pub fn methodsIn(self: *Self) []const Method {
     }
 }
 
-pub fn errd(self: *Self) void {
+fn errd(ptr: *anyopaque) void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     if (self.client) |client| {
         client.@"error" = true;
     }
 }
 
-pub fn @"error"(self: *Self, io: Io, gpa: mem.Allocator, id: u32, message: [:0]const u8) void {
-    _ = self;
+fn @"error"(ptr: *anyopaque, io: Io, gpa: mem.Allocator, id: u32, message: [:0]const u8) void {
+    _ = ptr;
     _ = io;
     _ = gpa;
     _ = id;
     _ = message;
 }
 
-pub fn sendMessage(self: *Self, io: Io, gpa: mem.Allocator, message: *Message) !void {
+fn sendMessage(ptr: *anyopaque, io: Io, gpa: mem.Allocator, message: *Message) anyerror!void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     if (self.client) |client| {
         try client.sendMessage(io, gpa, message);
     }
 }
 
-pub fn server(self: *Self) bool {
-    _ = self;
+fn server(ptr: *anyopaque) bool {
+    _ = ptr;
     return false;
 }
 
-pub fn deinit(self: *Self, gpa: mem.Allocator) void {
+pub fn deinit(ptr: *anyopaque, gpa: mem.Allocator) void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     if (isTrace()) {
         log.debug("destroying object {}", .{self.id});
     }
@@ -239,26 +145,31 @@ pub fn deinit(self: *Self, gpa: mem.Allocator) void {
     }
 }
 
-pub fn call(self: *Self, io: Io, gpa: mem.Allocator, id: u32, args: *types.Args) !u32 {
-    return self.asWireObject().callMethod(io, gpa, id, args);
+fn call(ptr: *anyopaque, io: Io, gpa: mem.Allocator, id: u32, args: *types.Args) anyerror!u32 {
+    const self: *Self = @ptrCast(@alignCast(ptr));
+    return WireObject.from(self).callMethod(io, gpa, id, args);
 }
 
-pub fn listen(self: *Self, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) !void {
+fn listen(ptr: *anyopaque, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) anyerror!void {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     if (self.listeners.items.len <= id) {
         try self.listeners.ensureTotalCapacity(gpa, id + 1);
     }
     self.listeners.appendAssumeCapacity(@constCast(callback));
 }
 
-pub fn getId(self: *Self) u32 {
+fn getId(ptr: *anyopaque) u32 {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     return self.id;
 }
 
-pub fn getListeners(self: *Self) []*anyopaque {
+fn getListeners(ptr: *anyopaque) []*anyopaque {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     return self.listeners.items;
 }
 
-pub fn getVersion(self: *Self) u32 {
+fn getVersion(ptr: *anyopaque) u32 {
+    const self: *Self = @ptrCast(@alignCast(ptr));
     return self.version;
 }
 

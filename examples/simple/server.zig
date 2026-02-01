@@ -20,7 +20,7 @@ const Server = struct {
         std.debug.print("Object bound XD\n", .{});
 
         var manager = test_protocol.MyManagerV1Object.init(self.alloc, .from(self), object) catch return;
-        manager.sendSendMessage(self.io, self.alloc, "Hello object") catch {};
+        manager.sendSendMessage(self.io, self.alloc, "Hello manager") catch {};
 
         self.manager = manager;
     }
