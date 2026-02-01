@@ -1,7 +1,7 @@
 const std = @import("std");
 const mem = std.mem;
 
-const MessageMagic = @import("../../types/MessageMagic.zig").MessageMagic;
+const MessageMagic = @import("../../implementation/types.zig").MessageMagic;
 const message_parser = @import("../MessageParser.zig");
 const MessageType = @import("../MessageType.zig").MessageType;
 const Message = @import("Message.zig");

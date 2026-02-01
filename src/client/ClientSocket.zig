@@ -353,12 +353,12 @@ pub fn objectForSeq(self: *const Self, seq: u32) ?*ClientObject {
 
 pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: *Message) !void {
     if (isTrace()) {
-        const parsed = message.parseData(gpa) catch |err| {
+        if (message.parseData(gpa)) |parsed| {
+            defer gpa.free(parsed);
+            log.debug("[{} @ {}] -> {s}", .{ self.stream.socket.handle, steadyMillis(), parsed });
+        } else |err| {
             log.debug("[{} @ {}] -> parse error: {}", .{ self.stream.socket.handle, steadyMillis(), err });
-            return;
-        };
-        defer gpa.free(parsed);
-        log.debug("[{} @ {}] -> {s}", .{ self.stream.socket.handle, steadyMillis(), parsed });
+        }
     }
 
     var iovec: posix.iovec = std.mem.zeroes(posix.iovec);

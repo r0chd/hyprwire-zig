@@ -48,6 +48,16 @@ const Client = struct {
             },
         }
     }
+
+    pub fn deinit(
+        self: *Self,
+        gpa: mem.Allocator,
+    ) void {
+        for (self.objects.items) |object| {
+            object.deinit(gpa);
+        }
+        self.objects.deinit(gpa);
+    }
 };
 
 fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
@@ -73,6 +83,7 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
     std.debug.print("test protocol supported at version {}. Binding.\n", .{SPEC.specVer()});
 
     var client = Client{ .io = io };
+    defer client.deinit(gpa);
 
     var obj = try sock.bindProtocol(io, gpa, protocol, 1);
     defer obj.deinit(gpa);
@@ -81,6 +92,7 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
         .from(&client),
         &obj,
     );
+    defer manager.deinit(gpa);
 
     std.debug.print("Bound!\n", .{});
 
@@ -107,7 +119,6 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
         .from(&client),
         &object_arg,
     );
-    defer cobject.deinit(gpa);
     try client.objects.append(gpa, cobject);
 
     var object_arg2 = try manager.sendMakeObject(io, gpa);
@@ -117,7 +128,6 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
         .from(&client),
         &object_arg2,
     );
-    defer cobject2.deinit(gpa);
     try client.objects.append(gpa, cobject2);
 
     try cobject.sendSendMessage(io, gpa, "Hello from object");
@@ -133,49 +143,84 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
 const Server = struct {
     alloc: mem.Allocator,
     socket: *hw.ServerSocket,
+    manager: ?*test_protocol.server.MyManagerV1Object = null,
+    objects: std.ArrayList(*test_protocol.server.MyObjectV1Object) = .empty,
+    object_handles: std.ArrayList(hw.types.Object) = .empty,
     io: Io,
 
     const Self = @This();
 
     pub fn bind(self: *Self, object: *hw.types.Object) void {
-        _ = .{ self, object };
+        const manager = test_protocol.server.MyManagerV1Object.init(self.alloc, .from(self), object) catch |err|
+            std.debug.panic("Error while initializing MyManagerV1Object: {s}", .{@errorName(err)});
+        self.manager = manager;
     }
 
     pub fn myManagerV1Listener(
         self: *Self,
         alloc: mem.Allocator,
-        proxy: *test_protocol.MyManagerV1Object,
-        event: test_protocol.MyManagerV1Object.Event,
+        proxy: *test_protocol.server.MyManagerV1Object,
+        event: test_protocol.server.MyManagerV1Object.Event,
     ) void {
-        _ = .{ self, alloc, proxy, event };
+        _ = proxy;
+        switch (event) {
+            .send_message => {},
+            .send_message_fd => {},
+            .send_message_array => {},
+            .send_message_array_uint => {},
+            .make_object => |seq| {
+                const manager = self.manager orelse return;
+                const server_object = self.socket.createObject(
+                    self.io,
+                    alloc,
+                    manager.getObject().getClient(),
+                    @ptrCast(@alignCast(manager.getObject().ptr)),
+                    "my_object_v1",
+                    seq.seq,
+                ) orelse return;
+
+                self.object_handles.append(alloc, .from(server_object)) catch |err|
+                    std.debug.panic("Error while appending object handle: {s}", .{@errorName(err)});
+                const handle_ptr = &self.object_handles.items[self.object_handles.items.len - 1];
+                const object = test_protocol.server.MyObjectV1Object.init(alloc, .from(self), handle_ptr) catch |err|
+                    std.debug.panic("Error while initializing MyObjectV1Object: {s}", .{@errorName(err)});
+                self.objects.append(alloc, object) catch |err|
+                    std.debug.panic("Error while appending object: {s}", .{@errorName(err)});
+            },
+        }
     }
 
     pub fn myObjectV1Listener(
         self: *Self,
         alloc: mem.Allocator,
-        proxy: *test_protocol.MyObjectV1Object,
-        event: test_protocol.MyObjectV1Object.Event,
+        proxy: *test_protocol.server.MyObjectV1Object,
+        event: test_protocol.server.MyObjectV1Object.Event,
     ) void {
         _ = .{ self, alloc, proxy, event };
     }
 
-    pub fn deinit(self: *Self) void {
+    pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
         if (self.manager) |manager| {
             self.alloc.destroy(manager.object);
-            manager.deinit(self.alloc);
+            manager.deinit(gpa);
         }
-        if (self.object) |object| {
-            object.deinit(self.alloc);
+        for (self.object_handles.items) |object_handle| {
+            object_handle.deinit(gpa);
         }
-        self.socket.deinit(self.io, self.alloc);
+        self.object_handles.deinit(gpa);
+        for (self.objects.items) |object| {
+            object.deinit(gpa);
+        }
+        self.objects.deinit(gpa);
+        self.socket.deinit(io, gpa);
     }
 };
 
 fn runServer(io: Io, gpa: mem.Allocator, client_fd: i32) !void {
     const sock = try hw.ServerSocket.open(io, gpa, null);
-    defer sock.deinit(io, gpa);
 
-    const server = Server{ .alloc = gpa, .io = io, .socket = sock };
+    var server = Server{ .alloc = gpa, .io = io, .socket = sock };
+    defer server.deinit(io, gpa);
     var impl = test_protocol.server.TestProtocolV1Impl.init(1, .from(&server));
     try sock.addImplementation(gpa, &impl.interface);
 
@@ -184,33 +229,14 @@ fn runServer(io: Io, gpa: mem.Allocator, client_fd: i32) !void {
         std.process.exit(1);
     };
 
-    var pfd = posix.pollfd{
-        .fd = try sock.extractLoopFD(io, gpa),
-        .events = posix.POLL.IN,
-        .revents = 0,
-    };
-
     while (!quitt) {
-        const events = posix.system.poll(@ptrCast(&pfd), 1, -1);
-        if (events < 0) {
-            break;
-        } else if (events == 0) {
-            continue;
-        }
-
-        if (pfd.revents & posix.POLL.HUP != 0) {
-            break;
-        }
-
-        if (pfd.revents & posix.POLL.IN == 0) {
-            continue;
-        }
-
-        try sock.dispatchEvents(io, gpa, false);
+        sock.dispatchEvents(io, gpa, true) catch break;
     }
 }
 
 pub fn main(init: std.process.Init) !void {
+    const gpa = std.heap.c_allocator;
+
     var sock_fds: [2]i32 = undefined;
     if (posix.system.socketpair(posix.AF.UNIX, posix.SOCK.STREAM, 0, &sock_fds) != 0) return error.Idk;
 
@@ -223,9 +249,19 @@ pub fn main(init: std.process.Init) !void {
         std.debug.print("Failed to fork\n", .{});
     } else if (child == 0) {
         _ = posix.system.close(sock_fds[s]);
-        try runClient(init.io, init.gpa, sock_fds[c]);
+        var child_io_backend = Io.Threaded.init(gpa, .{
+            .argv0 = .{},
+            .environ = init.minimal.environ,
+        });
+        const child_io = child_io_backend.io();
+        try runClient(child_io, gpa, sock_fds[c]);
     } else {
         _ = posix.system.close(sock_fds[c]);
-        try runServer(init.io, init.gpa, sock_fds[s]);
+        var parent_io_backend = Io.Threaded.init(gpa, .{
+            .argv0 = .{},
+            .environ = init.minimal.environ,
+        });
+        const parent_io = parent_io_backend.io();
+        try runServer(parent_io, gpa, sock_fds[s]);
     }
 }

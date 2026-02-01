@@ -3,15 +3,14 @@ const time = std.time;
 
 pub const proto = @import("protocols");
 
+pub const ClientSocket = @import("client/ClientSocket.zig");
+pub const types = @import("implementation/types.zig");
+pub const ServerSocket = @import("server/ServerSocket.zig");
+
 pub const reexports = struct {
     pub const FallbackAllocator = @import("helpers").FallbackAllocator;
     pub const Trait = @import("helpers").Trait;
 };
-
-pub const ClientSocket = @import("client/ClientSocket.zig");
-pub const ServerSocket = @import("server/ServerSocket.zig");
-pub const types = @import("implementation/types.zig");
-pub const MessageMagic = @import("types/MessageMagic.zig").MessageMagic;
 
 var start: ?time.Instant = null;
 

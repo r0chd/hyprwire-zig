@@ -72,12 +72,12 @@ pub fn dispatchFirstPoll(self: *Self) void {
 pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: *Message) void {
     _ = io;
     if (isTrace()) {
-        const parsed = message.parseData(gpa) catch |err| {
+        if (message.parseData(gpa)) |parsed| {
+            defer gpa.free(parsed);
+            log.debug("[{} @ {}] -> {s}", .{ self.stream.socket.handle, steadyMillis(), parsed });
+        } else |err| {
             log.debug("[{} @ {}] -> parse error: {}", .{ self.stream.socket.handle, steadyMillis(), err });
-            return;
-        };
-        defer gpa.free(parsed);
-        log.debug("[{} @ {}] -> {s}", .{ self.stream.socket.handle, steadyMillis(), parsed });
+        }
     }
 
     var iovec: posix.iovec = .{

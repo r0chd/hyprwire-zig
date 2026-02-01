@@ -145,7 +145,7 @@ fn writeMethodSpec(writer: anytype, method: Method, is_c2s: bool) !void {
 
     for (method.params, 0..) |param_byte, i| {
         if (i > 0) try writer.print(", ", .{});
-        try writer.print("@intFromEnum(hyprwire.MessageMagic.{s})", .{@tagName(@as(MessageMagic, @enumFromInt((param_byte))))});
+        try writer.print("@intFromEnum(hyprwire.types.MessageMagic.{s})", .{@tagName(@as(MessageMagic, @enumFromInt((param_byte))))});
     }
 
     if (is_c2s) {

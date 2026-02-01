@@ -3,7 +3,7 @@ const posix = std.posix;
 const mem = std.mem;
 const Io = std.Io;
 
-const MessageMagic = @import("hyprwire").MessageMagic;
+const MessageMagic = @import("hyprwire").types.MessageMagic;
 
 pub const FallbackAllocator = @import("FallbackAllocator.zig");
 pub const socket = @import("socket.zig");

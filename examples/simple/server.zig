@@ -19,8 +19,8 @@ const Server = struct {
     pub fn bind(self: *Self, object: *hw.types.Object) void {
         std.debug.print("Object bound XD\n", .{});
 
-        var manager = test_protocol.MyManagerV1Object.init(self.alloc, .from(self), object) catch return;
-        manager.sendSendMessage(self.io, self.alloc, "Hello manager") catch {};
+        var manager = test_protocol.MyManagerV1Object.init(self.alloc, .from(self), object) catch |err| std.debug.panic("Error while initializing MyManagerV1Object: {s}", .{@errorName(err)});
+        manager.sendSendMessage(self.io, self.alloc, "Hello manager") catch |err| std.debug.panic("Error while sending message: {s}", .{@errorName(err)});
 
         self.manager = manager;
     }
@@ -42,7 +42,8 @@ const Server = struct {
                 var reader = file.reader(self.io, &buffer);
                 var ioreader = &reader.interface;
                 var read_buffer: [5]u8 = undefined;
-                ioreader.readSliceAll(&read_buffer) catch return;
+                ioreader.readSliceAll(&read_buffer) catch |err|
+                    std.debug.panic("Error while reading from received fd: {s}", .{@errorName(err)});
 
                 std.debug.print("Recvd fd {} with data: {s}\n", .{ message.message, read_buffer });
             },
@@ -83,8 +84,10 @@ const Server = struct {
 
                 self.object_handle = .from(server_object);
 
-                var object = test_protocol.MyObjectV1Object.init(self.alloc, .from(self), &self.object_handle.?) catch return;
-                object.sendSendMessage(self.io, alloc, "Hello object") catch return;
+                var object = test_protocol.MyObjectV1Object.init(self.alloc, .from(self), &self.object_handle.?) catch |err|
+                    std.debug.panic("Error while initializing MyObjectV1Object: {s}", .{@errorName(err)});
+                object.sendSendMessage(self.io, alloc, "Hello object") catch |err|
+                    std.debug.panic("Error while sending message to object: {s}", .{@errorName(err)});
                 self.object = object;
             },
         }
@@ -149,5 +152,7 @@ pub fn main(init: std.process.Init) !void {
     const spec = test_protocol.TestProtocolV1Impl.init(1, .from(&server));
     try socket.addImplementation(gpa, &spec.interface);
 
-    while (socket.dispatchEvents(io, gpa, true)) {} else |_| {}
+    while (socket.dispatchEvents(io, gpa, true)) {} else |err| {
+        std.debug.print("Exiting example: {s}\n", .{@errorName(err)});
+    }
 }

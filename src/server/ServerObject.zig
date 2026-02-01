@@ -11,12 +11,12 @@ const ClientSocket = @import("../client/ClientSocket.zig");
 const Object = @import("../implementation/Object.zig");
 const types = @import("../implementation/types.zig");
 const Method = types.Method;
-const WireObject = @import("../implementation/WireObject.zig");
+const WireObject = types.WireObject;
+const MessageMagic = types.MessageMagic;
 const message_parser = @import("../message/MessageParser.zig");
 const FatalErrorMessage = @import("../message/messages/FatalProtocolError.zig");
 const Message = @import("../message/messages/Message.zig");
 const MessageType = @import("../message/MessageType.zig").MessageType;
-const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 const ServerClient = @import("ServerClient.zig");
 const ServerSocket = @import("ServerSocket.zig");
 
@@ -142,7 +142,7 @@ fn setOnDeinit(ptr: *anyopaque, cb: *const fn () void) void {
 fn @"error"(ptr: *anyopaque, io: Io, gpa: mem.Allocator, id: u32, message: [:0]const u8) void {
     const self: *Self = @ptrCast(@alignCast(ptr));
     // TODO:
-    // Figure out memory management that won't error
+    // Try to make it have no memory allocations/make user provide a buffer
     var buffer: [1024]u8 = undefined;
     var msg = FatalErrorMessage.initBuffer(&buffer, self.id, id, message);
     if (self.client) |client| {

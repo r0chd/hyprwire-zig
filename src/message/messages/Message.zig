@@ -3,7 +3,7 @@ const mem = std.mem;
 const fmt = std.fmt;
 const enums = std.enums;
 
-const MessageMagic = @import("hyprwire").MessageMagic;
+const MessageMagic = @import("hyprwire").types.MessageMagic;
 
 const message_parser = @import("../MessageParser.zig");
 const MessageType = @import("../MessageType.zig").MessageType;

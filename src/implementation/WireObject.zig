@@ -5,14 +5,14 @@ const mem = std.mem;
 const helpers = @import("helpers");
 const hyprwire = @import("hyprwire");
 
+const ClientObject = @import("../client/ClientObject.zig");
 const message_parser = @import("../message/MessageParser.zig");
 const Message = @import("../message/messages/Message.zig");
 const MessageType = @import("../message/MessageType.zig").MessageType;
-const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 const Object = @import("Object.zig");
 const types = @import("types.zig");
 const Method = types.Method;
-const ClientObject = @import("../client/ClientObject.zig");
+const MessageMagic = types.MessageMagic;
 
 const c = @cImport({
     @cInclude("sys/socket.h");

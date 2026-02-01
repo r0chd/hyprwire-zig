@@ -33,8 +33,9 @@ impls: std.ArrayList(*const ProtocolImplementation) = .empty,
 thread_can_poll: bool = false,
 poll_thread: ?std.Thread = null,
 poll_mtx: std.Thread.Mutex.Recursive = .init,
-export_poll_mtx: Io.Mutex = .init,
-export_poll_mtx_locked: bool = false,
+export_poll_mtx: std.Thread.Mutex = .{},
+poll_event: bool = false,
+poll_event_cv: std.Thread.Condition = .{},
 is_empty_listener: bool = false,
 path: ?[:0]const u8 = null,
 
@@ -78,15 +79,19 @@ pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
     if (self.poll_thread) |*thread| {
         self.thread_can_poll = false;
 
+        {
+            self.export_poll_mtx.lock();
+            defer self.export_poll_mtx.unlock();
+            self.poll_event = false;
+            self.poll_event_cv.signal();
+        }
+
         var buffer: [1]u8 = undefined;
         var writer = self.exit_write_fd.writer(io, &buffer);
         var iowriter = &writer.interface;
         iowriter.writeAll("x") catch {};
         iowriter.flush() catch {};
 
-        if (self.export_poll_mtx_locked) {
-            self.export_poll_mtx.unlock(io);
-        }
         thread.join();
     }
     if (self.export_fd) |*fd| fd.close(io);
@@ -149,29 +154,29 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
 
     self.poll_mtx.unlock();
 
-    if (self.export_poll_mtx_locked) {
-        self.export_poll_mtx.unlock(io);
-        self.export_poll_mtx_locked = false;
+    {
+        self.export_poll_mtx.lock();
+        defer self.export_poll_mtx.unlock();
+        self.poll_event = false;
+        self.poll_event_cv.signal();
     }
 }
 
-fn clearFd(io: Io, fd: Io.File) void {
+fn clearFd(_: Io, fd: Io.File) void {
     var buf: [128]u8 = undefined;
     var fds = [_]posix.pollfd{.{ .fd = fd.handle, .events = posix.POLL.IN, .revents = 0 }};
 
-    while (fd.length(io)) |_| {
+    while (true) {
         _ = posix.poll(&fds, 0) catch break;
 
         if (fds[0].revents & posix.POLL.IN != 0) {
-            var buffer: [128]u8 = undefined;
-            var reader = fd.reader(io, &buffer);
-            var ioreader = &reader.interface;
-            ioreader.readSliceAll(&buf) catch break;
+            const result = posix.system.read(fd.handle, &buf, buf.len);
+            if (result <= 0) break;
             continue;
         }
 
         break;
-    } else |_| {}
+    }
 }
 
 fn clearEventFd(self: *const Self, io: Io) void {
@@ -345,15 +350,20 @@ pub fn dispatchExistingConnections(self: *Self, io: Io, gpa: mem.Allocator) !boo
 
 pub fn dispatchClient(self: *Self, io: Io, gpa: mem.Allocator, client: *ServerClient) !void {
     _ = self;
-    var data = try SocketRawParsedMessage.readFromSocket(io, gpa, client.stream.socket);
+    var data = SocketRawParsedMessage.readFromSocket(io, gpa, client.stream.socket) catch |err| {
+        switch (err) {
+            error.ConnectionResetByPeer => {
+                client.@"error" = true;
+                return;
+            },
+            else => return err,
+        }
+    };
     defer data.deinit(gpa);
+
     if (data.bad) {
-        var fatal_msg = FatalError.init(gpa, 0, 0, "fatal: invalid message on wire") catch |err| {
-            log.err("Failed to create fatal error message: {}", .{err});
-            client.@"error" = true;
-            return;
-        };
-        defer fatal_msg.deinit(gpa);
+        var buffer: [64]u8 = undefined;
+        var fatal_msg = FatalError.initBuffer(&buffer, 0, 0, "fatal: invalid message on wire");
         client.sendMessage(io, gpa, &fatal_msg.interface);
         client.@"error" = true;
         return;
@@ -362,8 +372,8 @@ pub fn dispatchClient(self: *Self, io: Io, gpa: mem.Allocator, client: *ServerCl
     if (data.data.items.len == 0) return;
 
     message_parser.handleMessage(io, gpa, &data, .{ .server = client }) catch {
-        var fatal_msg = try FatalError.init(gpa, 0, 0, "fatal: failed to handle message on wire");
-        defer fatal_msg.deinit(gpa);
+        var buffer: [64]u8 = undefined;
+        var fatal_msg = FatalError.initBuffer(&buffer, 0, 0, "fatal: failed to handle message on wire");
         client.sendMessage(io, gpa, &fatal_msg.interface);
         client.@"error" = true;
         return;
@@ -377,13 +387,8 @@ pub fn dispatchClient(self: *Self, io: Io, gpa: mem.Allocator, client: *ServerCl
     }
 }
 
-fn threadCallback(self: *Self, io: std.Io, gpa: mem.Allocator) void {
+fn threadCallback(self: *Self, _: std.Io, gpa: mem.Allocator) void {
     while (self.thread_can_poll) {
-        self.export_poll_mtx.lock(io) catch continue; // wait for dispatch to unlock
-        self.export_poll_mtx_locked = true;
-
-        if (!self.thread_can_poll) break;
-
         self.poll_mtx.lock();
 
         var pollfds = std.ArrayList(posix.pollfd).empty;
@@ -437,12 +442,20 @@ fn threadCallback(self: *Self, io: std.Io, gpa: mem.Allocator) void {
 
         _ = posix.poll(pollfds.items, -1) catch continue;
 
-        if (self.export_write_fd) |export_write_fd| {
-            var buffer: [1]u8 = undefined;
-            var writer = export_write_fd.writer(io, &buffer);
-            var iowriter = &writer.interface;
-            iowriter.writeAll("x") catch return;
-            iowriter.flush() catch return;
+        if (!self.thread_can_poll) return;
+
+        {
+            self.export_poll_mtx.lock();
+            defer self.export_poll_mtx.unlock();
+
+            self.poll_event = true;
+            if (self.export_write_fd) |export_write_fd| {
+                _ = posix.system.write(export_write_fd.handle, "x", 1);
+            }
+
+            while (self.poll_event and self.thread_can_poll) {
+                self.poll_event_cv.timedWait(&self.export_poll_mtx, 100 * std.time.ns_per_ms) catch break;
+            }
         }
     }
 }

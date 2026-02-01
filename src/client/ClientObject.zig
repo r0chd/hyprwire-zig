@@ -10,13 +10,13 @@ const isTrace = helpers.isTrace;
 const Object = @import("../implementation/Object.zig");
 const types = @import("../implementation/types.zig");
 const Method = types.Method;
-const WireObject = @import("../implementation/WireObject.zig");
+const WireObject = types.WireObject;
+const MessageMagic = types.MessageMagic;
 const message_parser = @import("../message/MessageParser.zig");
 const Message = @import("../message/messages/Message.zig");
 const MessageType = @import("../message/MessageType.zig").MessageType;
 const ServerClient = @import("../server/ServerClient.zig");
 const ServerSocket = @import("../server/ServerSocket.zig");
-const MessageMagic = @import("../types/MessageMagic.zig").MessageMagic;
 const ClientSocket = @import("ClientSocket.zig");
 
 const log = std.log.scoped(.hw);

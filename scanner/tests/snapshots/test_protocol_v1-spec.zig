@@ -25,25 +25,25 @@ pub const MyManagerV1Spec = struct {
     c2s_methods: []const types.Method = &.{
         .{
             .idx = 0,
-            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_varchar)},
+            .params = &[_]u8{@intFromEnum(hyprwire.types.MessageMagic.type_varchar)},
             .returns_type = "",
             .since = 0,
         },
         .{
             .idx = 1,
-            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_fd)},
+            .params = &[_]u8{@intFromEnum(hyprwire.types.MessageMagic.type_fd)},
             .returns_type = "",
             .since = 0,
         },
         .{
             .idx = 2,
-            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_array), @intFromEnum(hyprwire.MessageMagic.type_varchar)},
+            .params = &[_]u8{@intFromEnum(hyprwire.types.MessageMagic.type_array), @intFromEnum(hyprwire.types.MessageMagic.type_varchar)},
             .returns_type = "",
             .since = 0,
         },
         .{
             .idx = 3,
-            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_array), @intFromEnum(hyprwire.MessageMagic.type_uint)},
+            .params = &[_]u8{@intFromEnum(hyprwire.types.MessageMagic.type_array), @intFromEnum(hyprwire.types.MessageMagic.type_uint)},
             .returns_type = "",
             .since = 0,
         },
@@ -58,12 +58,12 @@ pub const MyManagerV1Spec = struct {
     s2c_methods: []const types.Method = &.{
         .{
             .idx = 0,
-            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_varchar)},
+            .params = &[_]u8{@intFromEnum(hyprwire.types.MessageMagic.type_varchar)},
             .since = 0,
         },
         .{
             .idx = 1,
-            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_array), @intFromEnum(hyprwire.MessageMagic.type_uint)},
+            .params = &[_]u8{@intFromEnum(hyprwire.types.MessageMagic.type_array), @intFromEnum(hyprwire.types.MessageMagic.type_uint)},
             .since = 0,
         },
     },
@@ -95,13 +95,13 @@ pub const MyObjectV1Spec = struct {
     c2s_methods: []const types.Method = &.{
         .{
             .idx = 0,
-            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_varchar)},
+            .params = &[_]u8{@intFromEnum(hyprwire.types.MessageMagic.type_varchar)},
             .returns_type = "",
             .since = 0,
         },
         .{
             .idx = 1,
-            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_uint)},
+            .params = &[_]u8{@intFromEnum(hyprwire.types.MessageMagic.type_uint)},
             .returns_type = "",
             .since = 0,
         },
@@ -116,7 +116,7 @@ pub const MyObjectV1Spec = struct {
     s2c_methods: []const types.Method = &.{
         .{
             .idx = 0,
-            .params = &[_]u8{@intFromEnum(hyprwire.MessageMagic.type_varchar)},
+            .params = &[_]u8{@intFromEnum(hyprwire.types.MessageMagic.type_varchar)},
             .since = 0,
         },
     },
