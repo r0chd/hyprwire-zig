@@ -34,50 +34,6 @@ pub fn CMSG_DATA(cmsg: *c.struct_cmsghdr) [*]u8 {
     return cmsg_bytes + header_size;
 }
 
-pub const Fd = struct {
-    raw: i32,
-
-    const Self = @This();
-
-    pub fn setFlags(self: *const Self, flags: u32) !void {
-        if (!self.isValid() or self.isClosed()) return error.InvalidFd;
-
-        _ = try posix.fcntl(self.raw, posix.F.SETFD, flags);
-    }
-
-    pub fn isClosed(self: *const Self) bool {
-        if (!self.isValid()) return false;
-
-        const raw_fd = self.raw;
-        const pfd = posix.pollfd{
-            .fd = raw_fd,
-            .events = posix.POLL.IN,
-            .revents = 0,
-        };
-
-        var pollfd = [_]posix.pollfd{pfd};
-        _ = posix.poll(&pollfd, 0) catch return true;
-
-        return (pfd.revents & (posix.POLL.HUP | posix.POLL.ERR)) != 0;
-    }
-
-    pub fn isValid(self: *const Self) bool {
-        return self.raw != -1;
-    }
-
-    pub fn close(self: *Self, io: Io) void {
-        if (self.isValid() and !self.isClosed()) {
-            var file = self.asFile();
-            file.close(io);
-            self.raw = -1;
-        }
-    }
-
-    pub fn asFile(self: *const Self) Io.File {
-        return Io.File{ .handle = self.raw };
-    }
-};
-
 pub fn ffiTypeFrom(magic: MessageMagic) *c.ffi_type {
     return switch (magic) {
         .type_uint, .type_object, .type_seq => &c.ffi_type_uint32,

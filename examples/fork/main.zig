@@ -206,7 +206,7 @@ fn runServer(io: Io, gpa: mem.Allocator, client_fd: i32) !void {
             continue;
         }
 
-        _ = try sock.dispatchEvents(io, gpa, false);
+        try sock.dispatchEvents(io, gpa, false);
     }
 }
 

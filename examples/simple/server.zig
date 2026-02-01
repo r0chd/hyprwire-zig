@@ -149,5 +149,5 @@ pub fn main(init: std.process.Init) !void {
     const spec = test_protocol.TestProtocolV1Impl.init(1, .from(&server));
     try socket.addImplementation(gpa, &spec.interface);
 
-    while (socket.dispatchEvents(io, gpa, true) catch false) {}
+    while (socket.dispatchEvents(io, gpa, true)) {} else |_| {}
 }

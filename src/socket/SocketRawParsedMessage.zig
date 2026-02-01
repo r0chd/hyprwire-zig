@@ -88,11 +88,13 @@ test "SocketRawParsedMessage.fromFd receives payload and fd" {
 
     var sockets: [2]posix.socket_t = undefined;
     try std.testing.expectEqual(@as(c_int, 0), c.socketpair(posix.AF.UNIX, posix.SOCK.STREAM, 0, &sockets));
-    defer for (sockets) |s| posix.close(s);
+    defer {
+        for (sockets) |s| _ = posix.system.close(s);
+    }
 
     var pipe_fds = try Io.Threaded.pipe2(.{});
     defer {
-        for (pipe_fds) |fd| posix.close(fd);
+        for (pipe_fds) |fd| _ = posix.system.close(fd);
     }
 
     const payload = "hello";
@@ -122,6 +124,7 @@ test "SocketRawParsedMessage.fromFd receives payload and fd" {
     const fd_slice: [*]i32 = @ptrCast(@alignCast(data_ptr));
     fd_slice[0] = pipe_fds[1];
 
+    // TODO: https://codeberg.org/ziglang/zig/issues/30892
     const sent = c.sendmsg(sockets[0], &msg, 0);
     try std.testing.expect(sent == payload.len);
 
@@ -137,5 +140,5 @@ test "SocketRawParsedMessage.fromFd receives payload and fd" {
     try std.testing.expectEqualStrings(payload, result.data.items);
     try std.testing.expect(result.fds.items.len == 1);
 
-    for (result.fds.items) |fd| posix.close(fd);
+    for (result.fds.items) |fd| _ = posix.system.close(fd);
 }

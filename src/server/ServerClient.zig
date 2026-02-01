@@ -114,6 +114,7 @@ pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: *Mess
     }
 
     while (self.stream.socket.handle >= 0) {
+        // TODO: https://codeberg.org/ziglang/zig/issues/30892
         const ret = c.sendmsg(self.stream.socket.handle, &msg, 0);
         if (ret < 0) {
             const err = std.posix.errno(ret);

@@ -30,7 +30,6 @@ const HANDSHAKE_MAX_MS: i64 = 5000;
 stream: Io.net.Stream,
 impls: std.ArrayList(*const ProtocolImplementation) = .empty,
 server_specs: std.ArrayList(*ProtocolSpec) = .empty,
-pollfds: std.ArrayList(posix.pollfd) = .empty,
 objects: std.ArrayList(*ClientObject) = .empty,
 handshake_begin: std.time.Instant,
 @"error": bool = false,
@@ -63,7 +62,6 @@ pub fn open(io: std.Io, gpa: mem.Allocator, source: union(enum) { fd: i32, path:
 
 pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
     self.impls.deinit(gpa);
-    self.pollfds.deinit(gpa);
     self.stream.close(io);
     for (self.objects.items) |object| {
         gpa.destroy(object);
@@ -86,33 +84,17 @@ pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
 
 pub fn attempt(self: *Self, io: std.Io, gpa: mem.Allocator, path: [:0]const u8) !void {
     var address = try Io.net.UnixAddress.init(path);
-    var stream = try address.connect(io);
-
-    try self.pollfds.append(gpa, .{
-        .fd = stream.socket.handle,
-        .events = posix.POLL.IN,
-        .revents = 0,
-    });
-
-    self.stream = stream;
+    self.stream = try address.connect(io);
 
     var message = Message.Hello.init();
     try self.sendMessage(io, gpa, &message.interface);
 }
 
 pub fn attemptFromFd(self: *Self, io: Io, gpa: mem.Allocator, raw_fd: i32) !void {
-    const stream = std.Io.net.Stream{ .socket = .{
+    self.stream = std.Io.net.Stream{ .socket = .{
         .handle = raw_fd,
         .address = .{ .ip4 = .loopback(0) },
     } };
-
-    try self.pollfds.append(gpa, .{
-        .fd = raw_fd,
-        .events = posix.POLL.IN,
-        .revents = 0,
-    });
-
-    self.stream = stream;
 
     var message = Message.Hello.init();
     try self.sendMessage(io, gpa, &message.interface);
@@ -234,25 +216,59 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
         const now = try std.time.Instant.now();
         const elapsed_ns: i64 = @intCast(now.since(self.handshake_begin));
 
-        const max_ms: i32 = @intCast(@max(HANDSHAKE_MAX_MS - @divFloor(elapsed_ns, std.time.ns_per_ms), 0));
+        const max_ms = @max(HANDSHAKE_MAX_MS - @divFloor(elapsed_ns, std.time.ns_per_ms), 0);
 
-        const ret = try posix.poll(self.pollfds.items, if (block) max_ms else 0);
-        if (block and ret == 0) {
-            log.debug("handshake error: timed out", .{});
-            self.disconnectOnError(io);
-            return error.TimedOut;
+        var peek_buf: [1]u8 = undefined;
+        var peek_msg: Io.net.IncomingMessage = .init;
+        const err, const count = self.stream.socket.receiveManyTimeout(
+            io,
+            @as(*[1]Io.net.IncomingMessage, &peek_msg),
+            &peek_buf,
+            .{ .peek = true },
+            .{ .duration = .{ .clock = .awake, .raw = if (block) .fromMilliseconds(max_ms) else .zero } },
+        );
+        if (err) |e| {
+            switch (e) {
+                error.Timeout => {
+                    if (block) {
+                        log.debug("handshake error: timed out", .{});
+                        self.disconnectOnError(io);
+                        return error.TimedOut;
+                    }
+                    return;
+                },
+                error.ConnectionResetByPeer => return error.ConnectionClosed,
+                else => return e,
+            }
+        }
+
+        // count == 0 when blocking means HUP
+        if (count == 0) {
+            if (block) return error.ConnectionClosed;
+            return;
         }
     }
 
     if (self.handshake_done) {
-        _ = try posix.poll(self.pollfds.items, if (block) -1 else 0);
-    }
+        var peek_buf: [1]u8 = undefined;
+        var peek_msg: Io.net.IncomingMessage = .init;
+        const err, const count = self.stream.socket.receiveManyTimeout(
+            io,
+            @as(*[1]Io.net.IncomingMessage, &peek_msg),
+            &peek_buf,
+            .{ .peek = true },
+            if (block) .none else .{ .duration = .{ .clock = .awake, .raw = .zero } },
+        );
+        if (err) |e| {
+            if (e == error.ConnectionResetByPeer) return error.ConnectionClosed;
+            return e;
+        }
 
-    const revents = self.pollfds.items[0].revents;
-    if ((revents & posix.POLL.HUP) != 0) {
-        return error.ConnectionClosed;
-    } else if (revents & posix.POLL.IN == 0) {
-        return;
+        // count == 0 when blocking means HUP
+        if (count == 0) {
+            if (block) return error.ConnectionClosed;
+            return;
+        }
     }
 
     // dispatch
@@ -277,12 +293,12 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
     };
 
     var i: usize = self.pending_outgoing.items.len;
-    while (i > 0) : (i -= 1) {
-        const idx = i - 1;
-        var msg = &self.pending_outgoing.items[idx];
+    while (i > 0) {
+        i -= 1;
+        var msg = &self.pending_outgoing.items[i];
         const obj = self.objectForSeq(msg.depends_on_seq);
         if (obj == null) {
-            var removed = self.pending_outgoing.orderedRemove(idx);
+            var removed = self.pending_outgoing.orderedRemove(i);
             removed.deinit(gpa);
             continue;
         }
@@ -299,7 +315,7 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
         }
 
         try self.sendMessage(io, gpa, &msg.interface);
-        var removed = self.pending_outgoing.orderedRemove(idx);
+        var removed = self.pending_outgoing.orderedRemove(i);
         removed.deinit(gpa);
     }
 
@@ -336,7 +352,6 @@ pub fn objectForSeq(self: *const Self, seq: u32) ?*ClientObject {
 }
 
 pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: *Message) !void {
-    _ = io;
     if (isTrace()) {
         const parsed = message.parseData(gpa) catch |err| {
             log.debug("[{} @ {}] -> parse error: {}", .{ self.stream.socket.handle, steadyMillis(), err });
@@ -377,19 +392,21 @@ pub fn sendMessage(self: *const Self, io: Io, gpa: mem.Allocator, message: *Mess
     }
 
     while (self.stream.socket.handle >= 0) {
+        // TODO: https://codeberg.org/ziglang/zig/issues/30892
         const ret = c.sendmsg(self.stream.socket.handle, &msg, 0);
         if (ret < 0) {
             const err = std.posix.errno(ret);
 
             if (err == .AGAIN) {
-                const pfd = posix.pollfd{
-                    .fd = self.stream.socket.handle,
-                    .events = posix.POLL.OUT,
-                    .revents = 0,
-                };
-                var pfds = [_]posix.pollfd{pfd};
-
-                _ = posix.poll(&pfds, -1) catch {};
+                var peek_buf: [1]u8 = undefined;
+                var peek_msg: Io.net.IncomingMessage = .init;
+                _, _ = self.stream.socket.receiveManyTimeout(
+                    io,
+                    @as(*[1]Io.net.IncomingMessage, &peek_msg),
+                    &peek_buf,
+                    .{ .peek = true },
+                    .none,
+                );
                 continue;
             }
         }

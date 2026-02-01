@@ -4,7 +4,6 @@ const posix = std.posix;
 const Io = std.Io;
 
 const helpers = @import("helpers");
-const Fd = helpers.Fd;
 const isTrace = helpers.isTrace;
 
 const types = @import("../implementation/types.zig");
@@ -22,12 +21,12 @@ const log = std.log.scoped(.hw);
 const Self = @This();
 
 server: ?Io.net.Server = null,
-export_fd: ?Fd = null,
-export_write_fd: ?Fd = null,
-exit_fd: Fd,
-exit_write_fd: Fd,
-wakeup_fd: Fd,
-wakeup_write_fd: Fd,
+export_fd: ?Io.File = null,
+export_write_fd: ?Io.File = null,
+exit_fd: Io.File,
+exit_write_fd: Io.File,
+wakeup_fd: Io.File,
+wakeup_write_fd: Io.File,
 pollfds: std.ArrayList(posix.pollfd) = .empty,
 clients: std.ArrayList(*ServerClient) = .empty,
 impls: std.ArrayList(*const ProtocolImplementation) = .empty,
@@ -62,10 +61,10 @@ fn init() !Self {
     var exit_pipes = try Io.Threaded.pipe2(.{ .CLOEXEC = true });
 
     return .{
-        .wakeup_fd = Fd{ .raw = wake_pipes[0] },
-        .wakeup_write_fd = Fd{ .raw = wake_pipes[1] },
-        .exit_fd = Fd{ .raw = exit_pipes[0] },
-        .exit_write_fd = Fd{ .raw = exit_pipes[1] },
+        .wakeup_fd = Io.File{ .handle = wake_pipes[0] },
+        .wakeup_write_fd = Io.File{ .handle = wake_pipes[1] },
+        .exit_fd = Io.File{ .handle = exit_pipes[0] },
+        .exit_write_fd = Io.File{ .handle = exit_pipes[1] },
     };
 }
 
@@ -79,9 +78,8 @@ pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
     if (self.poll_thread) |*thread| {
         self.thread_can_poll = false;
 
-        var file = self.exit_write_fd.asFile();
         var buffer: [1]u8 = undefined;
-        var writer = file.writer(io, &buffer);
+        var writer = self.exit_write_fd.writer(io, &buffer);
         var iowriter = &writer.interface;
         iowriter.writeAll("x") catch {};
         iowriter.flush() catch {};
@@ -136,7 +134,7 @@ pub fn dispatchPending(self: *Self, io: Io, gpa: mem.Allocator) !bool {
     return self.dispatchExistingConnections(io, gpa);
 }
 
-pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !bool {
+pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !void {
     self.poll_mtx.lock();
 
     while (try self.dispatchPending(io, gpa)) {}
@@ -155,28 +153,25 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !boo
         self.export_poll_mtx.unlock(io);
         self.export_poll_mtx_locked = false;
     }
-
-    return true;
 }
 
-fn clearFd(io: Io, fd: Fd) void {
+fn clearFd(io: Io, fd: Io.File) void {
     var buf: [128]u8 = undefined;
-    var fds = [_]posix.pollfd{.{ .fd = fd.raw, .events = posix.POLL.IN, .revents = 0 }};
+    var fds = [_]posix.pollfd{.{ .fd = fd.handle, .events = posix.POLL.IN, .revents = 0 }};
 
-    while (fd.isValid()) {
+    while (fd.length(io)) |_| {
         _ = posix.poll(&fds, 0) catch break;
 
         if (fds[0].revents & posix.POLL.IN != 0) {
-            var file = fd.asFile();
             var buffer: [128]u8 = undefined;
-            var reader = file.reader(io, &buffer);
+            var reader = fd.reader(io, &buffer);
             var ioreader = &reader.interface;
             ioreader.readSliceAll(&buf) catch break;
             continue;
         }
 
         break;
-    }
+    } else |_| {}
 }
 
 fn clearEventFd(self: *const Self, io: Io) void {
@@ -209,9 +204,8 @@ pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, fd: i32) !*ServerC
 
     try self.recheckPollFds(gpa);
 
-    var file = self.wakeup_write_fd.asFile();
     var buffer: [1]u8 = undefined;
-    var writer = file.writer(io, &buffer);
+    var writer = self.wakeup_write_fd.writer(io, &buffer);
     var iowriter = &writer.interface;
     try iowriter.writeAll("x");
     try iowriter.flush();
@@ -219,13 +213,13 @@ pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, fd: i32) !*ServerC
     return client;
 }
 
-pub fn removeClient(self: *Self, io: Io, gpa: mem.Allocator, fd: Fd) bool {
+pub fn removeClient(self: *Self, io: Io, gpa: mem.Allocator, fd: i32) bool {
     var removed: u32 = 0;
 
     var i: usize = self.clients.items.len;
     while (i > 0) : (i -= 1) {
         const client = self.clients.items[i];
-        if (client.stream.socket.handle == fd.raw) {
+        if (client.stream.socket.handle == fd) {
             var c = self.clients.swapRemove(i);
             c.deinit(io, gpa);
             gpa.destroy(c);
@@ -255,13 +249,13 @@ pub fn recheckPollFds(self: *Self, gpa: mem.Allocator) !void {
     }
 
     try self.pollfds.append(gpa, .{
-        .fd = self.exit_fd.raw,
+        .fd = self.exit_fd.handle,
         .events = posix.POLL.IN,
         .revents = 0,
     });
 
     try self.pollfds.append(gpa, .{
-        .fd = self.wakeup_fd.raw,
+        .fd = self.wakeup_fd.handle,
         .events = posix.POLL.IN,
         .revents = 0,
     });
@@ -409,7 +403,7 @@ fn threadCallback(self: *Self, io: std.Io, gpa: mem.Allocator) void {
         }
 
         pollfds.append(gpa, .{
-            .fd = self.exit_fd.raw,
+            .fd = self.exit_fd.handle,
             .events = posix.POLL.IN,
             .revents = 0,
         }) catch {
@@ -418,7 +412,7 @@ fn threadCallback(self: *Self, io: std.Io, gpa: mem.Allocator) void {
         };
 
         pollfds.append(gpa, .{
-            .fd = self.wakeup_fd.raw,
+            .fd = self.wakeup_fd.handle,
             .events = posix.POLL.IN,
             .revents = 0,
         }) catch {
@@ -444,9 +438,8 @@ fn threadCallback(self: *Self, io: std.Io, gpa: mem.Allocator) void {
         _ = posix.poll(pollfds.items, -1) catch continue;
 
         if (self.export_write_fd) |export_write_fd| {
-            var file = export_write_fd.asFile();
             var buffer: [1]u8 = undefined;
-            var writer = file.writer(io, &buffer);
+            var writer = export_write_fd.writer(io, &buffer);
             var iowriter = &writer.interface;
             iowriter.writeAll("x") catch return;
             iowriter.flush() catch return;
@@ -456,14 +449,14 @@ fn threadCallback(self: *Self, io: std.Io, gpa: mem.Allocator) void {
 
 pub fn extractLoopFD(self: *Self, io: Io, gpa: mem.Allocator) !i32 {
     if (self.export_fd) |fd| {
-        if (fd.isValid()) {
-            return fd.raw;
-        }
+        if (fd.length(io)) |_| {
+            return fd.handle;
+        } else |_| {}
     }
 
     var export_pipes = try Io.Threaded.pipe2(.{ .CLOEXEC = true });
-    self.export_fd = Fd{ .raw = export_pipes[0] };
-    self.export_write_fd = Fd{ .raw = export_pipes[1] };
+    self.export_fd = Io.File{ .handle = export_pipes[0] };
+    self.export_write_fd = Io.File{ .handle = export_pipes[1] };
     errdefer {
         if (self.export_fd) |*fd| fd.close(io);
         self.export_fd = null;
@@ -472,8 +465,8 @@ pub fn extractLoopFD(self: *Self, io: Io, gpa: mem.Allocator) !i32 {
     }
 
     var exit_pipes = try Io.Threaded.pipe2(.{ .CLOEXEC = true });
-    self.exit_fd = Fd{ .raw = exit_pipes[0] };
-    self.exit_write_fd = Fd{ .raw = exit_pipes[1] };
+    self.exit_fd = Io.File{ .handle = exit_pipes[0] };
+    self.exit_write_fd = Io.File{ .handle = exit_pipes[1] };
     errdefer {
         self.exit_fd.close(io);
         self.exit_write_fd.close(io);
@@ -487,7 +480,7 @@ pub fn extractLoopFD(self: *Self, io: Io, gpa: mem.Allocator) !i32 {
     self.poll_thread = try std.Thread.spawn(.{}, threadCallback, .{ self, io, gpa });
 
     const export_fd = self.export_fd orelse return error.NoEventFd;
-    return export_fd.raw;
+    return export_fd.handle;
 }
 
 pub fn createObject(self: *Self, io: Io, gpa: mem.Allocator, client: ?*ServerClient, reference: ?*ServerObject, object: []const u8, seq: u32) ?*ServerObject {
