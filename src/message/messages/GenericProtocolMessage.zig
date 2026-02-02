@@ -118,7 +118,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
         }
     }
 
-    const data_copy = try gpa.dupe(u8, data);
+    const data_copy = try gpa.dupe(u8, data[offset .. offset + i + 1]);
 
     return .{
         .object = object_id,
@@ -127,7 +127,7 @@ pub fn fromBytes(gpa: mem.Allocator, data: []const u8, fds_list: *std.ArrayList(
         .fds = try fds_consumed.toOwnedSlice(gpa),
         .interface = .{
             .data = data_copy,
-            .len = i + 1,
+            .len = data_copy.len,
             .message_type = .generic_protocol_message,
             .fdsFn = fdsFn,
         },

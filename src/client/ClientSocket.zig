@@ -62,7 +62,9 @@ pub fn open(io: std.Io, gpa: mem.Allocator, source: union(enum) { file: Io.File,
 
 pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
     self.impls.deinit(gpa);
-    self.stream.close(io);
+    if (self.stream.socket.handle >= 0) {
+        self.stream.close(io);
+    }
     for (self.objects.items) |object| {
         gpa.destroy(object);
     }
@@ -438,7 +440,10 @@ fn serverSpecsInner(self: *Self, gpa: mem.Allocator, specs: []const []const u8) 
 
 pub fn disconnectOnError(self: *Self, io: Io) void {
     self.@"error" = true;
-    self.stream.close(io);
+    if (self.stream.socket.handle >= 0) {
+        self.stream.close(io);
+        self.stream.socket.handle = -1;
+    }
 }
 
 pub fn roundtrip(self: *Self, io: Io, gpa: mem.Allocator) !void {

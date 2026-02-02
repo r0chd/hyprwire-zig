@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<protocol name="hyprlauncher_core" version="1">
+  <copyright>
+    BSD 3-Clause License
+
+    Copyright (c) 2025, Hypr Development
+
+    Redistribution and use in source and binary forms, with or without
+    modification, are permitted provided that the following conditions are met:
+
+    1. Redistributions of source code must retain the above copyright notice, this
+        list of conditions and the following disclaimer.
+
+    2. Redistributions in binary form must reproduce the above copyright notice,
+        this list of conditions and the following disclaimer in the documentation
+        and/or other materials provided with the distribution.
+
+    3. Neither the name of the copyright holder nor the names of its
+        contributors may be used to endorse or promote products derived from
+        this software without specific prior written permission.
+
+    THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS"
+    AND ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+    IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
+    DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT HOLDER OR CONTRIBUTORS BE LIABLE
+    FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+    DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR
+    SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER
+    CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY,
+    OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
+    OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+  </copyright>
+
+  <object name="hyprlauncher_core_manager" version="1">
+    <description summary="manager object">
+      This is the core manager object for hyprlauncher operations
+    </description>
+
+    <c2s name="set_open_state">
+      <description summary="Set the launcher's open state">
+            Sets the open state of the launcher.
+            0 - toggle
+            1 - open
+            2 - close
+      </description>
+      <arg name="state" type="uint" summary="open state"/>
+    </c2s>
+
+    <c2s name="open_with_options">
+      <description summary="Open the launcher with options">
+            Opens the launcher with given options. If the launcher
+            is already open, this is a no-op.
+      </description>
+      <arg name="options" type="array varchar" summary="option array"/>
+    </c2s>
+
+    <c2s name="get_info_object">
+      <description summary="Get launcher's info object">
+            Gets the launcher info object. That object will return some data about
+            the launcher's state
+      </description>
+      <returns iface="hyprlauncher_core_info"/>
+    </c2s>
+
+    <c2s name="destroy" destructor="true">
+      <description summary="Destroy this object">
+            Destroys this object. Children remain alive until destroyed.
+      </description>
+    </c2s>
+  </object>
+
+  <object name="hyprlauncher_core_info" version="1">
+    <description summary="manager object">
+      Info object, will emit various information about the state of the launcher
+    </description>
+
+    <s2c name="open_state">
+      <description summary="Open the launcher with options">
+            Emitted on creation of this object, and when the state changes.
+      </description>
+      <arg name="state" type="uint" summary="open state"/>
+    </s2c>
+
+    <s2c name="selection_made">
+      <description summary="Selection was made">
+            Emitted on selection by the user. The launcher will close immediately
+            after this is emitted.
+      </description>
+      <arg name="selected" type="varchar" summary="selected entry"/>
+    </s2c>
+
+    <c2s name="destroy" destructor="true">
+      <description summary="Destroy this object">
+            Destroys this object. Children remain alive until destroyed.
+      </description>
+    </c2s>
+  </object>
+</protocol>

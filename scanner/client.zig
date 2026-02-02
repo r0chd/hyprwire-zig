@@ -232,6 +232,18 @@ fn writeObjectStruct(writer: anytype, obj: Object, use_short_init: bool) !void {
         \\        opcode: u16,
         \\        args: anytype,
         \\    ) void {{
+    , .{});
+
+    if (obj.s2c_methods.len == 0) {
+        try writer.print(
+            \\
+            \\        _ = self;
+            \\        _ = args;
+        , .{});
+    }
+
+    try writer.print(
+        \\
         \\        switch (opcode) {{
     , .{});
 
@@ -346,7 +358,7 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
         \\    }}
         \\
         \\    pub fn protocolFn(_: *const types.client.ProtocolImplementation) *const types.ProtocolSpec {{
-        \\        return &(spec.TestProtocolV1ProtocolSpec{{}}).interface;
+        \\        return &(spec.{s}ProtocolSpec{{}}).interface;
         \\    }}
         \\
         \\    pub fn implementationFn(
@@ -359,7 +371,7 @@ fn writeProtocolImpl(writer: anytype, protocol: Protocol, selected: ?ObjectSet, 
         \\        errdefer gpa.free(impls);
         \\
         \\
-    , .{obj_count});
+    , .{ protocol.name_pascal, obj_count });
 
     var idx: usize = 0;
     for (protocol.objects) |obj| {

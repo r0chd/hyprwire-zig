@@ -61,6 +61,59 @@ const ProtoData = struct {
     }
 };
 
+const ParsedDocument = struct {
+    path: []const u8,
+    document: Document,
+};
+
+fn parseDocuments(alloc: mem.Allocator, io: std.Io, paths: []const [:0]const u8) ![]ParsedDocument {
+    var documents: std.ArrayList(ParsedDocument) = .empty;
+    for (paths) |proto_path| {
+        var input_file = try std.Io.Dir.cwd().openFile(io, proto_path, .{});
+        defer input_file.close(io);
+
+        var input_buf: [4096]u8 = undefined;
+        var input_reader = input_file.reader(io, &input_buf);
+        var streaming_reader: xml.Reader.Streaming = .init(alloc, &input_reader.interface, .{});
+        const reader = &streaming_reader.interface;
+
+        const document = try Document.parse(alloc, reader);
+        try documents.append(alloc, .{
+            .path = proto_path,
+            .document = document,
+        });
+    }
+    return try documents.toOwnedSlice(alloc);
+}
+
+fn findDocumentForProtocol(documents: []const ParsedDocument, name: []const u8) ?*const ParsedDocument {
+    for (documents) |*doc| {
+        const protocol_element = Scanner.findProtocolElement(&doc.document) orelse continue;
+
+        // Check if the name matches the protocol name
+        const protocol_name = protocol_element.attributes.get("name") orelse continue;
+        if (mem.eql(u8, protocol_name, name)) {
+            return doc;
+        }
+
+        // Check if the name matches any object/interface name
+        for (protocol_element.children) |child| {
+            switch (child) {
+                .element => |e| {
+                    if (mem.eql(u8, e.name, "object")) {
+                        const obj_name = e.attributes.get("name") orelse continue;
+                        if (mem.eql(u8, obj_name, name)) {
+                            return doc;
+                        }
+                    }
+                },
+                else => {},
+            }
+        }
+    }
+    return null;
+}
+
 pub fn main(init: std.process.Init) !void {
     const alloc = init.arena.allocator();
 
@@ -71,10 +124,6 @@ pub fn main(init: std.process.Init) !void {
         },
         error.MissingOutPath => {
             log.err("Missing out path argument\n", .{});
-            process.exit(1);
-        },
-        error.MissingProtoPath => {
-            log.err("Missing proto path argument\n", .{});
             process.exit(1);
         },
         error.MissingInputPath => {
@@ -90,22 +139,24 @@ pub fn main(init: std.process.Init) !void {
         },
     };
 
-    var input_file = try std.Io.Dir.cwd().openFile(init.io, cli.protopath, .{});
-    defer input_file.close(init.io);
+    if (cli.protopaths.len == 0) {
+        log.err("No input files specified\n", .{});
+        process.exit(1);
+    }
 
-    var input_buf: [4096]u8 = undefined;
-    var input_reader = input_file.reader(init.io, &input_buf);
-    var streaming_reader: xml.Reader.Streaming = .init(alloc, &input_reader.interface, .{});
-    const reader = &streaming_reader.interface;
-
-    const document = try Document.parse(alloc, reader);
-
-    const proto_data = try ProtoData.init(alloc, cli.protopath, &document);
+    const documents = try parseDocuments(alloc, init.io, cli.protopaths);
 
     for (cli.protocols) |p| {
         const base_name = p.name;
 
-        const client_src = Scanner.generateClientCodeForGlobal(alloc, &document, p.name, p.version) catch |err| {
+        const parsed_doc = findDocumentForProtocol(documents, p.name) orelse {
+            log.err("Unknown global interface '{s}'\n", .{p.name});
+            process.exit(1);
+        };
+        const document = &parsed_doc.document;
+        const proto_data = try ProtoData.init(alloc, parsed_doc.path, document);
+
+        const client_src = Scanner.generateClientCodeForGlobal(alloc, document, p.name, p.version) catch |err| {
             switch (err) {
                 Scanner.GenerateError.ProtocolVersionTooLow => {
                     log.err("Protocol xml version ({}) is less than requested version ({})\n", .{ proto_data.version, p.version });
@@ -120,7 +171,7 @@ pub fn main(init: std.process.Init) !void {
         };
         defer alloc.free(client_src);
 
-        const server_src = Scanner.generateServerCodeForGlobal(alloc, &document, p.name, p.version) catch |err| {
+        const server_src = Scanner.generateServerCodeForGlobal(alloc, document, p.name, p.version) catch |err| {
             switch (err) {
                 Scanner.GenerateError.ProtocolVersionTooLow => {
                     log.err("Protocol xml version ({}) is less than requested version ({})\n", .{ proto_data.version, p.version });
@@ -135,7 +186,7 @@ pub fn main(init: std.process.Init) !void {
         };
         defer alloc.free(server_src);
 
-        const spec_src = Scanner.generateSpecCodeForGlobal(alloc, &document, p.name, p.version) catch |err| {
+        const spec_src = Scanner.generateSpecCodeForGlobal(alloc, document, p.name, p.version) catch |err| {
             switch (err) {
                 Scanner.GenerateError.ProtocolVersionTooLow => {
                     log.err("Protocol xml version ({}) is less than requested version ({})\n", .{ proto_data.version, p.version });

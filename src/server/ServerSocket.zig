@@ -86,6 +86,8 @@ pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
             self.poll_event_cv.signal();
         }
 
+        self.exit_write_fd.lock(io, .exclusive) catch {};
+        defer self.exit_write_fd.unlock(io);
         var buffer: [1]u8 = undefined;
         var writer = self.exit_write_fd.writer(io, &buffer);
         var iowriter = &writer.interface;
@@ -144,8 +146,8 @@ pub fn dispatchEvents(self: *Self, io: Io, gpa: mem.Allocator, block: bool) !voi
 
     while (try self.dispatchPending(io, gpa)) {}
 
-    self.clearEventFd(io);
-    self.clearWakeupFd(io);
+    try self.clearEventFd(io);
+    try self.clearWakeupFd(io);
 
     if (block) {
         _ = try posix.poll(self.pollfds.items, -1);
@@ -179,13 +181,17 @@ fn clearFd(_: Io, fd: Io.File) void {
     }
 }
 
-fn clearEventFd(self: *const Self, io: Io) void {
+fn clearEventFd(self: *const Self, io: Io) !void {
     if (self.export_fd) |fd| {
+        try fd.lock(io, .exclusive);
+        defer fd.unlock(io);
         clearFd(io, fd);
     }
 }
 
-fn clearWakeupFd(self: *const Self, io: Io) void {
+fn clearWakeupFd(self: *const Self, io: Io) !void {
+    try self.wakeup_fd.lock(io, .exclusive);
+    defer self.wakeup_fd.unlock(io);
     clearFd(io, self.wakeup_fd);
 }
 
@@ -209,6 +215,8 @@ pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, file: Io.File) !*S
 
     try self.recheckPollFds(gpa);
 
+    try self.wakeup_write_fd.lock(io, .exclusive);
+    defer self.wakeup_write_fd.unlock(io);
     var buffer: [1]u8 = undefined;
     var writer = self.wakeup_write_fd.writer(io, &buffer);
     var iowriter = &writer.interface;
@@ -222,7 +230,8 @@ pub fn removeClient(self: *Self, io: Io, gpa: mem.Allocator, file: Io.File) bool
     var removed: u32 = 0;
 
     var i: usize = self.clients.items.len;
-    while (i > 0) : (i -= 1) {
+    while (i > 0) {
+        i -= 1;
         const client = self.clients.items[i];
         if (client.stream.socket.handle == file.handle) {
             var c = self.clients.swapRemove(i);

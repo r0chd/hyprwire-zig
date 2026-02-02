@@ -15,14 +15,14 @@ pub const Protocol = struct {
     version: u32,
 };
 
-protopath: [:0]const u8,
+protopaths: []const [:0]const u8,
 outpath: [:0]const u8,
 protocols: []Protocol,
 
 const Self = @This();
 
 pub fn init(gpa: mem.Allocator, args: std.process.Args) !Self {
-    var protopath: ?[:0]const u8 = null;
+    var protopaths: std.ArrayList([:0]const u8) = .empty;
     var outpath: ?[:0]const u8 = null;
     var protocols: std.ArrayList(Protocol) = .empty;
 
@@ -35,7 +35,8 @@ pub fn init(gpa: mem.Allocator, args: std.process.Args) !Self {
                     outpath = iter.next() orelse return error.MissingOutputPath;
                 },
                 .@"-i" => {
-                    protopath = iter.next() orelse return error.MissingInputPath;
+                    const path = iter.next() orelse return error.MissingInputPath;
+                    try protopaths.append(gpa, path);
                 },
                 .@"-p" => {
                     const name = iter.next() orelse return error.MissingProtocolName;
@@ -47,9 +48,7 @@ pub fn init(gpa: mem.Allocator, args: std.process.Args) !Self {
                 },
             }
         } else {
-            if (protopath == null) {
-                protopath = arg;
-            } else if (outpath == null) {
+            if (outpath == null) {
                 outpath = arg;
             } else {
                 return error.TooManyArguments;
@@ -58,7 +57,7 @@ pub fn init(gpa: mem.Allocator, args: std.process.Args) !Self {
     }
 
     return Self{
-        .protopath = protopath orelse return error.MissingProtoPath,
+        .protopaths = try protopaths.toOwnedSlice(gpa),
         .outpath = outpath orelse return error.MissingOutPath,
         .protocols = try protocols.toOwnedSlice(gpa),
     };
