@@ -69,13 +69,13 @@ pub const MyManagerV1Object = struct {
     pub const Event = MyManagerV1Event;
     pub const Listener = MyManagerV1Listener;
 
-    object: *const types.Object,
+    object: types.Object,
     listener: Listener,
     arena: std.heap.ArenaAllocator,
 
     const Self = @This();
 
-    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {
+    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: types.Object) !*Self {
         const self = try gpa.create(Self);
         self.* = .{
             .listener = listener,
@@ -83,53 +83,48 @@ pub const MyManagerV1Object = struct {
             .arena = std.heap.ArenaAllocator.init(gpa),
         };
 
-        object.vtable.setData(object.ptr, self);
-        try object.vtable.listen(object.ptr, gpa, 0, @ptrCast(&myManagerV1_method0));
-        try object.vtable.listen(object.ptr, gpa, 1, @ptrCast(&myManagerV1_method1));
+        self.object.vtable.setData(self.object.ptr, self);
+        try self.object.vtable.listen(self.object.ptr, gpa, 0, @ptrCast(&myManagerV1_method0));
+        try self.object.vtable.listen(self.object.ptr, gpa, 1, @ptrCast(&myManagerV1_method1));
 
         return self;
     }
-
-    pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+    pub fn deinit(self: *Self, io: std.Io, gpa: std.mem.Allocator) void {
+        _ = io;
         gpa.destroy(self);
     }
 
     pub fn sendSendMessage(self: *Self, io: std.Io, gpa: std.mem.Allocator, @"message": [:0]const u8) !void {
-        var buffer: [1]types.Arg = undefined;
-        var args = types.Args.init(&buffer, .{
+        const wire: types.WireObject = .{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) };
+        _ = try wire.callMethod(io, gpa, 0, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, io, gpa, 0, &args);
     }
 
-    pub fn sendSendMessageFd(self: *Self, io: std.Io, gpa: std.mem.Allocator, @"message": i32) !void {
-        var buffer: [1]types.Arg = undefined;
-        var args = types.Args.init(&buffer, .{
+    pub fn sendSendMessageFd(self: *Self, io: std.Io, gpa: std.mem.Allocator, @"message": std.Io.File) !void {
+        const wire: types.WireObject = .{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) };
+        _ = try wire.callMethod(io, gpa, 1, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, io, gpa, 1, &args);
     }
 
     pub fn sendSendMessageArray(self: *Self, io: std.Io, gpa: std.mem.Allocator, @"message": []const [:0]const u8) !void {
-        var buffer: [1]types.Arg = undefined;
-        var args = types.Args.init(&buffer, .{
+        const wire: types.WireObject = .{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) };
+        _ = try wire.callMethod(io, gpa, 2, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, io, gpa, 2, &args);
     }
 
     pub fn sendSendMessageArrayUint(self: *Self, io: std.Io, gpa: std.mem.Allocator, @"message": []const u32) !void {
-        var buffer: [1]types.Arg = undefined;
-        var args = types.Args.init(&buffer, .{
+        const wire: types.WireObject = .{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) };
+        _ = try wire.callMethod(io, gpa, 3, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, io, gpa, 3, &args);
     }
 
     pub fn sendMakeObject(self: *Self, io: std.Io, gpa: std.mem.Allocator) !types.Object {
-        var buffer: [0]types.Arg = undefined;
-        var args = types.Args.init(&buffer, .{});
-        const seq = try self.object.vtable.call(self.object.ptr, io, gpa, 4, &args);
+        const wire: types.WireObject = .{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) };
+        const seq = try wire.callMethod(io, gpa, 4, .{});
         if (self.object.vtable.clientSock(self.object.ptr)) |sock| {
             const obj = sock.objectForSeq(seq) orelse return error.NoObject;
             return types.Object.from(obj);
@@ -187,13 +182,13 @@ pub const MyObjectV1Object = struct {
     pub const Event = MyObjectV1Event;
     pub const Listener = MyObjectV1Listener;
 
-    object: *const types.Object,
+    object: types.Object,
     listener: Listener,
     arena: std.heap.ArenaAllocator,
 
     const Self = @This();
 
-    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {
+    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: types.Object) !*Self {
         const self = try gpa.create(Self);
         self.* = .{
             .object = object,
@@ -201,37 +196,33 @@ pub const MyObjectV1Object = struct {
             .arena = std.heap.ArenaAllocator.init(gpa),
         };
 
-        object.vtable.setData(object.ptr, self);
-        try object.vtable.listen(object.ptr, gpa, 0, @ptrCast(&myObjectV1_method0));
+        self.object.vtable.setData(self.object.ptr, self);
+        try self.object.vtable.listen(self.object.ptr, gpa, 0, @ptrCast(&myObjectV1_method0));
 
         return self;
     }
-
-    pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {
+    pub fn deinit(self: *Self, io: std.Io, gpa: std.mem.Allocator) void {
+        self.sendDestroy(io, gpa);
         gpa.destroy(self);
     }
 
     pub fn sendSendMessage(self: *Self, io: std.Io, gpa: std.mem.Allocator, @"message": [:0]const u8) !void {
-        var buffer: [1]types.Arg = undefined;
-        var args = types.Args.init(&buffer, .{
+        const wire: types.WireObject = .{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) };
+        _ = try wire.callMethod(io, gpa, 0, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, io, gpa, 0, &args);
     }
 
     pub fn sendSendEnum(self: *Self, io: std.Io, gpa: std.mem.Allocator, @"message": spec.MyEnum) !void {
-        var buffer: [1]types.Arg = undefined;
-        var args = types.Args.init(&buffer, .{
+        const wire: types.WireObject = .{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) };
+        _ = try wire.callMethod(io, gpa, 1, .{
             @"message",
         });
-        _ = try self.object.vtable.call(self.object.ptr, io, gpa, 1, &args);
     }
 
-    pub fn sendDestroy(self: *Self, io: std.Io, gpa: std.mem.Allocator) !void {
-        var buffer: [0]types.Arg = undefined;
-        var args = types.Args.init(&buffer, .{});
-        _ = try self.object.vtable.call(self.object.ptr, io, gpa, 2, &args);
-        self.object.destroy();
+    fn sendDestroy(self: *Self, io: std.Io, gpa: std.mem.Allocator) void {
+        const wire: types.WireObject = .{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) };
+        _ = wire.callMethod(io, gpa, 2, .{}) catch {};
     }
 
     pub fn dispatch(

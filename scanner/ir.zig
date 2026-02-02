@@ -385,10 +385,10 @@ fn computeSendArgType(gpa: mem.Allocator, base_type: []const u8, is_array: bool,
         return fmt.allocPrint(gpa, "{s}[:0]const u8", .{arr});
     } else if (mem.eql(u8, base_type, "uint")) {
         return fmt.allocPrint(gpa, "{s}u32", .{arr});
-    } else if (mem.eql(u8, base_type, "int") or
-        mem.eql(u8, base_type, "fd"))
-    {
+    } else if (mem.eql(u8, base_type, "int")) {
         return fmt.allocPrint(gpa, "{s}i32", .{arr});
+    } else if (mem.eql(u8, base_type, "fd")) {
+        return fmt.allocPrint(gpa, "{s}std.Io.File", .{arr});
     } else if (mem.eql(u8, base_type, "enum")) {
         const enum_pascal = try toPascalCase(interface, gpa);
         return fmt.allocPrint(gpa, "{s}spec.{s}", .{ arr, enum_pascal });

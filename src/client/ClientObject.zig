@@ -35,7 +35,6 @@ const Self = @This();
 
 pub const vtable: WireObject.VTable = .{
     .object = .{
-        .call = call,
         .listen = listen,
         .clientSock = clientSock,
         .setData = setData,
@@ -143,11 +142,6 @@ pub fn deinit(ptr: *anyopaque, gpa: mem.Allocator) void {
     if (self.on_deinit) |onDeinit| {
         onDeinit();
     }
-}
-
-fn call(ptr: *anyopaque, io: Io, gpa: mem.Allocator, id: u32, args: *types.Args) anyerror!u32 {
-    const self: *Self = @ptrCast(@alignCast(ptr));
-    return WireObject.from(self).callMethod(io, gpa, id, args);
 }
 
 fn listen(ptr: *anyopaque, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) anyerror!void {

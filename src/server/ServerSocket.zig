@@ -189,9 +189,9 @@ fn clearWakeupFd(self: *const Self, io: Io) void {
     clearFd(io, self.wakeup_fd);
 }
 
-pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, fd: i32) !*ServerClient {
+pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, file: Io.File) !*ServerClient {
     const stream = std.Io.net.Stream{ .socket = .{
-        .handle = fd,
+        .handle = file.handle,
         .address = .{ .ip4 = .loopback(0) },
     } };
     const x = ServerClient{ .stream = stream };
@@ -200,7 +200,7 @@ pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, fd: i32) !*ServerC
     errdefer gpa.destroy(client);
     client.* = x;
 
-    _ = posix.system.fcntl(fd, posix.F.GETFL, @as(u32, 0));
+    _ = posix.system.fcntl(file.handle, posix.F.GETFL, @as(u32, 0));
 
     client.self = client;
     client.server = self;
@@ -218,13 +218,13 @@ pub fn addClient(self: *Self, io: std.Io, gpa: mem.Allocator, fd: i32) !*ServerC
     return client;
 }
 
-pub fn removeClient(self: *Self, io: Io, gpa: mem.Allocator, fd: i32) bool {
+pub fn removeClient(self: *Self, io: Io, gpa: mem.Allocator, file: Io.File) bool {
     var removed: u32 = 0;
 
     var i: usize = self.clients.items.len;
     while (i > 0) : (i -= 1) {
         const client = self.clients.items[i];
-        if (client.stream.socket.handle == fd) {
+        if (client.stream.socket.handle == file.handle) {
             var c = self.clients.swapRemove(i);
             c.deinit(io, gpa);
             gpa.destroy(c);

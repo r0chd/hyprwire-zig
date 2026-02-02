@@ -134,13 +134,13 @@ fn writeObjectStruct(writer: anytype, obj: Object) !void {
     try writer.print("    pub const Listener = {s}Listener;\n\n", .{obj.name_pascal});
 
     try writer.print(
-        \\    object: *const types.Object,
+        \\    object: types.Object,
         \\    listener: Listener,
         \\    arena: std.heap.ArenaAllocator,
         \\
         \\    const Self = @This();
         \\
-        \\    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {{
+        \\    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: types.Object) !*Self {{
         \\        const self = try gpa.create(Self);
         \\        self.* = .{{
     , .{});
@@ -153,7 +153,7 @@ fn writeObjectStruct(writer: anytype, obj: Object) !void {
             \\            .arena = std.heap.ArenaAllocator.init(gpa),
             \\        }};
             \\
-            \\        object.vtable.setData(object.ptr, self);
+            \\        self.object.vtable.setData(self.object.ptr, self);
             \\
         , .{});
     } else {
@@ -164,14 +164,14 @@ fn writeObjectStruct(writer: anytype, obj: Object) !void {
             \\            .arena = std.heap.ArenaAllocator.init(gpa),
             \\        }};
             \\
-            \\        object.vtable.setData(object.ptr, self);
+            \\        self.object.vtable.setData(self.object.ptr, self);
             \\
         , .{});
     }
 
     try writer.print("\n", .{});
     for (obj.c2s_methods, 0..) |_, idx| {
-        try writer.print("        try object.vtable.listen(object.ptr, gpa, {}, @ptrCast(&{s}_method{}));\n", .{ idx, obj.name_camel, idx });
+        try writer.print("        try self.object.vtable.listen(self.object.ptr, gpa, {}, @ptrCast(&{s}_method{}));\n", .{ idx, obj.name_camel, idx });
     }
 
     if (is_first_object) {
@@ -185,7 +185,7 @@ fn writeObjectStruct(writer: anytype, obj: Object) !void {
             \\    }}
             \\
             \\    pub fn getObject(self: *const Self) *const types.Object {{
-            \\        return self.object;
+            \\        return &self.object;
             \\    }}
             \\
             \\    pub fn @"error"(self: *const Self, code: u32, message: []const u8) void {{
@@ -230,9 +230,8 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
         try writer.print(
             \\
             \\    pub fn send{s}(self: *Self, io: std.Io, gpa: std.mem.Allocator) !void {{
-            \\        var buffer: [0]types.Arg = undefined;
-            \\        var args = types.Args.init(&buffer, .{{}});
-            \\        _ = try self.object.vtable.call(self.object.ptr, io, gpa, {}, &args);
+            \\        const wire: types.WireObject = .{{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) }};
+            \\        _ = try wire.callMethod(io, gpa, {}, .{{}});
             \\    }}
         , .{ method.name_pascal, method.idx });
     } else {
@@ -244,21 +243,20 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
 
         try writer.print(
             \\) !void {{
-            \\        var buffer: [{d}]types.Arg = undefined;
-            \\        var args = types.Args.init(&buffer, .{{
+            \\        const wire: types.WireObject = .{{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) }};
+            \\        _ = try wire.callMethod(io, gpa, {}, .{{
             \\
-        , .{method.args.len});
+        , .{method.idx});
 
         for (method.args) |arg| {
-            try writer.print("            @\"{s}\",\n", .{arg.name});
+            try writer.print("            {s},\n", .{arg.name});
         }
 
         try writer.print(
             \\        }});
-            \\        _ = try self.object.vtable.call(self.object.ptr, io, gpa, {}, &args);
             \\    }}
             \\
-        , .{method.idx});
+        , .{});
     }
 }
 

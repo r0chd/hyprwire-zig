@@ -79,19 +79,16 @@ pub fn main(init: std.process.Init) !void {
     var manager = try test_protocol.MyManagerV1Object.init(
         gpa,
         .from(&client),
-        &obj,
+        obj,
     );
-    defer manager.deinit(gpa);
+    defer manager.deinit(io, gpa);
 
     std.debug.print("Bound!\n", .{});
 
     var pipes = try Io.Threaded.pipe2(.{});
-    defer {
-        _ = posix.system.close(pipes[0]);
-        _ = posix.system.close(pipes[1]);
-    }
 
     var out: Io.File = .{ .handle = pipes[1] };
+    defer out.close(io);
     var buffer: [5]u8 = undefined;
     var writer = out.writer(io, &buffer);
     var iowriter = &writer.interface;
@@ -100,8 +97,10 @@ pub fn main(init: std.process.Init) !void {
 
     std.debug.print("Will send fd {}\n", .{pipes[0]});
 
+    var in = Io.File{ .handle = pipes[0] };
+    defer in.close(io);
     try manager.sendSendMessage(io, gpa, "Hello!");
-    try manager.sendSendMessageFd(io, gpa, pipes[0]);
+    try manager.sendSendMessageFd(io, gpa, in);
     try manager.sendSendMessageArray(io, gpa, &.{ "Hello", "via", "array!" });
     try manager.sendSendMessageArray(io, gpa, &.{});
     try manager.sendSendMessageArrayUint(io, gpa, &.{ 69, 420, 2137 });
@@ -113,9 +112,9 @@ pub fn main(init: std.process.Init) !void {
     var object = try test_protocol.MyObjectV1Object.init(
         gpa,
         .from(&client),
-        &object_arg,
+        object_arg,
     );
-    defer object.deinit(gpa);
+    defer object.deinit(io, gpa);
 
     try object.sendSendMessage(io, gpa, "Hello on object");
     try object.sendSendEnum(io, gpa, .world);

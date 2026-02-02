@@ -8,7 +8,6 @@ const ServerSocket = @import("../server/ServerSocket.zig");
 const types = @import("types.zig");
 
 pub const VTable = struct {
-    call: *const fn (*anyopaque, std.Io, mem.Allocator, u32, *types.Args) anyerror!u32,
     listen: *const fn (*anyopaque, mem.Allocator, u32, *const fn (*anyopaque) void) anyerror!void,
     clientSock: *const fn (*anyopaque) ?*ClientSocket = defaultClientSock,
     serverSock: *const fn (*anyopaque) ?*ServerSocket = defaultServerSock,
@@ -67,10 +66,6 @@ pub fn from(impl: anytype) Self {
     }
 
     @compileError("Implementation type must have a 'vtable' declaration with an 'object' field of type VTable");
-}
-
-pub fn call(self: Self, io: std.Io, gpa: mem.Allocator, id: u32, args: *types.Args) anyerror!u32 {
-    return self.vtable.call(self.ptr, io, gpa, id, args);
 }
 
 pub fn listen(self: Self, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) anyerror!void {

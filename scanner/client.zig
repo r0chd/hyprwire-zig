@@ -127,13 +127,13 @@ fn writeObjectStruct(writer: anytype, obj: Object, use_short_init: bool) !void {
     try writer.print("    pub const Listener = {s}Listener;\n\n", .{obj.name_pascal});
 
     try writer.print(
-        \\    object: *const types.Object,
+        \\    object: types.Object,
         \\    listener: Listener,
         \\    arena: std.heap.ArenaAllocator,
         \\
         \\    const Self = @This();
         \\
-        \\    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {{
+        \\    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: types.Object) !*Self {{
         \\        const self = try gpa.create(Self);
         \\        self.* = .{{
     , .{});
@@ -146,7 +146,7 @@ fn writeObjectStruct(writer: anytype, obj: Object, use_short_init: bool) !void {
             \\            .arena = std.heap.ArenaAllocator.init(gpa),
             \\        }};
             \\
-            \\        object.vtable.setData(object.ptr, self);
+            \\        self.object.vtable.setData(self.object.ptr, self);
             \\
         , .{});
     } else {
@@ -157,13 +157,13 @@ fn writeObjectStruct(writer: anytype, obj: Object, use_short_init: bool) !void {
             \\            .arena = std.heap.ArenaAllocator.init(gpa),
             \\        }};
             \\
-            \\        object.vtable.setData(object.ptr, self);
+            \\        self.object.vtable.setData(self.object.ptr, self);
             \\
         , .{});
     }
 
     for (obj.s2c_methods, 0..) |_, idx| {
-        try writer.print("        try object.vtable.listen(object.ptr, gpa, {}, @ptrCast(&{s}_method{}));\n", .{ idx, obj.name_camel, idx });
+        try writer.print("        try self.object.vtable.listen(self.object.ptr, gpa, {}, @ptrCast(&{s}_method{}));\n", .{ idx, obj.name_camel, idx });
     }
 
     try writer.print(
@@ -171,7 +171,51 @@ fn writeObjectStruct(writer: anytype, obj: Object, use_short_init: bool) !void {
         \\        return self;
         \\    }}
         \\
-        \\    pub fn deinit(self: *Self, gpa: std.mem.Allocator) void {{
+    , .{});
+
+    // Collect all destructor args for deinit signature
+    var destructor_args: std.ArrayList(struct { name: []const u8, zig_type: []const u8 }) = .empty;
+    var destructor_methods: std.ArrayList(struct { name_pascal: []const u8, arg_names: []const []const u8 }) = .empty;
+    var arg_name_counts = std.StringHashMap(u32).init(std.heap.page_allocator);
+
+    for (obj.c2s_methods) |method| {
+        if (method.is_destructor) {
+            var method_arg_names: std.ArrayList([]const u8) = .empty;
+            for (method.args) |arg| {
+                const count = arg_name_counts.get(arg.name) orelse 0;
+                const renamed = if (count == 0)
+                    try std.fmt.allocPrint(std.heap.page_allocator, "{s}0", .{arg.name})
+                else
+                    try std.fmt.allocPrint(std.heap.page_allocator, "{s}{}", .{ arg.name, count });
+                try arg_name_counts.put(arg.name, count + 1);
+                try destructor_args.append(std.heap.page_allocator, .{ .name = renamed, .zig_type = arg.zig_send_type });
+                try method_arg_names.append(std.heap.page_allocator, renamed);
+            }
+            try destructor_methods.append(std.heap.page_allocator, .{
+                .name_pascal = method.name_pascal,
+                .arg_names = try method_arg_names.toOwnedSlice(std.heap.page_allocator),
+            });
+        }
+    }
+
+    try writer.print("    pub fn deinit(self: *Self, io: std.Io, gpa: std.mem.Allocator", .{});
+    for (destructor_args.items) |arg| {
+        try writer.print(", @\"{s}\": {s}", .{ arg.name, arg.zig_type });
+    }
+    try writer.print(") void {{\n", .{});
+
+    if (destructor_methods.items.len == 0) {
+        try writer.print("        _ = io;\n", .{});
+    } else {
+        for (destructor_methods.items) |method| {
+            try writer.print("        self.send{s}(io, gpa", .{method.name_pascal});
+            for (method.arg_names) |arg_name| {
+                try writer.print(", @\"{s}\"", .{arg_name});
+            }
+            try writer.print(");\n", .{});
+        }
+    }
+    try writer.print(
         \\        gpa.destroy(self);
         \\    }}
         \\
@@ -215,9 +259,8 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
         try writer.print(
             \\
             \\    pub fn send{s}(self: *Self, io: std.Io, gpa: std.mem.Allocator) !types.Object {{
-            \\        var buffer: [0]types.Arg = undefined;
-            \\        var args = types.Args.init(&buffer, .{{}});
-            \\        const seq = try self.object.vtable.call(self.object.ptr, io, gpa, {}, &args);
+            \\        const wire: types.WireObject = .{{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) }};
+            \\        const seq = try wire.callMethod(io, gpa, {}, .{{}});
             \\        if (self.object.vtable.clientSock(self.object.ptr)) |sock| {{
             \\            const obj = sock.objectForSeq(seq) orelse return error.NoObject;
             \\            return types.Object.from(obj);
@@ -227,46 +270,59 @@ fn writeSendMethod(writer: anytype, method: Method) !void {
             \\    }}
             \\
         , .{ method.name_pascal, method.idx });
-    } else if (method.is_destructor) {
-        try writer.print(
-            \\
-            \\    pub fn send{s}(self: *Self, io: std.Io, gpa: std.mem.Allocator) !void {{
-            \\        var buffer: [0]types.Arg = undefined;
-            \\        var args = types.Args.init(&buffer, .{{}});
-            \\        _ = try self.object.vtable.call(self.object.ptr, io, gpa, {}, &args);
-            \\        self.object.destroy();
-            \\    }}
-            \\
-        , .{ method.name_pascal, method.idx });
-    } else if (method.args.len == 0) {
-        try writer.print(
-            \\
-            \\    pub fn send{s}(self: *Self, io: std.Io, gpa: std.mem.Allocator) !void {{
-            \\        var buffer: [0]types.Arg = undefined;
-            \\        var args = types.Args.init(&buffer, .{{}});
-            \\        _ = try self.object.vtable.call(self.object.ptr, io, gpa, {}, &args);
-            \\    }}
-            \\
-        , .{ method.name_pascal, method.idx });
-    } else {
-        try writer.print("\n    pub fn send{s}(self: *Self, io: std.Io, gpa: std.mem.Allocator", .{method.name_pascal});
+        return;
+    }
 
-        for (method.args) |arg| {
-            try writer.print(", @\"{s}\": {s}", .{ arg.name, arg.zig_send_type });
+    const visibility = if (method.is_destructor) "" else "pub ";
+    const return_type = if (method.is_destructor) "void" else "!void";
+
+    try writer.print("\n    {s}fn send{s}(self: *Self, io: std.Io, gpa: std.mem.Allocator", .{ visibility, method.name_pascal });
+
+    for (method.args) |arg| {
+        try writer.print(", @\"{s}\": {s}", .{ arg.name, arg.zig_send_type });
+    }
+
+    try writer.print(") {s} {{\n", .{return_type});
+    try writer.print("        const wire: types.WireObject = .{{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) }};\n", .{});
+
+    if (method.args.len == 0) {
+        if (method.is_destructor) {
+            try writer.print(
+                \\        _ = wire.callMethod(io, gpa, {}, .{{}}) catch {{}};
+                \\    }}
+                \\
+            , .{method.idx});
+        } else {
+            try writer.print(
+                \\        _ = try wire.callMethod(io, gpa, {}, .{{}});
+                \\    }}
+                \\
+            , .{method.idx});
         }
-
-        try writer.print(") !void {{\n        var buffer: [{d}]types.Arg = undefined;\n        var args = types.Args.init(&buffer, .{{\n", .{method.args.len});
-
+    } else {
+        // Build tuple directly
+        try writer.print("        ", .{});
+        if (method.is_destructor) {
+            try writer.print("_ = wire.callMethod(io, gpa, {}, .{{\n", .{method.idx});
+        } else {
+            try writer.print("_ = try wire.callMethod(io, gpa, {}, .{{\n", .{method.idx});
+        }
         for (method.args) |arg| {
             try writer.print("            @\"{s}\",\n", .{arg.name});
         }
-
-        try writer.print(
-            \\        }});
-            \\        _ = try self.object.vtable.call(self.object.ptr, io, gpa, {}, &args);
-            \\    }}
-            \\
-        , .{method.idx});
+        if (method.is_destructor) {
+            try writer.print(
+                \\        }}) catch {{}};
+                \\    }}
+                \\
+            , .{});
+        } else {
+            try writer.print(
+                \\        }});
+                \\    }}
+                \\
+            , .{});
+        }
     }
 }
 

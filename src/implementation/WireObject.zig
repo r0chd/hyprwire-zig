@@ -76,10 +76,6 @@ pub fn asObject(self: Self) Object {
 }
 
 // Object methods (delegated)
-pub fn call(self: Self, io: std.Io, gpa: mem.Allocator, id: u32, args: *types.Args) anyerror!u32 {
-    return self.vtable.object.call(self.ptr, io, gpa, id, args);
-}
-
 pub fn listen(self: Self, gpa: mem.Allocator, id: u32, callback: *const fn (*anyopaque) void) anyerror!void {
     return self.vtable.object.listen(self.ptr, gpa, id, callback);
 }
@@ -149,7 +145,18 @@ pub fn getId(self: Self) u32 {
     return self.vtable.getId(self.ptr);
 }
 
-pub fn callMethod(self: Self, io: std.Io, gpa: mem.Allocator, id: u32, args: *types.Args) anyerror!u32 {
+pub fn callMethod(self: Self, io: std.Io, gpa: mem.Allocator, id: u32, args: anytype) !u32 {
+    const ArgsType = @TypeOf(args);
+    const args_type_info = @typeInfo(ArgsType);
+    if (args_type_info != .@"struct") {
+        @compileError("expected tuple or struct argument, found " ++ @typeName(ArgsType));
+    }
+
+    const fields_info = args_type_info.@"struct".fields;
+    if (fields_info.len > 32) {
+        @compileError("32 arguments max are supported");
+    }
+
     const methods = self.methodsOut();
     if (methods.len <= id) {
         const msg = try fmt.allocPrintSentinel(gpa, "core protocol error: invalid method {} for object {}", .{ id, self.getId() }, 0);
@@ -160,7 +167,6 @@ pub fn callMethod(self: Self, io: std.Io, gpa: mem.Allocator, id: u32, args: *ty
     }
 
     const method = methods[id];
-    const params = method.params;
 
     if (method.since > self.getVersion()) {
         const msg = try fmt.allocPrintSentinel(gpa, "method {} since {} but has {}", .{ id, method.since, self.getVersion() }, 0);
@@ -216,113 +222,83 @@ pub fn callMethod(self: Self, io: std.Io, gpa: mem.Allocator, id: u32, args: *ty
         try data.appendSlice(gpa, &seq_buf);
     }
 
-    var i: usize = 0;
-    while (i < params.len) : (i += 1) {
-        const param = std.enums.fromInt(MessageMagic, params[i]) orelse return error.InvalidMessage;
-        switch (param) {
-            .type_uint => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
-                const arg = (args.next() orelse return error.InvalidMessage).get(u32) orelse return error.InvalidMessage;
+    inline for (fields_info) |field| {
+        const field_value = @field(args, field.name);
+        const field_type = field.type;
+
+        if (@typeInfo(field_type) == .@"enum") {
+            try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
+            const tag_int: u32 = @intCast(@intFromEnum(field_value));
+            var buf: [4]u8 = undefined;
+            mem.writeInt(u32, &buf, tag_int, .little);
+            try data.appendSlice(gpa, &buf);
+        } else if (field_type == u32) {
+            try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
+            var buf: [4]u8 = undefined;
+            mem.writeInt(u32, &buf, field_value, .little);
+            try data.appendSlice(gpa, &buf);
+        } else if (field_type == i32) {
+            try data.append(gpa, @intFromEnum(MessageMagic.type_int));
+            var buf: [4]u8 = undefined;
+            mem.writeInt(i32, &buf, field_value, .little);
+            try data.appendSlice(gpa, &buf);
+        } else if (field_type == std.Io.File) {
+            try data.append(gpa, @intFromEnum(MessageMagic.type_fd));
+            try fds.append(gpa, field_value.handle);
+        } else if (field_type == f32) {
+            try data.append(gpa, @intFromEnum(MessageMagic.type_f32));
+            const bits: u32 = @bitCast(field_value);
+            var buf: [4]u8 = undefined;
+            mem.writeInt(u32, &buf, bits, .little);
+            try data.appendSlice(gpa, &buf);
+        } else if (field_type == [:0]const u8) {
+            try data.append(gpa, @intFromEnum(MessageMagic.type_varchar));
+            var len_buf: [10]u8 = undefined;
+            try data.appendSlice(gpa, message_parser.encodeVarInt(field_value.len, &len_buf));
+            try data.appendSlice(gpa, field_value[0..field_value.len]);
+        } else if (field_type == []const u32) {
+            try data.append(gpa, @intFromEnum(MessageMagic.type_array));
+            try data.append(gpa, @intFromEnum(MessageMagic.type_uint));
+            var len_buf: [10]u8 = undefined;
+            try data.appendSlice(gpa, message_parser.encodeVarInt(field_value.len, &len_buf));
+            for (field_value) |v| {
                 var buf: [4]u8 = undefined;
-                mem.writeInt(u32, &buf, arg, .little);
+                mem.writeInt(u32, &buf, v, .little);
                 try data.appendSlice(gpa, &buf);
-            },
-            .type_int => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_int));
-                const arg = (args.next() orelse return error.InvalidMessage).get(i32) orelse return error.InvalidMessage;
+            }
+        } else if (field_type == []const i32) {
+            try data.append(gpa, @intFromEnum(MessageMagic.type_array));
+            try data.append(gpa, @intFromEnum(MessageMagic.type_int));
+            var len_buf: [10]u8 = undefined;
+            try data.appendSlice(gpa, message_parser.encodeVarInt(field_value.len, &len_buf));
+            for (field_value) |v| {
                 var buf: [4]u8 = undefined;
-                mem.writeInt(i32, &buf, arg, .little);
+                mem.writeInt(i32, &buf, v, .little);
                 try data.appendSlice(gpa, &buf);
-            },
-            .type_object => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_object));
-                const arg = (args.next() orelse return error.InvalidMessage).get(u32) orelse return error.InvalidMessage;
-                var buf: [4]u8 = undefined;
-                mem.writeInt(u32, &buf, arg, .little);
-                try data.appendSlice(gpa, &buf);
-            },
-            .type_f32 => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_f32));
-                const arg = (args.next() orelse return error.InvalidMessage).get(f32) orelse return error.InvalidMessage;
-                const bits: u32 = @bitCast(arg);
+            }
+        } else if (field_type == []const f32) {
+            try data.append(gpa, @intFromEnum(MessageMagic.type_array));
+            try data.append(gpa, @intFromEnum(MessageMagic.type_f32));
+            var len_buf: [10]u8 = undefined;
+            try data.appendSlice(gpa, message_parser.encodeVarInt(field_value.len, &len_buf));
+            for (field_value) |v| {
+                const bits: u32 = @bitCast(v);
                 var buf: [4]u8 = undefined;
                 mem.writeInt(u32, &buf, bits, .little);
                 try data.appendSlice(gpa, &buf);
-            },
-            .type_varchar => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_varchar));
-                const str = (args.next() orelse return error.InvalidMessage).get([:0]const u8) orelse return error.InvalidMessage;
-                var len_buf: [10]u8 = undefined;
-                try data.appendSlice(gpa, message_parser.encodeVarInt(str.len, &len_buf));
-                try data.appendSlice(gpa, str[0..str.len]);
-            },
-            .type_array => {
-                if (i + 1 >= params.len) return error.InvalidMessage;
-                const arr_type = std.enums.fromInt(MessageMagic, params[i + 1]) orelse return error.InvalidMessage;
-                i += 1;
-
-                try data.append(gpa, @intFromEnum(MessageMagic.type_array));
-                try data.append(gpa, @intFromEnum(arr_type));
-
-                switch (arr_type) {
-                    .type_uint => {
-                        const arr = (args.next() orelse return error.InvalidMessage).get([]const u32) orelse return error.InvalidMessage;
-                        var len_buf: [10]u8 = undefined;
-                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
-                        for (arr) |v| {
-                            var buf: [4]u8 = undefined;
-                            mem.writeInt(u32, &buf, v, .little);
-                            try data.appendSlice(gpa, &buf);
-                        }
-                    },
-                    .type_int => {
-                        const arr = (args.next() orelse return error.InvalidMessage).get([]const i32) orelse return error.InvalidMessage;
-                        var len_buf: [10]u8 = undefined;
-                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
-                        for (arr) |v| {
-                            var buf: [4]u8 = undefined;
-                            mem.writeInt(i32, &buf, v, .little);
-                            try data.appendSlice(gpa, &buf);
-                        }
-                    },
-                    .type_f32 => {
-                        const arr = (args.next() orelse return error.InvalidMessage).get([]const f32) orelse return error.InvalidMessage;
-                        var len_buf: [10]u8 = undefined;
-                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
-                        for (arr) |v| {
-                            const bits: u32 = @bitCast(v);
-                            var buf: [4]u8 = undefined;
-                            mem.writeInt(u32, &buf, bits, .little);
-                            try data.appendSlice(gpa, &buf);
-                        }
-                    },
-                    .type_varchar => {
-                        const arr = (args.next() orelse return error.InvalidMessage).get([]const [:0]const u8) orelse return error.InvalidMessage;
-                        var len_buf: [10]u8 = undefined;
-                        try data.appendSlice(gpa, message_parser.encodeVarInt(arr.len, &len_buf));
-                        for (arr) |s| {
-                            var slen_buf: [10]u8 = undefined;
-                            try data.appendSlice(gpa, message_parser.encodeVarInt(s.len, &slen_buf));
-                            try data.appendSlice(gpa, s[0..s.len]);
-                        }
-                    },
-                    .type_fd => {
-                        const fd_list = (args.next() orelse return error.InvalidMessage).get([]const i32) orelse return error.InvalidMessage;
-                        for (fd_list) |fd| {
-                            try fds.append(gpa, fd);
-                        }
-                        var len_buf: [10]u8 = undefined;
-                        try data.appendSlice(gpa, message_parser.encodeVarInt(fd_list.len, &len_buf));
-                    },
-                    else => return error.InvalidMessage,
-                }
-            },
-            .type_fd => {
-                try data.append(gpa, @intFromEnum(MessageMagic.type_fd));
-                const fd = (args.next() orelse return error.InvalidMessage).get(i32) orelse return error.InvalidMessage;
-                try fds.append(gpa, fd);
-            },
-            else => {},
+            }
+        } else if (field_type == []const [:0]const u8) {
+            try data.append(gpa, @intFromEnum(MessageMagic.type_array));
+            try data.append(gpa, @intFromEnum(MessageMagic.type_varchar));
+            var len_buf: [10]u8 = undefined;
+            try data.appendSlice(gpa, message_parser.encodeVarInt(field_value.len, &len_buf));
+            for (field_value) |s| {
+                var slen_buf: [10]u8 = undefined;
+                try data.appendSlice(gpa, message_parser.encodeVarInt(s.len, &slen_buf));
+                try data.appendSlice(gpa, s[0..s.len]);
+            }
+        } else {
+            @compileError("unsupported type for callMethod: " ++ @typeName(field_type));
         }
     }
 

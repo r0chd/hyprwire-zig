@@ -10,8 +10,6 @@ const Server = struct {
     alloc: mem.Allocator,
     socket: *hw.ServerSocket,
     manager: ?*test_protocol.MyManagerV1Object = null,
-    object: ?*test_protocol.MyObjectV1Object = null,
-    object_handle: ?hw.types.Object = null,
     io: Io,
 
     const Self = @This();
@@ -19,7 +17,7 @@ const Server = struct {
     pub fn bind(self: *Self, object: *hw.types.Object) void {
         std.debug.print("Object bound XD\n", .{});
 
-        var manager = test_protocol.MyManagerV1Object.init(self.alloc, .from(self), object) catch |err| std.debug.panic("Error while initializing MyManagerV1Object: {s}", .{@errorName(err)});
+        var manager = test_protocol.MyManagerV1Object.init(self.alloc, .from(self), object.*) catch |err| std.debug.panic("Error while initializing MyManagerV1Object: {s}", .{@errorName(err)});
         manager.sendSendMessage(self.io, self.alloc, "Hello manager") catch |err| std.debug.panic("Error while sending message: {s}", .{@errorName(err)});
 
         self.manager = manager;
@@ -82,13 +80,10 @@ const Server = struct {
                     seq.seq,
                 ).?;
 
-                self.object_handle = .from(server_object);
-
-                var object = test_protocol.MyObjectV1Object.init(self.alloc, .from(self), &self.object_handle.?) catch |err|
+                var object = test_protocol.MyObjectV1Object.init(self.alloc, .from(self), .from(server_object)) catch |err|
                     std.debug.panic("Error while initializing MyObjectV1Object: {s}", .{@errorName(err)});
                 object.sendSendMessage(self.io, alloc, "Hello object") catch |err|
                     std.debug.panic("Error while sending message to object: {s}", .{@errorName(err)});
-                self.object = object;
             },
         }
     }
@@ -115,13 +110,8 @@ const Server = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        if (self.manager) |manager| {
-            self.alloc.destroy(manager.object);
-            manager.deinit(self.alloc);
-        }
-        if (self.object) |object| {
-            object.deinit(self.alloc);
-        }
+        // Note: manager and object are owned by clients and cleaned up on disconnect
+        // We only need to clean up the socket
         self.socket.deinit(self.io, self.alloc);
     }
 };
@@ -143,6 +133,10 @@ pub fn main(init: std.process.Init) !void {
 
     const socket = try hw.ServerSocket.open(io, gpa, socket_path);
     var server = Server{
+        // Allocator provided by callbacks automatically frees
+        // all allocated resources at the end of function call
+        // so we need another allocator for resources with longer
+        // lifetime
         .alloc = gpa,
         .socket = socket,
         .io = io,

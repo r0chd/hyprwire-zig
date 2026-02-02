@@ -44,7 +44,7 @@ waiting_on_object: ?WireObject = null,
 
 const Self = @This();
 
-pub fn open(io: std.Io, gpa: mem.Allocator, source: union(enum) { fd: i32, path: [:0]const u8 }) !*Self {
+pub fn open(io: std.Io, gpa: mem.Allocator, source: union(enum) { file: Io.File, path: [:0]const u8 }) !*Self {
     const sock = try gpa.create(Self);
     errdefer gpa.destroy(sock);
     sock.* = .{
@@ -53,7 +53,7 @@ pub fn open(io: std.Io, gpa: mem.Allocator, source: union(enum) { fd: i32, path:
     };
 
     switch (source) {
-        .fd => |fd| try sock.attemptFromFd(io, gpa, fd),
+        .file => |fd| try sock.attemptFromFile(io, gpa, fd),
         .path => |path| try sock.attempt(io, gpa, path),
     }
 
@@ -90,9 +90,9 @@ pub fn attempt(self: *Self, io: std.Io, gpa: mem.Allocator, path: [:0]const u8) 
     try self.sendMessage(io, gpa, &message.interface);
 }
 
-pub fn attemptFromFd(self: *Self, io: Io, gpa: mem.Allocator, raw_fd: i32) !void {
+pub fn attemptFromFile(self: *Self, io: Io, gpa: mem.Allocator, file: Io.File) !void {
     self.stream = std.Io.net.Stream{ .socket = .{
-        .handle = raw_fd,
+        .handle = file.handle,
         .address = .{ .ip4 = .loopback(0) },
     } };
 

@@ -54,14 +54,14 @@ const Client = struct {
         gpa: mem.Allocator,
     ) void {
         for (self.objects.items) |object| {
-            object.deinit(gpa);
+            object.deinit(self.io, gpa);
         }
         self.objects.deinit(gpa);
     }
 };
 
 fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
-    const sock = try hw.ClientSocket.open(io, gpa, .{ .fd = server_fd });
+    const sock = try hw.ClientSocket.open(io, gpa, .{ .file = .{ .handle = server_fd } });
     defer sock.deinit(io, gpa);
 
     sock.waitForHandshake(io, gpa) catch {
@@ -90,9 +90,9 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
     var manager = try test_protocol.client.MyManagerV1Object.init(
         gpa,
         .from(&client),
-        &obj,
+        obj,
     );
-    defer manager.deinit(gpa);
+    defer manager.deinit(io, gpa);
 
     std.debug.print("Bound!\n", .{});
 
@@ -107,7 +107,7 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
     std.debug.print("Will send fd {}\n", .{pips[0]});
 
     try manager.sendSendMessage(io, gpa, "Hello!");
-    try manager.sendSendMessageFd(io, gpa, pips[0]);
+    try manager.sendSendMessageFd(io, gpa, .{ .handle = pips[0] });
     try manager.sendSendMessageArray(io, gpa, &.{ "Hello", "via", "array!" });
     try manager.sendSendMessageArray(io, gpa, &.{});
     try manager.sendSendMessageArrayUint(io, gpa, &.{ 69, 420, 2137 });
@@ -117,7 +117,7 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
     var cobject = try test_protocol.client.MyObjectV1Object.init(
         gpa,
         .from(&client),
-        &object_arg,
+        object_arg,
     );
     try client.objects.append(gpa, cobject);
 
@@ -126,7 +126,7 @@ fn runClient(io: Io, gpa: mem.Allocator, server_fd: i32) !void {
     var cobject2 = try test_protocol.client.MyObjectV1Object.init(
         gpa,
         .from(&client),
-        &object_arg2,
+        object_arg2,
     );
     try client.objects.append(gpa, cobject2);
 
@@ -151,9 +151,8 @@ const Server = struct {
     const Self = @This();
 
     pub fn bind(self: *Self, object: *hw.types.Object) void {
-        const manager = test_protocol.server.MyManagerV1Object.init(self.alloc, .from(self), object) catch |err|
+        self.manager = test_protocol.server.MyManagerV1Object.init(self.alloc, .from(self), object.*) catch |err|
             std.debug.panic("Error while initializing MyManagerV1Object: {s}", .{@errorName(err)});
-        self.manager = manager;
     }
 
     pub fn myManagerV1Listener(
@@ -182,7 +181,7 @@ const Server = struct {
                 self.object_handles.append(alloc, .from(server_object)) catch |err|
                     std.debug.panic("Error while appending object handle: {s}", .{@errorName(err)});
                 const handle_ptr = &self.object_handles.items[self.object_handles.items.len - 1];
-                const object = test_protocol.server.MyObjectV1Object.init(alloc, .from(self), handle_ptr) catch |err|
+                const object = test_protocol.server.MyObjectV1Object.init(alloc, .from(self), handle_ptr.*) catch |err|
                     std.debug.panic("Error while initializing MyObjectV1Object: {s}", .{@errorName(err)});
                 self.objects.append(alloc, object) catch |err|
                     std.debug.panic("Error while appending object: {s}", .{@errorName(err)});
@@ -200,18 +199,6 @@ const Server = struct {
     }
 
     pub fn deinit(self: *Self, io: Io, gpa: mem.Allocator) void {
-        if (self.manager) |manager| {
-            self.alloc.destroy(manager.object);
-            manager.deinit(gpa);
-        }
-        for (self.object_handles.items) |object_handle| {
-            object_handle.deinit(gpa);
-        }
-        self.object_handles.deinit(gpa);
-        for (self.objects.items) |object| {
-            object.deinit(gpa);
-        }
-        self.objects.deinit(gpa);
         self.socket.deinit(io, gpa);
     }
 };
@@ -224,7 +211,7 @@ fn runServer(io: Io, gpa: mem.Allocator, client_fd: i32) !void {
     var impl = test_protocol.server.TestProtocolV1Impl.init(1, .from(&server));
     try sock.addImplementation(gpa, &impl.interface);
 
-    _ = sock.addClient(io, gpa, client_fd) catch {
+    _ = sock.addClient(io, gpa, .{ .handle = client_fd }) catch {
         std.debug.print("Failed to add clientFd to the server socket!\n", .{});
         std.process.exit(1);
     };

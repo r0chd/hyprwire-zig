@@ -139,13 +139,13 @@ pub const MyManagerV1Object = struct {
     pub const Event = MyManagerV1Event;
     pub const Listener = MyManagerV1Listener;
 
-    object: *const types.Object,
+    object: types.Object,
     listener: Listener,
     arena: std.heap.ArenaAllocator,
 
     const Self = @This();
 
-    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {
+    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: types.Object) !*Self {
         const self = try gpa.create(Self);
         self.* = .{
             .listener = listener,
@@ -153,13 +153,13 @@ pub const MyManagerV1Object = struct {
             .arena = std.heap.ArenaAllocator.init(gpa),
         };
 
-        object.vtable.setData(object.ptr, self);
+        self.object.vtable.setData(self.object.ptr, self);
 
-        try object.vtable.listen(object.ptr, gpa, 0, @ptrCast(&myManagerV1_method0));
-        try object.vtable.listen(object.ptr, gpa, 1, @ptrCast(&myManagerV1_method1));
-        try object.vtable.listen(object.ptr, gpa, 2, @ptrCast(&myManagerV1_method2));
-        try object.vtable.listen(object.ptr, gpa, 3, @ptrCast(&myManagerV1_method3));
-        try object.vtable.listen(object.ptr, gpa, 4, @ptrCast(&myManagerV1_method4));
+        try self.object.vtable.listen(self.object.ptr, gpa, 0, @ptrCast(&myManagerV1_method0));
+        try self.object.vtable.listen(self.object.ptr, gpa, 1, @ptrCast(&myManagerV1_method1));
+        try self.object.vtable.listen(self.object.ptr, gpa, 2, @ptrCast(&myManagerV1_method2));
+        try self.object.vtable.listen(self.object.ptr, gpa, 3, @ptrCast(&myManagerV1_method3));
+        try self.object.vtable.listen(self.object.ptr, gpa, 4, @ptrCast(&myManagerV1_method4));
 
         return self;
     }
@@ -169,7 +169,7 @@ pub const MyManagerV1Object = struct {
     }
 
     pub fn getObject(self: *const Self) *const types.Object {
-        return self.object;
+        return &self.object;
     }
 
     pub fn @"error"(self: *const Self, code: u32, message: []const u8) void {
@@ -181,19 +181,17 @@ pub const MyManagerV1Object = struct {
     }
 
     pub fn sendSendMessage(self: *Self, io: std.Io, gpa: std.mem.Allocator, message: [:0]const u8) !void {
-        var buffer: [1]types.Arg = undefined;
-        var args = types.Args.init(&buffer, .{
-            @"message",
+        const wire: types.WireObject = .{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) };
+        _ = try wire.callMethod(io, gpa, 0, .{
+            message,
         });
-        _ = try self.object.vtable.call(self.object.ptr, io, gpa, 0, &args);
     }
 
     pub fn sendRecvMessageArrayUint(self: *Self, io: std.Io, gpa: std.mem.Allocator, message: []const u32) !void {
-        var buffer: [1]types.Arg = undefined;
-        var args = types.Args.init(&buffer, .{
-            @"message",
+        const wire: types.WireObject = .{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) };
+        _ = try wire.callMethod(io, gpa, 1, .{
+            message,
         });
-        _ = try self.object.vtable.call(self.object.ptr, io, gpa, 1, &args);
     }
 };
 
@@ -273,13 +271,13 @@ pub const MyObjectV1Object = struct {
     pub const Event = MyObjectV1Event;
     pub const Listener = MyObjectV1Listener;
 
-    object: *const types.Object,
+    object: types.Object,
     listener: Listener,
     arena: std.heap.ArenaAllocator,
 
     const Self = @This();
 
-    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: *const types.Object) !*Self {
+    pub fn init(gpa: std.mem.Allocator, listener: Listener, object: types.Object) !*Self {
         const self = try gpa.create(Self);
         self.* = .{
             .object = object,
@@ -287,11 +285,11 @@ pub const MyObjectV1Object = struct {
             .arena = std.heap.ArenaAllocator.init(gpa),
         };
 
-        object.vtable.setData(object.ptr, self);
+        self.object.vtable.setData(self.object.ptr, self);
 
-        try object.vtable.listen(object.ptr, gpa, 0, @ptrCast(&myObjectV1_method0));
-        try object.vtable.listen(object.ptr, gpa, 1, @ptrCast(&myObjectV1_method1));
-        try object.vtable.listen(object.ptr, gpa, 2, @ptrCast(&myObjectV1_method2));
+        try self.object.vtable.listen(self.object.ptr, gpa, 0, @ptrCast(&myObjectV1_method0));
+        try self.object.vtable.listen(self.object.ptr, gpa, 1, @ptrCast(&myObjectV1_method1));
+        try self.object.vtable.listen(self.object.ptr, gpa, 2, @ptrCast(&myObjectV1_method2));
         return self;
     }
 
@@ -309,11 +307,10 @@ pub const MyObjectV1Object = struct {
     }
 
     pub fn sendSendMessage(self: *Self, io: std.Io, gpa: std.mem.Allocator, message: [:0]const u8) !void {
-        var buffer: [1]types.Arg = undefined;
-        var args = types.Args.init(&buffer, .{
-            @"message",
+        const wire: types.WireObject = .{ .ptr = self.object.ptr, .vtable = @ptrCast(@alignCast(self.object.vtable)) };
+        _ = try wire.callMethod(io, gpa, 0, .{
+            message,
         });
-        _ = try self.object.vtable.call(self.object.ptr, io, gpa, 0, &args);
     }
 };
 pub const TestProtocolV1Listener = hyprwire.reexports.Trait(.{
